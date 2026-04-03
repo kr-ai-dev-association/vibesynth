@@ -8,8 +8,43 @@ export type AppView = 'dashboard' | 'editor' | 'settings'
 export interface Project {
   id: string
   name: string
+  prompt?: string
   updatedAt: string
   thumbnail?: string
+  screens: Screen[]
+  designSystem?: DesignSystem
+  deviceType: 'app' | 'web' | 'tablet'
+}
+
+export interface Screen {
+  id: string
+  name: string
+  html: string
+}
+
+export interface DesignGuide {
+  overview: string
+  colorRules: string
+  typographyRules: string
+  elevationRules: string
+  componentRules: string
+  dosAndDonts: string
+}
+
+export interface DesignSystem {
+  name: string
+  colors: {
+    primary: { base: string; tones: string[] }
+    secondary: { base: string; tones: string[] }
+    tertiary: { base: string; tones: string[] }
+    neutral: { base: string; tones: string[] }
+  }
+  typography: {
+    headline: { family: string }
+    body: { family: string }
+    label: { family: string }
+  }
+  guide?: DesignGuide
 }
 
 export default function App() {
@@ -26,6 +61,10 @@ export default function App() {
     setCurrentProject(null)
   }
 
+  const handleProjectUpdate = (updated: Project) => {
+    setCurrentProject(updated)
+  }
+
   if (view === 'settings') {
     return <Settings onBack={handleBackToDashboard} />
   }
@@ -35,6 +74,8 @@ export default function App() {
       <Editor
         project={currentProject}
         onBack={handleBackToDashboard}
+        onProjectUpdate={handleProjectUpdate}
+        onOpenSettings={() => setView('settings')}
       />
     )
   }
@@ -42,11 +83,15 @@ export default function App() {
   return (
     <Dashboard
       onOpenProject={handleOpenProject}
-      onCreateProject={(name) => {
+      onCreateProject={(prompt, deviceType) => {
+        const name = prompt.length > 50 ? prompt.slice(0, 50) + '...' : prompt
         const project: Project = {
           id: crypto.randomUUID(),
           name,
+          prompt,
           updatedAt: new Date().toLocaleDateString(),
+          screens: [],
+          deviceType,
         }
         handleOpenProject(project)
       }}

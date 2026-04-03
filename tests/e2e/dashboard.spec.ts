@@ -15,9 +15,14 @@ test.describe('Dashboard - VibeSynth vs Stitch parity', () => {
   })
 
   test('has left sidebar with My projects and Examples', async ({ page }) => {
-    await expect(page.getByRole('button', { name: 'My projects' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /My projects/ })).toBeVisible()
     await expect(page.getByText('Examples')).toBeVisible()
     await expect(page.getByText('Indoor Plant Care Dashboard')).toBeVisible()
+  })
+
+  test('has sidebar tabs: My projects / Shared with me', async ({ page }) => {
+    await expect(page.getByRole('button', { name: /My projects/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Shared with me/ })).toBeVisible()
   })
 
   test('has search input', async ({ page }) => {
@@ -25,12 +30,13 @@ test.describe('Dashboard - VibeSynth vs Stitch parity', () => {
   })
 
   test('has prompt suggestion chips', async ({ page }) => {
-    const chips = page.getByRole('button').filter({ hasText: /kickball|language learning|Formula One/ })
+    const chips = page.getByRole('button').filter({ hasText: /recipe|browse tab|fitness/ })
     await expect(chips.first()).toBeVisible()
   })
 
-  test('has prompt bar with App/Web toggle', async ({ page }) => {
+  test('has prompt bar with App/Tablet/Web toggle', async ({ page }) => {
     await expect(page.getByRole('button', { name: 'App', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Tablet', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Web', exact: true })).toBeVisible()
   })
 
@@ -40,15 +46,15 @@ test.describe('Dashboard - VibeSynth vs Stitch parity', () => {
     await expect(page.getByPlaceholder(/web experience/)).toBeVisible()
   })
 
-  test('has model selector with Fast as default', async ({ page }) => {
-    await expect(page.getByRole('button', { name: 'Fast' })).toBeVisible()
+  test('has model selector with 3.0 Flash as default', async ({ page }) => {
+    await expect(page.getByRole('button', { name: /3\.0 Flash/ })).toBeVisible()
   })
 
   test('model selector shows 4 options', async ({ page }) => {
-    await page.getByRole('button', { name: 'Fast' }).click()
-    await expect(page.getByRole('button', { name: /Quality/ })).toBeVisible()
-    await expect(page.getByRole('button', { name: /Redesign/ })).toBeVisible()
-    await expect(page.getByRole('button', { name: /Ideate/ })).toBeVisible()
+    await page.getByRole('button', { name: /3\.0 Flash/ }).click()
+    await expect(page.getByText('3.0 Quality', { exact: true })).toBeVisible()
+    await expect(page.getByText('Redesign', { exact: true })).toBeVisible()
+    await expect(page.getByText('Ideate', { exact: true })).toBeVisible()
   })
 
   test('has appearance toggle', async ({ page }) => {
@@ -57,13 +63,13 @@ test.describe('Dashboard - VibeSynth vs Stitch parity', () => {
 
   test('appearance toggle shows Light/System/Dark', async ({ page }) => {
     await page.getByRole('button', { name: 'Appearance' }).click()
-    await expect(page.getByRole('button', { name: 'Light' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'System' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Dark' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Light', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'System', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Dark', exact: true })).toBeVisible()
   })
 
   test('clicking example project navigates to editor', async ({ page }) => {
-    await page.getByRole('button', { name: /Indoor Plant Care/ }).click()
+    await page.getByText('Indoor Plant Care Dashboard').click()
     await expect(page.getByText('Indoor Plant Care Dashboard')).toBeVisible()
     await expect(page.getByRole('button', { name: /Run/ })).toBeVisible()
   })

@@ -65,7 +65,7 @@ export function AppearanceToggle() {
       </button>
 
       {isOpen && (
-        <div className="absolute bottom-full right-0 mb-1 bg-white dark:bg-neutral-800 rounded-xl shadow-lg border border-neutral-200 dark:border-neutral-700 py-1 z-50">
+        <div className="absolute top-full right-0 mt-1 bg-white dark:bg-neutral-800 rounded-xl shadow-lg border border-neutral-200 dark:border-neutral-700 py-1 z-50">
           {options.map((opt) => (
             <button
               key={opt.value}

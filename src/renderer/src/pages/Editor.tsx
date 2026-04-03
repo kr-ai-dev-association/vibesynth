@@ -1,23 +1,53 @@
-import { useState, useRef, useCallback } from 'react'
-import type { Project } from '../App'
+import { useState, useRef, useCallback, useEffect } from 'react'
+import type { Project, Screen, DesignSystem } from '../App'
 import { PromptBar } from '../components/common/PromptBar'
-import { DesignSystemCard } from '../components/design-system/DesignSystemCard'
+import { AppearanceToggle } from '../components/common/AppearanceToggle'
 import { AgentLog } from '../components/editor/AgentLog'
 import { ScreenContextToolbar, ScreenContextMenu } from '../components/editor/ScreenContextToolbar'
+import { RightPanel } from '../components/editor/RightPanel'
+import { generateDesign, editDesign, generateDesignSystem } from '../lib/gemini'
+import { DEFAULT_DESIGN_GUIDE } from '../lib/default-design-guide'
+
+export interface AgentLogEntry {
+  id: string
+  message: string
+  timestamp: Date
+  type: 'info' | 'success' | 'error' | 'generating'
+}
 
 interface EditorProps {
   project: Project
   onBack: () => void
+  onProjectUpdate: (project: Project) => void
+  onOpenSettings?: () => void
 }
 
-export function Editor({ project, onBack }: EditorProps) {
+const PLACEHOLDER_DESIGN_SYSTEM: DesignSystem = {
+  name: 'Generating...',
+  colors: {
+    primary: { base: '#d4d4d4', tones: Array(12).fill('#e5e5e5') },
+    secondary: { base: '#d4d4d4', tones: Array(12).fill('#e5e5e5') },
+    tertiary: { base: '#d4d4d4', tones: Array(12).fill('#e5e5e5') },
+    neutral: { base: '#d4d4d4', tones: Array(12).fill('#e5e5e5') },
+  },
+  typography: {
+    headline: { family: '...' },
+    body: { family: '...' },
+    label: { family: '...' },
+  },
+}
+
+export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: EditorProps) {
   const [zoom, setZoom] = useState(100)
   const [isRunning, setIsRunning] = useState(false)
   const [showHamburger, setShowHamburger] = useState(false)
-  const [deviceType, setDeviceType] = useState<'app' | 'web'>('app')
+  const [deviceType, setDeviceType] = useState<'app' | 'web' | 'tablet'>(project.deviceType)
   const [agentLogOpen, setAgentLogOpen] = useState(true)
   const [selectedScreen, setSelectedScreen] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [logEntries, setLogEntries] = useState<AgentLogEntry[]>([])
+  const [showCodeModal, setShowCodeModal] = useState(false)
   const canvasRef = useRef<HTMLDivElement>(null)
 
   // Canvas pan state
@@ -25,8 +55,310 @@ export function Editor({ project, onBack }: EditorProps) {
   const [isPanning, setIsPanning] = useState(false)
   const panStart = useRef({ x: 0, y: 0 })
 
+  const designSystem = project.designSystem || PLACEHOLDER_DESIGN_SYSTEM
+
+  // Auto-generate initial screen if project has no screens (just created from dashboard)
+  const initialGenerationDone = useRef(false)
+  useEffect(() => {
+    if (project.screens.length === 0 && !initialGenerationDone.current) {
+      initialGenerationDone.current = true
+      handleGenerateScreen(project.prompt || project.name)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Listen for live window close events from main process
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onLiveWindowClosed(() => {
+      setIsRunning(false)
+    })
+    return () => cleanup?.()
+  }, [])
+
+  // Sync current screen HTML to live window when screens update
+  useEffect(() => {
+    if (!isRunning) return
+    const screen = selectedScreen
+      ? project.screens.find((s) => s.name === selectedScreen)
+      : project.screens[0]
+    if (screen) {
+      window.electronAPI?.updateLiveWindow(screen.html)
+    }
+  }, [project.screens, selectedScreen, isRunning])
+
+  const addLog = (message: string, type: AgentLogEntry['type'] = 'info') => {
+    const entry: AgentLogEntry = {
+      id: crypto.randomUUID(),
+      message,
+      timestamp: new Date(),
+      type,
+    }
+    setLogEntries((prev) => [...prev, entry])
+    return entry.id
+  }
+
+  const updateLog = (id: string, message: string, type: AgentLogEntry['type']) => {
+    setLogEntries((prev) =>
+      prev.map((e) => (e.id === id ? { ...e, message, type } : e))
+    )
+  }
+
+  const activeGuide = project.designSystem?.guide || DEFAULT_DESIGN_GUIDE
+
+  const handleGenerateScreen = async (prompt: string) => {
+    if (isGenerating) return
+    setIsGenerating(true)
+    setAgentLogOpen(true)
+
+    const logId = addLog(`Generating design: "${prompt}"...`, 'generating')
+
+    try {
+      const results = await generateDesign(prompt, deviceType, activeGuide)
+      const newScreens: Screen[] = results.map((r) => ({
+        id: crypto.randomUUID(),
+        name: r.screenName,
+        html: r.html,
+      }))
+
+      updateLog(logId, `Generated screen: ${newScreens[0].name}`, 'success')
+
+      if (!project.designSystem && newScreens[0]) {
+        const dsLogId = addLog('Extracting design system & guide...', 'generating')
+        try {
+          const ds = await generateDesignSystem(newScreens[0].html, activeGuide)
+          updateLog(dsLogId, `Design system "${ds.name}" with guide extracted`, 'success')
+          onProjectUpdate({
+            ...project,
+            screens: [...project.screens, ...newScreens],
+            designSystem: ds,
+            updatedAt: new Date().toLocaleDateString(),
+          })
+        } catch {
+          updateLog(dsLogId, 'Could not extract design system', 'error')
+          onProjectUpdate({
+            ...project,
+            screens: [...project.screens, ...newScreens],
+            updatedAt: new Date().toLocaleDateString(),
+          })
+        }
+      } else {
+        onProjectUpdate({
+          ...project,
+          screens: [...project.screens, ...newScreens],
+          updatedAt: new Date().toLocaleDateString(),
+        })
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      updateLog(logId, `Generation failed: ${message}`, 'error')
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  const handleEditScreen = async (prompt: string) => {
+    if (isGenerating || !selectedScreen) return
+
+    const screen = project.screens.find((s) => s.name === selectedScreen)
+    if (!screen) return
+
+    setIsGenerating(true)
+    setAgentLogOpen(true)
+
+    const logId = addLog(`Editing "${screen.name}": "${prompt}"...`, 'generating')
+
+    try {
+      const newHtml = await editDesign(screen.html, prompt)
+      updateLog(logId, `Updated screen: ${screen.name}`, 'success')
+
+      const updatedScreens = project.screens.map((s) =>
+        s.id === screen.id ? { ...s, html: newHtml } : s
+      )
+      onProjectUpdate({
+        ...project,
+        screens: updatedScreens,
+        updatedAt: new Date().toLocaleDateString(),
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      updateLog(logId, `Edit failed: ${message}`, 'error')
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  const handlePromptSubmit = (prompt: string) => {
+    if (selectedScreen && project.screens.some((s) => s.name === selectedScreen)) {
+      handleEditScreen(prompt)
+    } else {
+      handleGenerateScreen(prompt)
+    }
+  }
+
+  const handleRegenerateScreen = async () => {
+    if (!selectedScreen || isGenerating) return
+    const screen = project.screens.find((s) => s.name === selectedScreen)
+    if (!screen) return
+
+    setIsGenerating(true)
+    setAgentLogOpen(true)
+    const logId = addLog(`Regenerating "${screen.name}"...`, 'generating')
+
+    try {
+      const results = await generateDesign(screen.name, deviceType)
+      if (results[0]) {
+        updateLog(logId, `Regenerated: ${screen.name}`, 'success')
+        const updatedScreens = project.screens.map((s) =>
+          s.id === screen.id ? { ...s, html: results[0].html } : s
+        )
+        onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
+      }
+    } catch (err) {
+      updateLog(logId, `Regenerate failed: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error')
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  const handleDuplicateScreen = () => {
+    if (!selectedScreen) return
+    const screen = project.screens.find((s) => s.name === selectedScreen)
+    if (!screen) return
+    const dup: Screen = { id: crypto.randomUUID(), name: `${screen.name} (copy)`, html: screen.html }
+    onProjectUpdate({ ...project, screens: [...project.screens, dup], updatedAt: new Date().toLocaleDateString() })
+    addLog(`Duplicated "${screen.name}"`, 'success')
+  }
+
+  const handleDeleteScreen = () => {
+    if (!selectedScreen) return
+    const updated = project.screens.filter((s) => s.name !== selectedScreen)
+    onProjectUpdate({ ...project, screens: updated, updatedAt: new Date().toLocaleDateString() })
+    addLog(`Deleted "${selectedScreen}"`, 'info')
+    setSelectedScreen(null)
+  }
+
+  const handleScreenAction = (action: string) => {
+    setContextMenu(null)
+
+    switch (action) {
+      case 'regenerate':
+        handleRegenerateScreen()
+        break
+      case 'duplicate':
+        handleDuplicateScreen()
+        break
+      case 'delete':
+        handleDeleteScreen()
+        break
+      case 'view-code': {
+        setShowCodeModal(true)
+        break
+      }
+      case 'copy-code': {
+        const screen = project.screens.find((s) => s.name === selectedScreen)
+        if (screen) {
+          navigator.clipboard.writeText(screen.html)
+          addLog(`Copied code for "${screen.name}"`, 'success')
+        }
+        break
+      }
+      case 'copy-png':
+        addLog('Copy as PNG — coming soon', 'info')
+        break
+      case 'run-popup':
+        if (!isRunning) handleRun()
+        break
+      case 'run-browser':
+      case 'open-browser': {
+        const screen = project.screens.find((s) => s.name === selectedScreen)
+        if (screen) {
+          const blob = new Blob([screen.html], { type: 'text/html' })
+          const url = URL.createObjectURL(blob)
+          window.open(url, '_blank')
+        }
+        break
+      }
+      case 'device-mobile':
+        window.electronAPI?.setLiveWindowSize(420, 900)
+        addLog('Switched to Mobile frame (390×884)', 'info')
+        break
+      case 'device-tablet':
+        window.electronAPI?.setLiveWindowSize(800, 1060)
+        addLog('Switched to Tablet frame (768×1024)', 'info')
+        break
+      case 'device-desktop':
+        window.electronAPI?.setLiveWindowSize(1320, 1060)
+        addLog('Switched to Desktop frame (1280×1024)', 'info')
+        break
+      case 'always-on-top':
+        window.electronAPI?.setLiveWindowAlwaysOnTop(true)
+        addLog('Live window: always on top', 'info')
+        break
+      case 'variations':
+        addLog('Variations — coming soon', 'info')
+        break
+      case 'desktop-web':
+        addLog('Desktop web version — coming soon', 'info')
+        break
+      case 'heatmap':
+        addLog('Predictive heatmap — coming soon', 'info')
+        break
+      case 'edit':
+        break
+      case 'annotate':
+        addLog('Annotate — coming soon', 'info')
+        break
+      case 'design-system':
+        addLog('Design system editor — coming soon', 'info')
+        break
+      case 'download':
+        addLog('Download — coming soon', 'info')
+        break
+      case 'copy':
+      case 'copy-as':
+      case 'cut':
+      case 'focus':
+      case 'favourite':
+      case 'open-editor':
+      case 'devtools':
+        addLog(`${action} — coming soon`, 'info')
+        break
+      default:
+        break
+    }
+  }
+
+  const spaceHeld = useRef(false)
+  const [spaceDown, setSpaceDown] = useState(false)
+
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+        e.preventDefault()
+        spaceHeld.current = true
+        setSpaceDown(true)
+      }
+    }
+    const up = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        spaceHeld.current = false
+        setSpaceDown(false)
+      }
+    }
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+    }
+  }, [])
+
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button === 1 || (e.button === 0 && e.altKey)) {
+    const isMiddle = e.button === 1
+    const isLeftWithMod = e.button === 0 && (e.altKey || spaceHeld.current)
+    const isLeftOnEmptyCanvas = e.button === 0 && !(e.target as HTMLElement).closest('[data-screen-card]')
+
+    if (isMiddle || isLeftWithMod || isLeftOnEmptyCanvas) {
+      e.preventDefault()
       setIsPanning(true)
       panStart.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }
     }
@@ -50,13 +382,21 @@ export function Editor({ project, onBack }: EditorProps) {
   }, [])
 
   const handleRun = () => {
-    setIsRunning(!isRunning)
     if (!isRunning) {
-      window.electronAPI?.openLiveWindow()
+      const screen = selectedScreen
+        ? project.screens.find((s) => s.name === selectedScreen)
+        : project.screens[0]
+      window.electronAPI?.openLiveWindow(screen?.html)
+      setIsRunning(true)
     } else {
       window.electronAPI?.closeLiveWindow()
+      setIsRunning(false)
     }
   }
+
+  const screenWidth = deviceType === 'app' ? 390 : deviceType === 'tablet' ? 1024 : 1280
+  const screenHeight = deviceType === 'app' ? 844 : deviceType === 'tablet' ? 1366 : 800
+  const selectedScreenObj = selectedScreen ? project.screens.find((s) => s.name === selectedScreen) : null
 
   return (
     <div className="h-screen flex flex-col bg-neutral-50 dark:bg-neutral-900">
@@ -74,18 +414,35 @@ export function Editor({ project, onBack }: EditorProps) {
             {showHamburger && (
               <div className="absolute top-full left-0 mt-1 w-52 bg-white dark:bg-neutral-800 rounded-xl shadow-lg border border-neutral-200 dark:border-neutral-700 py-1 z-50">
                 <MenuItem icon="←" label="Go to all projects" onClick={() => { setShowHamburger(false); onBack() }} />
-                <MenuItem icon="📁" label="Open project folder" />
-                <MenuItem icon="📝" label="Open in external editor" />
+                <MenuItem icon="📁" label="Open project folder" onClick={() => setShowHamburger(false)} />
+                <MenuItem icon="📝" label="Open in external editor" onClick={() => setShowHamburger(false)} />
                 <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-1" />
-                <MenuItem icon="🎨" label="Appearance" />
-                <MenuItem icon="⚙" label="Settings" />
+                <MenuItem icon="🎨" label="Appearance" onClick={() => {
+                  setShowHamburger(false)
+                  const root = document.documentElement
+                  if (root.classList.contains('dark')) {
+                    root.classList.remove('dark')
+                    localStorage.setItem('vibesynth-theme', 'light')
+                  } else {
+                    root.classList.add('dark')
+                    localStorage.setItem('vibesynth-theme', 'dark')
+                  }
+                }} />
+                <MenuItem icon="⚙" label="Settings" onClick={() => { setShowHamburger(false); onOpenSettings?.() }} />
                 <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-1" />
-                <MenuItem icon="⌘" label="Command menu" shortcut="⌘K" />
+                <MenuItem icon="⌘" label="Command menu" shortcut="⌘K" onClick={() => setShowHamburger(false)} />
               </div>
             )}
           </div>
 
           <span className="text-sm font-medium">{project.name}</span>
+
+          {isGenerating && (
+            <span className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+              <LoadingSpinner />
+              Generating...
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2 no-drag">
@@ -101,7 +458,9 @@ export function Editor({ project, onBack }: EditorProps) {
             {isRunning ? '■ Stop' : '▶ Run'}
           </button>
 
-          <button className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700" title="Settings">
+          <AppearanceToggle />
+
+          <button onClick={onOpenSettings} className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700" title="Settings">
             <SettingsIcon className="w-5 h-5" />
           </button>
         </div>
@@ -111,7 +470,7 @@ export function Editor({ project, onBack }: EditorProps) {
           <div className="absolute left-1/2 -translate-x-1/2 top-1 z-40">
             <ScreenContextToolbar
               screenName={selectedScreen}
-              onAction={(action) => console.log('Action:', action, selectedScreen)}
+              onAction={handleScreenAction}
             />
           </div>
         )}
@@ -132,7 +491,7 @@ export function Editor({ project, onBack }: EditorProps) {
         {/* Canvas */}
         <div
           ref={canvasRef}
-          className="flex-1 overflow-hidden cursor-grab active:cursor-grabbing"
+          className={`flex-1 overflow-hidden ${isPanning ? 'cursor-grabbing' : spaceDown ? 'cursor-grab' : 'cursor-default'}`}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
@@ -146,71 +505,85 @@ export function Editor({ project, onBack }: EditorProps) {
               transformOrigin: '0 0',
             }}
           >
-            {/* Design System Card */}
             <div className="flex gap-8 items-start">
-              <DesignSystemCard
-                name="Kinetic Volt"
-                colors={{
-                  primary: { base: '#CCFF00', tones: ['#000000','#161e00','#283500','#3c4d00','#506600','#668100','#7c9c00','#93b900','#abd600','#c3f400','#daff6e','#ffffff'] },
-                  secondary: { base: '#A2A003', tones: ['#000000','#1d1d00','#333200','#4a4900','#636100','#7d7b00','#979500','#b3b01f','#cfcc3c','#ece856','#faf763','#ffffff'] },
-                  tertiary: { base: '#C4AB04', tones: ['#000000','#211b00','#393000','#524600','#6d5e00','#897700','#a69000','#c4ab04','#e1c62e','#ffe24a','#fff1b8','#ffffff'] },
-                  neutral: { base: '#121212', tones: ['#000000','#1c1b1b','#313030','#474646','#5f5e5e','#787776','#929090','#adabaa','#c8c6c5','#e5e2e1','#f3f0ef','#ffffff'] },
-                }}
-                typography={{
-                  headline: { family: 'Lexend' },
-                  body: { family: 'Inter' },
-                  label: { family: 'Inter' },
-                }}
-              />
-
-              {/* Placeholder screens */}
+              {/* Screens */}
               <div className="flex gap-4">
-                {['Dashboard', 'Workout Plans', 'Progress Charts'].map((name) => (
-                  <ScreenPlaceholder
-                    key={name}
-                    name={name}
-                    width={390}
-                    height={844}
-                    isSelected={selectedScreen === name}
-                    onClick={() => setSelectedScreen(selectedScreen === name ? null : name)}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      setSelectedScreen(name)
-                      setContextMenu({ x: e.clientX, y: e.clientY })
-                    }}
-                  />
-                ))}
+                {project.screens.length > 0 ? (
+                  project.screens.map((screen) => (
+                    <ScreenCard
+                      key={screen.id}
+                      screen={screen}
+                      width={screenWidth}
+                      height={screenHeight}
+                      isSelected={selectedScreen === screen.name}
+                      deviceType={deviceType}
+                      onClick={() => setSelectedScreen(selectedScreen === screen.name ? null : screen.name)}
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        setSelectedScreen(screen.name)
+                        setContextMenu({ x: e.clientX, y: e.clientY })
+                      }}
+                    />
+                  ))
+                ) : (
+                  /* Empty state placeholder */
+                  <div className="flex flex-col items-center justify-center" style={{ width: screenWidth * 0.5, height: screenHeight * 0.5 }}>
+                    <div className="rounded-xl border-2 border-dashed border-neutral-300 dark:border-neutral-600 flex flex-col items-center justify-center w-full h-full bg-neutral-100 dark:bg-neutral-800">
+                      {isGenerating ? (
+                        <div className="flex flex-col items-center gap-3">
+                          <LoadingSpinner size="lg" />
+                          <span className="text-sm text-neutral-500">Generating your design...</span>
+                        </div>
+                      ) : (
+                        <span className="text-sm text-neutral-400">
+                          Enter a prompt to generate a screen
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         </div>
 
-        {/* Right toolbar */}
-        <div className="w-10 bg-white dark:bg-neutral-800 border-l border-neutral-200 dark:border-neutral-700 flex flex-col items-center py-2 gap-1 shrink-0">
-          <ToolButton icon={<CursorIcon />} title="Cursor" active />
-          <ToolButton icon={<SelectIcon />} title="Select box" />
-          <ToolButton icon={<PenIcon />} title="Pen" />
-          <div className="h-px w-6 bg-neutral-200 dark:bg-neutral-700 my-1" />
-          <ToolButton icon={<MicIcon />} title="Voice" />
-          <ToolButton icon={<ImageIcon />} title="Image" />
-          <ToolButton icon={<SettingsIcon className="w-4 h-4" />} title="Settings" />
-          <ToolButton icon={<StarIcon />} title="Favourites" />
-        </div>
+        {/* Right floating panel */}
+        <RightPanel
+          designSystem={designSystem}
+          screenNames={project.screens.map(s => s.name)}
+          selectedScreen={selectedScreen}
+          onSelectScreen={(name) => setSelectedScreen(selectedScreen === name ? null : name)}
+          onDesignSystemUpdate={(ds) => onProjectUpdate({
+            ...project,
+            designSystem: ds,
+            updatedAt: new Date().toLocaleDateString(),
+          })}
+        />
       </div>
 
       {/* Bottom: Prompt Bar + Agent Log */}
       <div className="bg-white dark:bg-neutral-800 border-t border-neutral-200 dark:border-neutral-700">
         <div className="max-w-2xl mx-auto px-4 py-2">
           <PromptBar
-            placeholder="What would you like to change or create?"
+            placeholder={
+              selectedScreen
+                ? `Describe changes for "${selectedScreen}"...`
+                : 'What would you like to change or create?'
+            }
             deviceType={deviceType}
             onDeviceTypeChange={setDeviceType}
-            onSubmit={() => {}}
+            onSubmit={handlePromptSubmit}
+            selectedScreen={selectedScreen || undefined}
+            onRemoveScreen={() => setSelectedScreen(null)}
           />
         </div>
 
         {/* Agent Log */}
-        <AgentLog isOpen={agentLogOpen} onToggle={() => setAgentLogOpen(!agentLogOpen)} />
+        <AgentLog
+          isOpen={agentLogOpen}
+          onToggle={() => setAgentLogOpen(!agentLogOpen)}
+          entries={logEntries}
+        />
       </div>
 
       {/* Zoom indicator */}
@@ -228,12 +601,116 @@ export function Editor({ project, onBack }: EditorProps) {
         <ScreenContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          onAction={(action) => console.log('Context action:', action, selectedScreen)}
+          onAction={handleScreenAction}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* View Code Modal */}
+      {showCodeModal && selectedScreenObj && (
+        <ViewCodeModal
+          screenName={selectedScreenObj.name}
+          html={selectedScreenObj.html}
+          onClose={() => setShowCodeModal(false)}
+          onCopy={() => {
+            navigator.clipboard.writeText(selectedScreenObj.html)
+            addLog(`Copied code for "${selectedScreenObj.name}"`, 'success')
+          }}
         />
       )}
     </div>
   )
+}
+
+// Screen card with iframe rendering
+function ScreenCard({
+  screen, width, height, isSelected, deviceType, onClick, onContextMenu,
+}: {
+  screen: Screen; width: number; height: number; deviceType: 'app' | 'web' | 'tablet'
+  isSelected?: boolean; onClick?: () => void; onContextMenu?: (e: React.MouseEvent) => void
+}) {
+  const scale = 0.5
+  const displayWidth = width * scale
+  const displayHeight = height * scale
+
+  return (
+    <div data-screen-card className="flex flex-col cursor-pointer" onClick={onClick} onContextMenu={onContextMenu}>
+      <div className="flex items-center gap-1 mb-1 text-xs text-neutral-500">
+        {deviceType === 'app' ? <PhoneSmallIcon /> : deviceType === 'tablet' ? <TabletSmallIcon /> : <MonitorSmallIcon />}
+        <span>{screen.name}</span>
+      </div>
+      <div
+        className={`rounded-xl border-2 overflow-hidden transition-colors ${
+          isSelected
+            ? 'border-blue-500 shadow-lg shadow-blue-500/20'
+            : 'border-neutral-200 dark:border-neutral-600 hover:border-neutral-400'
+        }`}
+        style={{ width: displayWidth, height: displayHeight }}
+      >
+        <iframe
+          srcDoc={screen.html}
+          title={screen.name}
+          sandbox="allow-scripts"
+          className="pointer-events-none"
+          style={{
+            width: width,
+            height: height,
+            transform: `scale(${scale})`,
+            transformOrigin: '0 0',
+            border: 'none',
+          }}
+        />
+      </div>
+      {isSelected && (
+        <div className="text-[10px] text-blue-500 mt-1 text-center">{width} x {height}</div>
+      )}
+    </div>
+  )
+}
+
+function LoadingSpinner({ size }: { size?: 'lg' }) {
+  const s = size === 'lg' ? 'w-6 h-6' : 'w-3.5 h-3.5'
+  return (
+    <svg className={`${s} animate-spin`} viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-20" />
+      <path d="M12 2a10 10 0 019.95 9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function ViewCodeModal({ screenName, html, onClose, onCopy }: {
+  screenName: string; html: string; onClose: () => void; onCopy: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div
+        className="w-[720px] max-h-[80vh] bg-white dark:bg-neutral-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-200 dark:border-neutral-700">
+          <h3 className="text-sm font-semibold">{screenName} — Source Code</h3>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onCopy}
+              className="px-3 py-1 text-xs font-medium rounded-lg bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600"
+            >
+              Copy
+            </button>
+            <button onClick={onClose} className="p-1 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700">
+              <XSmallIcon />
+            </button>
+          </div>
+        </div>
+        <pre className="flex-1 overflow-auto p-5 text-xs leading-relaxed text-neutral-700 dark:text-neutral-300 font-mono whitespace-pre-wrap break-all">
+          {html}
+        </pre>
+      </div>
+    </div>
+  )
+}
+
+function XSmallIcon() {
+  return <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
 }
 
 // Sub-components
@@ -260,37 +737,6 @@ function ToolButton({ icon, title, active }: { icon: React.ReactNode; title: str
     >
       {icon}
     </button>
-  )
-}
-
-function ScreenPlaceholder({
-  name, width, height, isSelected, onClick, onContextMenu,
-}: {
-  name: string; width: number; height: number
-  isSelected?: boolean; onClick?: () => void; onContextMenu?: (e: React.MouseEvent) => void
-}) {
-  return (
-    <div className="flex flex-col cursor-pointer" onClick={onClick} onContextMenu={onContextMenu}>
-      <div className="flex items-center gap-1 mb-1 text-xs text-neutral-500">
-        <PhoneSmallIcon />
-        <span>{name}</span>
-      </div>
-      <div
-        className={`rounded-xl border-2 flex items-center justify-center transition-colors ${
-          isSelected
-            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-            : 'border-dashed border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 hover:border-neutral-400'
-        }`}
-        style={{ width: width * 0.5, height: height * 0.5 }}
-      >
-        <span className="text-sm text-neutral-400">
-          {width} x {height}
-        </span>
-      </div>
-      {isSelected && (
-        <div className="text-[10px] text-blue-500 mt-1 text-center">{width} x {height}</div>
-      )}
-    </div>
   )
 }
 
@@ -321,4 +767,10 @@ function StarIcon() {
 }
 function PhoneSmallIcon() {
   return <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="14" height="20" rx="2" /><path d="M12 18h.01" /></svg>
+}
+function TabletSmallIcon() {
+  return <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="4" y="2" width="16" height="20" rx="2" /><path d="M12 18h.01" /></svg>
+}
+function MonitorSmallIcon() {
+  return <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg>
 }

@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 import electron from 'vite-plugin-electron'
 import renderer from 'vite-plugin-electron-renderer'
 import path from 'path'
@@ -9,6 +10,7 @@ const root = path.resolve(__dirname, 'src/renderer')
 export default defineConfig({
   plugins: [
     react(),
+    tailwindcss(),
     electron([
       {
         entry: path.resolve(__dirname, 'electron/main.ts'),
@@ -41,6 +43,7 @@ export default defineConfig({
     },
   },
   root,
+  envDir: path.resolve(__dirname),
   build: {
     outDir: path.resolve(__dirname, 'dist'),
   },

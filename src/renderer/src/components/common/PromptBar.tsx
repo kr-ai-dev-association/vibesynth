@@ -2,8 +2,8 @@ import { useState } from 'react'
 
 interface PromptBarProps {
   placeholder: string
-  deviceType: 'app' | 'web'
-  onDeviceTypeChange: (type: 'app' | 'web') => void
+  deviceType: 'app' | 'web' | 'tablet'
+  onDeviceTypeChange: (type: 'app' | 'web' | 'tablet') => void
   onSubmit: (prompt: string) => void
   selectedScreen?: string
   onRemoveScreen?: () => void
@@ -18,12 +18,12 @@ export function PromptBar({
   onRemoveScreen,
 }: PromptBarProps) {
   const [prompt, setPrompt] = useState('')
-  const [model, setModel] = useState('Fast')
+  const [model, setModel] = useState('3.0 Flash')
   const [showModelMenu, setShowModelMenu] = useState(false)
 
   const models = [
-    { name: 'Fast', desc: 'Quick code generation. Great for iteration.' },
-    { name: 'Quality', desc: 'Maximum quality and reasoning.' },
+    { name: '3.0 Flash', desc: 'Fast generation. Great for iteration.' },
+    { name: '3.0 Quality', desc: 'Maximum quality and reasoning.' },
     { name: 'Redesign', desc: 'Redesign existing apps. Attach a screenshot.' },
     { name: 'Ideate', desc: 'Bring a problem to solve and see solutions.' },
   ]
@@ -87,6 +87,17 @@ export function PromptBar({
               App
             </button>
             <button
+              onClick={() => onDeviceTypeChange('tablet')}
+              className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium ${
+                deviceType === 'tablet'
+                  ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
+                  : 'hover:bg-neutral-50 dark:hover:bg-neutral-700'
+              }`}
+            >
+              <TabletIcon className="w-3.5 h-3.5" />
+              Tablet
+            </button>
+            <button
               onClick={() => onDeviceTypeChange('web')}
               className={`flex items-center gap-1 px-2.5 py-1 text-xs font-medium ${
                 deviceType === 'web'
@@ -107,7 +118,7 @@ export function PromptBar({
               onClick={() => setShowModelMenu(!showModelMenu)}
               className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700"
             >
-              <SparkleIcon className="w-3.5 h-3.5" />
+              <DiamondIcon className="w-3 h-3" />
               {model}
               <ChevronDownIcon className="w-3 h-3" />
             </button>
@@ -161,11 +172,17 @@ function PlusIcon({ className }: { className?: string }) {
 function PhoneIcon({ className }: { className?: string }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="14" height="20" rx="2" /><path d="M12 18h.01" /></svg>
 }
+function TabletIcon({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="4" y="2" width="16" height="20" rx="2" /><path d="M12 18h.01" /></svg>
+}
 function MonitorIcon({ className }: { className?: string }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg>
 }
 function SparkleIcon({ className }: { className?: string }) {
-  return <svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8L12 2z" /></svg>
+  return <svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3 7h7l-5.5 4.5L18.5 21 12 16.5 5.5 21l2-7.5L2 9h7l3-7z" /></svg>
+}
+function DiamondIcon({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 12l10 10 10-10L12 2z" /></svg>
 }
 function ChevronDownIcon({ className }: { className?: string }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9l6 6 6-6" /></svg>

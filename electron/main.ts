@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import path from 'path'
 
 let mainWindow: BrowserWindow | null = null
 let liveAppWindow: BrowserWindow | null = null
+let currentLiveHtml: string | null = null
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 
@@ -48,21 +49,33 @@ function createLiveAppWindow() {
     minHeight: 480,
     title: 'Live App',
     webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   })
 
-  // For now, show a placeholder. Later this will load localhost:PORT
-  liveAppWindow.loadURL('about:blank')
+  if (currentLiveHtml) {
+    loadHtmlInLiveWindow(currentLiveHtml)
+  } else {
+    liveAppWindow.loadURL('about:blank')
+  }
 
   liveAppWindow.on('closed', () => {
     liveAppWindow = null
+    mainWindow?.webContents.send('live-window-closed')
   })
 }
 
+function loadHtmlInLiveWindow(html: string) {
+  if (!liveAppWindow) return
+  const encoded = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`
+  liveAppWindow.loadURL(encoded)
+}
+
 // IPC Handlers
-ipcMain.handle('open-live-window', () => {
+ipcMain.handle('open-live-window', (_event, html?: string) => {
+  if (html) currentLiveHtml = html
   createLiveAppWindow()
 })
 
@@ -72,10 +85,27 @@ ipcMain.handle('close-live-window', () => {
   }
 })
 
+ipcMain.handle('update-live-window', (_event, html: string) => {
+  currentLiveHtml = html
+  if (liveAppWindow) {
+    loadHtmlInLiveWindow(html)
+  }
+})
+
 ipcMain.handle('set-live-window-always-on-top', (_event, value: boolean) => {
   if (liveAppWindow) {
     liveAppWindow.setAlwaysOnTop(value)
   }
+})
+
+ipcMain.handle('set-live-window-size', (_event, width: number, height: number) => {
+  if (liveAppWindow) {
+    liveAppWindow.setSize(width, height)
+  }
+})
+
+ipcMain.handle('open-external', (_event, url: string) => {
+  shell.openExternal(url)
 })
 
 app.whenReady().then(() => {
