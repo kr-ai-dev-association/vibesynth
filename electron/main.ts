@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import path from 'path'
+import { db } from './database'
 
 let mainWindow: BrowserWindow | null = null
 let liveAppWindow: BrowserWindow | null = null
@@ -106,6 +107,55 @@ ipcMain.handle('set-live-window-size', (_event, width: number, height: number) =
 
 ipcMain.handle('open-external', (_event, url: string) => {
   shell.openExternal(url)
+})
+
+// ─── Database IPC Handlers ─────────────────────────────────────
+
+// Projects
+ipcMain.handle('db:get-all-projects', (_event, userId: string) => {
+  return db.getAllProjects(userId)
+})
+
+ipcMain.handle('db:get-project', (_event, id: string) => {
+  return db.getProject(id)
+})
+
+ipcMain.handle('db:save-project', (_event, project: any) => {
+  db.saveProject(project)
+  return true
+})
+
+ipcMain.handle('db:delete-project', (_event, id: string) => {
+  db.deleteProject(id)
+  return true
+})
+
+// Design Guides
+ipcMain.handle('db:get-all-guides', (_event, userId: string) => {
+  return db.getAllGuides(userId)
+})
+
+ipcMain.handle('db:save-guide', (_event, guide: any) => {
+  db.saveGuide(guide)
+  return true
+})
+
+ipcMain.handle('db:find-matching-guide', (_event, prompt: string, userId: string) => {
+  return db.findMatchingGuide(prompt, userId)
+})
+
+// Settings
+ipcMain.handle('db:get-settings', (_event, userId: string) => {
+  return db.getSettings(userId)
+})
+
+ipcMain.handle('db:save-settings', (_event, settings: any) => {
+  db.saveSettings(settings)
+  return true
+})
+
+ipcMain.handle('db:get-path', () => {
+  return db.getDbPath()
 })
 
 app.whenReady().then(() => {

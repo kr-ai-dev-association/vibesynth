@@ -279,7 +279,7 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate }: 
                         <EditSmallIcon className="w-3 h-3 text-neutral-300 opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
                       <p className="text-[10px] leading-relaxed text-neutral-500 dark:text-neutral-400 line-clamp-3">
-                        {designSystem.guide[key] || 'Click to add...'}
+                        {designSystem.guide?.[key] || 'Click to add...'}
                       </p>
                     </button>
                   )}

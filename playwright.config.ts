@@ -2,37 +2,26 @@ import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests/e2e',
-  timeout: 30000,
-  projects: [
-    {
-      name: 'vibesynth',
-      testIgnore: /stitch-/,
-      use: {
-        baseURL: 'http://localhost:5173',
-        screenshot: 'only-on-failure',
-      },
+  timeout: 300_000,
+  expect: {
+    timeout: 60_000,
+  },
+  workers: 1,
+  retries: 0,
+  use: {
+    baseURL: 'http://localhost:5199',
+    screenshot: 'on',
+    trace: 'on-first-retry',
+    launchOptions: {
+      args: ['--start-maximized'],
     },
-    {
-      name: 'stitch',
-      testMatch: /stitch-/,
-      use: {
-        baseURL: 'https://stitch.withgoogle.com',
-        screenshot: 'only-on-failure',
-        viewport: { width: 1400, height: 900 },
-      },
-    },
-    {
-      name: 'parity',
-      testMatch: /parity-/,
-      use: {
-        screenshot: 'on',
-        viewport: { width: 1400, height: 900 },
-      },
-    },
-  ],
+    viewport: null,
+  },
+  outputDir: 'test-results',
   webServer: {
-    command: 'npm run dev:web',
-    port: 5173,
-    reuseExistingServer: true,
+    command: 'npx vite --config vite.config.web.ts --port 5199',
+    port: 5199,
+    reuseExistingServer: !process.env.CI,
+    timeout: 30_000,
   },
 })

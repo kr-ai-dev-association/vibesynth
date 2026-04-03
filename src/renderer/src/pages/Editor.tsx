@@ -5,8 +5,9 @@ import { AppearanceToggle } from '../components/common/AppearanceToggle'
 import { AgentLog } from '../components/editor/AgentLog'
 import { ScreenContextToolbar, ScreenContextMenu } from '../components/editor/ScreenContextToolbar'
 import { RightPanel } from '../components/editor/RightPanel'
-import { generateDesign, editDesign, generateDesignSystem } from '../lib/gemini'
+import { generateDesign, generateMultiScreen, editDesign, generateDesignSystem } from '../lib/gemini'
 import { DEFAULT_DESIGN_GUIDE } from '../lib/default-design-guide'
+import { designGuideDB } from '../lib/design-guide-db'
 
 export interface AgentLogEntry {
   id: string
@@ -62,7 +63,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   useEffect(() => {
     if (project.screens.length === 0 && !initialGenerationDone.current) {
       initialGenerationDone.current = true
-      handleGenerateScreen(project.prompt || project.name)
+      handlePromptSubmit(project.prompt || project.name)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -110,9 +111,23 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     setAgentLogOpen(true)
 
     const logId = addLog(`Generating design: "${prompt}"...`, 'generating')
+    let imgLogId: string | null = null
 
     try {
-      const results = await generateDesign(prompt, deviceType, activeGuide)
+      const results = await generateDesign(prompt, deviceType, activeGuide, {
+        onImageGenStart: () => {
+          imgLogId = addLog('Generating images with Nano Banana...', 'generating')
+        },
+        onImageGenComplete: (count) => {
+          if (imgLogId) updateLog(imgLogId, `Generated ${count} image${count !== 1 ? 's' : ''} for design`, 'success')
+        },
+        onDesignGenStart: () => {
+          updateLog(logId, `Generating design layout: "${prompt}"...`, 'generating')
+        },
+        onDesignGenComplete: () => {
+          updateLog(logId, 'Design layout generated, assembling...', 'generating')
+        },
+      })
       const newScreens: Screen[] = results.map((r) => ({
         id: crypto.randomUUID(),
         name: r.screenName,
@@ -126,6 +141,10 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         try {
           const ds = await generateDesignSystem(newScreens[0].html, activeGuide)
           updateLog(dsLogId, `Design system "${ds.name}" with guide extracted`, 'success')
+          // Save guide to DB for future prompt-based matching
+          if (ds.guide) {
+            designGuideDB.saveFromGeneration(project.name, prompt, ds.guide)
+          }
           onProjectUpdate({
             ...project,
             screens: [...project.screens, ...newScreens],
@@ -155,41 +174,186 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     }
   }
 
+  const handleGenerateMultiScreen = async (appDescription: string, screenNames: string[]) => {
+    if (isGenerating) return
+    setIsGenerating(true)
+    setAgentLogOpen(true)
+
+    const logId = addLog(`Generating ${screenNames.length} screens: ${screenNames.join(', ')}...`, 'generating')
+    let imgLogId: string | null = null
+
+    try {
+      const results = await generateMultiScreen(appDescription, screenNames, deviceType, activeGuide, {
+        onImageGenStart: () => {
+          imgLogId = addLog('Generating images with Nano Banana...', 'generating')
+        },
+        onImageGenComplete: (count) => {
+          if (imgLogId) updateLog(imgLogId, `Generated ${count} image${count !== 1 ? 's' : ''} for design`, 'success')
+        },
+        onDesignGenStart: () => {
+          updateLog(logId, `Generating ${screenNames.length} screens...`, 'generating')
+        },
+        onDesignGenComplete: () => {
+          updateLog(logId, `All ${screenNames.length} screens generated`, 'generating')
+        },
+        onScreenComplete: (i, total, name) => {
+          addLog(`Screen ${i}/${total} done: ${name}`, 'success')
+        },
+      })
+
+      const newScreens: Screen[] = results.map((r) => ({
+        id: crypto.randomUUID(),
+        name: r.screenName,
+        html: r.html,
+      }))
+
+      updateLog(logId, `Generated ${newScreens.length} screens`, 'success')
+
+      // Extract design system from first screen
+      if (!project.designSystem && newScreens[0]) {
+        const dsLogId = addLog('Extracting design system & guide...', 'generating')
+        try {
+          const ds = await generateDesignSystem(newScreens[0].html, activeGuide)
+          updateLog(dsLogId, `Design system "${ds.name}" with guide extracted`, 'success')
+          if (ds.guide) {
+            designGuideDB.saveFromGeneration(project.name, appDescription, ds.guide)
+          }
+          onProjectUpdate({
+            ...project,
+            screens: [...project.screens, ...newScreens],
+            designSystem: ds,
+            updatedAt: new Date().toLocaleDateString(),
+          })
+        } catch {
+          updateLog(dsLogId, 'Could not extract design system', 'error')
+          onProjectUpdate({
+            ...project,
+            screens: [...project.screens, ...newScreens],
+            updatedAt: new Date().toLocaleDateString(),
+          })
+        }
+      } else {
+        onProjectUpdate({
+          ...project,
+          screens: [...project.screens, ...newScreens],
+          updatedAt: new Date().toLocaleDateString(),
+        })
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      updateLog(logId, `Multi-screen generation failed: ${message}`, 'error')
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
   const handleEditScreen = async (prompt: string) => {
     if (isGenerating || !selectedScreen) return
 
     const screen = project.screens.find((s) => s.name === selectedScreen)
     if (!screen) return
 
+    // Detect if this is a global edit (color/theme/font changes should propagate)
+    const isGlobalEdit = detectGlobalEdit(prompt)
+
     setIsGenerating(true)
     setAgentLogOpen(true)
 
-    const logId = addLog(`Editing "${screen.name}": "${prompt}"...`, 'generating')
+    if (isGlobalEdit && project.screens.length > 1) {
+      // ─── Batch edit: apply to all screens (Stitch parity) ───
+      const logId = addLog(`Batch editing all ${project.screens.length} screens: "${prompt}"...`, 'generating')
 
-    try {
-      const newHtml = await editDesign(screen.html, prompt)
-      updateLog(logId, `Updated screen: ${screen.name}`, 'success')
+      try {
+        const editPromises = project.screens.map(async (s) => {
+          const newHtml = await editDesign(s.html, prompt)
+          return { ...s, html: newHtml }
+        })
 
-      const updatedScreens = project.screens.map((s) =>
-        s.id === screen.id ? { ...s, html: newHtml } : s
-      )
-      onProjectUpdate({
-        ...project,
-        screens: updatedScreens,
-        updatedAt: new Date().toLocaleDateString(),
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error'
-      updateLog(logId, `Edit failed: ${message}`, 'error')
-    } finally {
-      setIsGenerating(false)
+        const updatedScreens = await Promise.all(editPromises)
+        updateLog(logId, `Batch updated ${updatedScreens.length} screens`, 'success')
+
+        // Also re-extract design system to reflect changes
+        const dsLogId = addLog('Updating design system...', 'generating')
+        try {
+          const ds = await generateDesignSystem(updatedScreens[0].html, activeGuide)
+          updateLog(dsLogId, `Design system updated to "${ds.name}"`, 'success')
+          if (ds.guide) {
+            designGuideDB.saveFromGeneration(project.name, prompt, ds.guide)
+          }
+          onProjectUpdate({
+            ...project,
+            screens: updatedScreens,
+            designSystem: ds,
+            updatedAt: new Date().toLocaleDateString(),
+          })
+        } catch {
+          updateLog(dsLogId, 'Design system update skipped', 'info')
+          onProjectUpdate({
+            ...project,
+            screens: updatedScreens,
+            updatedAt: new Date().toLocaleDateString(),
+          })
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error'
+        updateLog(logId, `Batch edit failed: ${message}`, 'error')
+      } finally {
+        setIsGenerating(false)
+      }
+    } else {
+      // ─── Single screen edit ───
+      const logId = addLog(`Editing "${screen.name}": "${prompt}"...`, 'generating')
+
+      try {
+        const newHtml = await editDesign(screen.html, prompt)
+        updateLog(logId, `Updated screen: ${screen.name}`, 'success')
+
+        const updatedScreens = project.screens.map((s) =>
+          s.id === screen.id ? { ...s, html: newHtml } : s
+        )
+        onProjectUpdate({
+          ...project,
+          screens: updatedScreens,
+          updatedAt: new Date().toLocaleDateString(),
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error'
+        updateLog(logId, `Edit failed: ${message}`, 'error')
+      } finally {
+        setIsGenerating(false)
+      }
     }
+  }
+
+  /**
+   * Detect if an edit prompt is a global change that should propagate
+   * across all screens (e.g., color, theme, font changes).
+   */
+  function detectGlobalEdit(prompt: string): boolean {
+    const globalKeywords = [
+      'color', 'colour', 'theme', 'accent', 'palette', 'font', 'typography',
+      'dark mode', 'light mode', 'dark theme', 'light theme',
+      'background', 'style', 'redesign', 'rebrand',
+      'all screens', 'every screen', 'entire', 'global',
+    ]
+    const p = prompt.toLowerCase()
+    return globalKeywords.some(kw => p.includes(kw))
   }
 
   const handlePromptSubmit = (prompt: string) => {
     if (selectedScreen && project.screens.some((s) => s.name === selectedScreen)) {
       handleEditScreen(prompt)
     } else {
+      // Detect multi-screen prompt (e.g., "screens: Home, Profile, Settings")
+      const multiMatch = prompt.match(/screens?\s*:\s*(.+)/i)
+      if (multiMatch) {
+        const screenNames = multiMatch[1].split(/[,;]+/).map(s => s.trim()).filter(Boolean)
+        const appDescription = prompt.replace(multiMatch[0], '').trim()
+        if (screenNames.length > 1 && appDescription) {
+          handleGenerateMultiScreen(appDescription, screenNames)
+          return
+        }
+      }
       handleGenerateScreen(prompt)
     }
   }
