@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Project } from '../App'
 import { PromptBar } from '../components/common/PromptBar'
+import { AppearanceToggle } from '../components/common/AppearanceToggle'
 
 const EXAMPLE_PROJECTS: Project[] = [
   { id: 'ex1', name: 'Indoor Plant Care Dashboard', updatedAt: 'May 19, 2025' },
@@ -19,9 +20,10 @@ const PROMPT_SUGGESTIONS = [
 interface DashboardProps {
   onOpenProject: (project: Project) => void
   onCreateProject: (name: string) => void
+  onOpenSettings?: () => void
 }
 
-export function Dashboard({ onOpenProject, onCreateProject }: DashboardProps) {
+export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: DashboardProps) {
   const [recentProjects] = useState<Project[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [deviceType, setDeviceType] = useState<'app' | 'web'>('app')
@@ -41,7 +43,8 @@ export function Dashboard({ onOpenProject, onCreateProject }: DashboardProps) {
           </span>
         </div>
         <div className="flex items-center gap-2 no-drag">
-          <button className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800" title="Settings">
+          <AppearanceToggle />
+          <button onClick={onOpenSettings} className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800" title="Settings">
             <SettingsIcon />
           </button>
         </div>

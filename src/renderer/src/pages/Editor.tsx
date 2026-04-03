@@ -3,6 +3,7 @@ import type { Project } from '../App'
 import { PromptBar } from '../components/common/PromptBar'
 import { DesignSystemCard } from '../components/design-system/DesignSystemCard'
 import { AgentLog } from '../components/editor/AgentLog'
+import { ScreenContextToolbar, ScreenContextMenu } from '../components/editor/ScreenContextToolbar'
 
 interface EditorProps {
   project: Project
@@ -15,6 +16,8 @@ export function Editor({ project, onBack }: EditorProps) {
   const [showHamburger, setShowHamburger] = useState(false)
   const [deviceType, setDeviceType] = useState<'app' | 'web'>('app')
   const [agentLogOpen, setAgentLogOpen] = useState(true)
+  const [selectedScreen, setSelectedScreen] = useState<string | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
 
   // Canvas pan state
@@ -102,6 +105,16 @@ export function Editor({ project, onBack }: EditorProps) {
             <SettingsIcon className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Screen context toolbar - shown when a screen is selected */}
+        {selectedScreen && (
+          <div className="absolute left-1/2 -translate-x-1/2 top-1 z-40">
+            <ScreenContextToolbar
+              screenName={selectedScreen}
+              onAction={(action) => console.log('Action:', action, selectedScreen)}
+            />
+          </div>
+        )}
       </header>
 
       {/* Main area */}
@@ -152,9 +165,21 @@ export function Editor({ project, onBack }: EditorProps) {
 
               {/* Placeholder screens */}
               <div className="flex gap-4">
-                <ScreenPlaceholder name="Dashboard" width={390} height={844} />
-                <ScreenPlaceholder name="Workout Plans" width={390} height={844} />
-                <ScreenPlaceholder name="Progress Charts" width={390} height={844} />
+                {['Dashboard', 'Workout Plans', 'Progress Charts'].map((name) => (
+                  <ScreenPlaceholder
+                    key={name}
+                    name={name}
+                    width={390}
+                    height={844}
+                    isSelected={selectedScreen === name}
+                    onClick={() => setSelectedScreen(selectedScreen === name ? null : name)}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      setSelectedScreen(name)
+                      setContextMenu({ x: e.clientX, y: e.clientY })
+                    }}
+                  />
+                ))}
               </div>
             </div>
           </div>
@@ -197,6 +222,16 @@ export function Editor({ project, onBack }: EditorProps) {
           {Math.round(zoom)}%
         </button>
       </div>
+
+      {/* Right-click context menu */}
+      {contextMenu && selectedScreen && (
+        <ScreenContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onAction={(action) => console.log('Context action:', action, selectedScreen)}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   )
 }
@@ -228,21 +263,33 @@ function ToolButton({ icon, title, active }: { icon: React.ReactNode; title: str
   )
 }
 
-function ScreenPlaceholder({ name, width, height }: { name: string; width: number; height: number }) {
+function ScreenPlaceholder({
+  name, width, height, isSelected, onClick, onContextMenu,
+}: {
+  name: string; width: number; height: number
+  isSelected?: boolean; onClick?: () => void; onContextMenu?: (e: React.MouseEvent) => void
+}) {
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col cursor-pointer" onClick={onClick} onContextMenu={onContextMenu}>
       <div className="flex items-center gap-1 mb-1 text-xs text-neutral-500">
         <PhoneSmallIcon />
         <span>{name}</span>
       </div>
       <div
-        className="rounded-xl border-2 border-dashed border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center"
+        className={`rounded-xl border-2 flex items-center justify-center transition-colors ${
+          isSelected
+            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+            : 'border-dashed border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 hover:border-neutral-400'
+        }`}
         style={{ width: width * 0.5, height: height * 0.5 }}
       >
         <span className="text-sm text-neutral-400">
           {width} x {height}
         </span>
       </div>
+      {isSelected && (
+        <div className="text-[10px] text-blue-500 mt-1 text-center">{width} x {height}</div>
+      )}
     </div>
   )
 }

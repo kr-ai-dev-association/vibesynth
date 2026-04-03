@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Dashboard } from './pages/Dashboard'
 import { Editor } from './pages/Editor'
+import { Settings } from './pages/Settings'
 
-export type AppView = 'dashboard' | 'editor'
+export type AppView = 'dashboard' | 'editor' | 'settings'
 
 export interface Project {
   id: string
@@ -25,6 +26,10 @@ export default function App() {
     setCurrentProject(null)
   }
 
+  if (view === 'settings') {
+    return <Settings onBack={handleBackToDashboard} />
+  }
+
   if (view === 'editor' && currentProject) {
     return (
       <Editor
@@ -45,6 +50,7 @@ export default function App() {
         }
         handleOpenProject(project)
       }}
+      onOpenSettings={() => setView('settings')}
     />
   )
 }
