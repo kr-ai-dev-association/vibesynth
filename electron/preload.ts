@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   openLiveWindow: (html?: string) => ipcRenderer.invoke('open-live-window', html),
+  openLiveWindowUrl: (url: string) => ipcRenderer.invoke('open-live-window-url', url),
   closeLiveWindow: () => ipcRenderer.invoke('close-live-window'),
   updateLiveWindow: (html: string) => ipcRenderer.invoke('update-live-window', html),
   setLiveWindowAlwaysOnTop: (value: boolean) =>
@@ -12,6 +13,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onLiveWindowClosed: (callback: () => void) => {
     ipcRenderer.on('live-window-closed', callback)
     return () => ipcRenderer.removeListener('live-window-closed', callback)
+  },
+  onLiveEditRequest: (callback: (prompt: string, currentUrl: string) => void) => {
+    const handler = (_e: any, prompt: string, currentUrl: string) => callback(prompt, currentUrl)
+    ipcRenderer.on('live-edit-request', handler)
+    return () => ipcRenderer.removeListener('live-edit-request', handler)
+  },
+  sendLiveEditResult: (result: { success: boolean; message: string }) =>
+    ipcRenderer.invoke('live-edit-result', result),
+
+  // Project filesystem + dev server API
+  project: {
+    scaffold: (projectId: string, files: Record<string, string>) =>
+      ipcRenderer.invoke('project:scaffold', projectId, files),
+    writeFile: (projectId: string, filePath: string, content: string) =>
+      ipcRenderer.invoke('project:write-file', projectId, filePath, content),
+    readFile: (projectId: string, filePath: string) =>
+      ipcRenderer.invoke('project:read-file', projectId, filePath),
+    install: (projectId: string) =>
+      ipcRenderer.invoke('project:install', projectId),
+    startDev: (projectId: string, port: number) =>
+      ipcRenderer.invoke('project:start-dev', projectId, port),
+    stopDev: () => ipcRenderer.invoke('project:stop-dev'),
+    getStatus: () => ipcRenderer.invoke('project:get-status'),
   },
 
   // Database API

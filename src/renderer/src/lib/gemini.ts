@@ -138,48 +138,65 @@ export async function generateDesign(
   deviceType: 'app' | 'web' | 'tablet' = 'app',
   guide?: DesignGuide,
   callbacks?: GenerationCallbacks,
+  existingScreenHtml?: string,
 ): Promise<GenerateDesignResult[]> {
   const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
 
-  // Auto-match design guide from DB if none provided
   const activeGuide = guide || designGuideDB.findBestMatch(prompt)?.guide
 
-  // Step 1: Generate images in parallel with design
   callbacks?.onImageGenStart?.()
   const imagePromise = generateDesignImages(prompt, deviceType).catch((err) => {
     console.warn('[VibeSynth] Image generation failed, using fallbacks:', err)
     return new Map<string, string>()
   })
 
-  // Step 2: Generate the HTML design
   callbacks?.onDesignGenStart?.()
 
   const deviceContext = deviceType === 'app'
     ? 'Design a native mobile app screen (390px width, mobile viewport with status bar and bottom navigation).'
     : deviceType === 'tablet'
     ? 'Design a tablet app screen (1024px width, portrait tablet viewport like iPad Pro).'
-    : 'Design a desktop web page (full width, responsive layout with proper header/navigation).'
+    : 'Design a desktop web page (full width, responsive layout with proper header/navigation). IMPORTANT: Do NOT use height:100vh or any fixed height on the body, html, or any main wrapper element. Let the page height grow naturally based on content. Use min-height:100vh only if you need to ensure a minimum full-screen look. The page must scroll if content is long.'
 
   const guideContext = activeGuide
     ? `\n\n${formatGuideForPrompt(activeGuide)}\n\nYou MUST follow the design guide above when choosing colors, typography, elevation, components, and overall visual style.`
     : ''
 
+  // If the project already has screens, enforce design consistency
+  let consistencyContext = ''
+  if (existingScreenHtml) {
+    const tokens = extractDesignTokens(existingScreenHtml)
+    const stripped = stripHeavyContent(existingScreenHtml)
+    const ref = stripped.length > 6000 ? stripped.slice(0, 6000) + '\n<!-- truncated -->' : stripped
+    consistencyContext = `
+
+=== DESIGN CONSISTENCY — MATCH EXISTING APP ===
+This new screen is being added to an existing app. You MUST match the visual design system exactly.
+
+DESIGN TOKENS:
+${tokens}
+
+REFERENCE SCREEN HTML:
+${ref}
+
+Use the EXACT same colors, fonts, border-radius, shadows, navigation style, and component styles.
+=== END CONSISTENCY ===`
+  }
+
   const result = await model.generateContent([
     SYSTEM_PROMPT,
-    `${deviceContext}${guideContext}\n\nUser request: ${prompt}\n\nGenerate a single complete, production-quality screen. Use the image placeholders {{HERO_IMAGE}}, {{CONTENT_IMAGE_1}}, {{CONTENT_IMAGE_2}} where photos should appear. Include realistic content, proper component styling, and polished visual hierarchy.`,
+    `${deviceContext}${guideContext}${consistencyContext}\n\nUser request: ${prompt}\n\nGenerate a single complete, production-quality screen. Use the image placeholders {{HERO_IMAGE}}, {{CONTENT_IMAGE_1}}, {{CONTENT_IMAGE_2}} where photos should appear. Include realistic content, proper component styling, and polished visual hierarchy.`,
   ])
   callbacks?.onDesignGenComplete?.()
 
   const text = result.response.text()
 
-  // Extract HTML
   let html = text.trim()
   if (html.startsWith('```html')) html = html.slice(7)
   else if (html.startsWith('```')) html = html.slice(3)
   if (html.endsWith('```')) html = html.slice(0, -3)
   html = html.trim()
 
-  // Step 3: Replace image placeholders with generated images
   const images = await imagePromise
   callbacks?.onImageGenComplete?.(images.size)
   html = replaceImagePlaceholders(html, images)
@@ -189,8 +206,77 @@ export async function generateDesign(
 }
 
 /**
+ * Extract concrete design tokens (colors, fonts, key CSS) from generated HTML
+ * so subsequent screens can replicate the exact same visual system.
+ */
+function extractDesignTokens(html: string): string {
+  const tokens: string[] = []
+
+  // Extract color hex codes
+  const colorSet = new Set<string>()
+  const hexMatches = html.matchAll(/#[0-9a-fA-F]{3,8}\b/g)
+  for (const m of hexMatches) colorSet.add(m[0].toLowerCase())
+  if (colorSet.size > 0) {
+    tokens.push(`EXACT COLORS USED: ${[...colorSet].join(', ')}`)
+  }
+
+  // Extract rgb/rgba colors
+  const rgbMatches = html.matchAll(/rgba?\([^)]+\)/g)
+  const rgbSet = new Set<string>()
+  for (const m of rgbMatches) rgbSet.add(m[0])
+  if (rgbSet.size > 0) {
+    tokens.push(`RGB COLORS: ${[...rgbSet].slice(0, 15).join(', ')}`)
+  }
+
+  // Extract Google Fonts imports
+  const fontImports = html.matchAll(/@import\s+url\(['"]([^'"]+)['"]\)/g)
+  for (const m of fontImports) tokens.push(`FONT IMPORT: ${m[0]}`)
+
+  // Extract font-family declarations
+  const fontFamilies = new Set<string>()
+  const ffMatches = html.matchAll(/font-family\s*:\s*['"]?([^;'"}\n]+)/g)
+  for (const m of ffMatches) fontFamilies.add(m[1].trim())
+  if (fontFamilies.size > 0) {
+    tokens.push(`FONT FAMILIES: ${[...fontFamilies].join(', ')}`)
+  }
+
+  // Extract border-radius patterns
+  const radiusSet = new Set<string>()
+  const brMatches = html.matchAll(/border-radius\s*:\s*([^;}\n]+)/g)
+  for (const m of brMatches) radiusSet.add(m[1].trim())
+  if (radiusSet.size > 0) {
+    tokens.push(`BORDER RADIUS: ${[...radiusSet].join(', ')}`)
+  }
+
+  // Extract box-shadow patterns
+  const shadowSet = new Set<string>()
+  const bsMatches = html.matchAll(/box-shadow\s*:\s*([^;}\n]+)/g)
+  for (const m of bsMatches) shadowSet.add(m[1].trim())
+  if (shadowSet.size > 0) {
+    tokens.push(`BOX SHADOWS: ${[...shadowSet].join('; ')}`)
+  }
+
+  // Extract the full <style> block as the definitive reference
+  const styleMatch = html.match(/<style[^>]*>([\s\S]*?)<\/style>/i)
+  if (styleMatch) {
+    const css = styleMatch[1].trim()
+    if (css.length < 3000) {
+      tokens.push(`FULL CSS STYLESHEET:\n${css}`)
+    } else {
+      tokens.push(`CSS STYLESHEET (first 3000 chars):\n${css.slice(0, 3000)}`)
+    }
+  }
+
+  return tokens.join('\n')
+}
+
+/**
  * Generate multiple screens for a single app at once.
  * Each screen is a different page/route of the same app, sharing the same design system.
+ *
+ * Design consistency is enforced by:
+ * 1. Extracting concrete design tokens (colors, fonts, CSS) from the first screen
+ * 2. Passing those tokens + the first screen's full HTML as reference for all subsequent screens
  */
 export async function generateMultiScreen(
   appDescription: string,
@@ -198,7 +284,7 @@ export async function generateMultiScreen(
   deviceType: 'app' | 'web' | 'tablet' = 'app',
   guide?: DesignGuide,
   callbacks?: GenerationCallbacks & {
-    onScreenComplete?: (index: number, total: number, name: string) => void
+    onScreenComplete?: (index: number, total: number, name: string, html: string) => void
   },
 ): Promise<GenerateDesignResult[]> {
   const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
@@ -212,7 +298,7 @@ export async function generateMultiScreen(
     ? 'Design a native mobile app screen (390px width, mobile viewport with status bar and bottom navigation).'
     : deviceType === 'tablet'
     ? 'Design a tablet app screen (1024px width, portrait tablet viewport like iPad Pro).'
-    : 'Design a desktop web page (full width, responsive layout with proper header/navigation).'
+    : 'Design a desktop web page (full width, responsive layout with proper header/navigation). IMPORTANT: Do NOT use height:100vh or any fixed height on the body, html, or any main wrapper element. Let the page height grow naturally based on content. Use min-height:100vh only if you need to ensure a minimum full-screen look.'
 
   const guideContext = activeGuide
     ? `\n\n${formatGuideForPrompt(activeGuide)}\n\nYou MUST follow the design guide above.`
@@ -221,21 +307,43 @@ export async function generateMultiScreen(
   const images = await imagePromise
   callbacks?.onImageGenComplete?.(images.size)
 
-  // Generate each screen sequentially to maintain design consistency
   callbacks?.onDesignGenStart?.()
   const results: GenerateDesignResult[] = []
+  let designTokens = ''
+  let referenceHtml = ''
 
   for (let i = 0; i < screenNames.length; i++) {
     const screenName = screenNames[i]
 
-    // Build context from previously generated screens for consistency
-    const prevScreenContext = results.length > 0
-      ? `\n\nYou have already designed these screens for the SAME app (maintain identical design system, colors, typography, navigation, and component styles):\n${results.map(r => `- ${r.screenName}`).join('\n')}\n\nThe new screen must look like it belongs to the same app.`
-      : ''
+    let consistencyContext = ''
+    if (i === 0) {
+      consistencyContext = `\n\nThis is the FIRST screen of a ${screenNames.length}-screen app. The other screens are: ${screenNames.slice(1).join(', ')}. Establish a clear, consistent visual design system (colors, typography, spacing, component styles, navigation) that ALL screens will share.`
+    } else {
+      consistencyContext = `
+
+=== MANDATORY DESIGN CONSISTENCY ===
+You are generating screen ${i + 1} of ${screenNames.length} for the SAME app.
+You MUST replicate the EXACT same visual design system as the reference screen below.
+
+DESIGN TOKENS FROM REFERENCE:
+${designTokens}
+
+REFERENCE SCREEN HTML ("${results[0].screenName}"):
+${referenceHtml}
+
+CRITICAL RULES:
+- Use the EXACT SAME color palette — same hex codes, same accent colors, same backgrounds
+- Use the EXACT SAME fonts — same @import, same font-family, same sizes/weights
+- Use the EXACT SAME component styles — same border-radius, shadows, padding, card styles
+- Use the EXACT SAME navigation bar/header design
+- The screens must look like they are from the SAME app, just different pages
+- Do NOT invent new colors, fonts, or component styles
+=== END CONSISTENCY RULES ===`
+    }
 
     const result = await model.generateContent([
       SYSTEM_PROMPT,
-      `${deviceContext}${guideContext}${prevScreenContext}\n\nApp description: ${appDescription}\n\nGenerate the "${screenName}" screen/page of this app. Use image placeholders {{HERO_IMAGE}}, {{CONTENT_IMAGE_1}}, {{CONTENT_IMAGE_2}} where photos should appear. Include realistic content specific to this screen.`,
+      `${deviceContext}${guideContext}${consistencyContext}\n\nApp description: ${appDescription}\n\nGenerate the "${screenName}" screen/page. Use image placeholders {{HERO_IMAGE}}, {{CONTENT_IMAGE_1}}, {{CONTENT_IMAGE_2}} where photos should appear. Include realistic content specific to this screen.`,
     ])
 
     let html = result.response.text().trim()
@@ -244,8 +352,15 @@ export async function generateMultiScreen(
     if (html.endsWith('```')) html = html.slice(0, -3)
     html = replaceImagePlaceholders(html.trim(), images)
 
+    // After generating the first screen, extract tokens for consistency enforcement
+    if (i === 0) {
+      designTokens = extractDesignTokens(html)
+      const stripped = stripHeavyContent(html)
+      referenceHtml = stripped.length > 6000 ? stripped.slice(0, 6000) + '\n<!-- truncated -->' : stripped
+    }
+
     results.push({ html, screenName })
-    callbacks?.onScreenComplete?.(i + 1, screenNames.length, screenName)
+    callbacks?.onScreenComplete?.(i + 1, screenNames.length, screenName, html)
   }
 
   callbacks?.onDesignGenComplete?.()
@@ -279,6 +394,53 @@ export async function editDesign(
   html = html.trim()
 
   // Re-inject original images
+  for (const [key, dataUrl] of imageMap) {
+    html = html.split(key).join(dataUrl)
+  }
+
+  return html
+}
+
+/**
+ * Edit a specific element within a design, identified by its CSS selector path.
+ * Only the targeted element (and its children) should change; the rest of the page stays intact.
+ */
+export async function editDesignElement(
+  currentHtml: string,
+  cssPath: string,
+  elementOuterHtml: string,
+  editPrompt: string,
+): Promise<string> {
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+
+  const imageMap = new Map<string, string>()
+  let placeholder = 0
+  const strippedHtml = currentHtml.replace(/data:[^"')\s]{200,}/g, (match) => {
+    const key = `__IMG_${placeholder++}__`
+    imageMap.set(key, match)
+    return key
+  })
+
+  const result = await model.generateContent([
+    SYSTEM_PROMPT,
+    `Here is the current design HTML:\n\n${strippedHtml}\n\n` +
+    `The user has selected a specific element using CSS path: "${cssPath}"\n` +
+    `The selected element's HTML is:\n${elementOuterHtml}\n\n` +
+    `User wants to modify ONLY this element: "${editPrompt}"\n\n` +
+    `Rules:\n` +
+    `1. Return the COMPLETE page HTML with the modification applied.\n` +
+    `2. ONLY change the targeted element and its children. Do NOT change anything else.\n` +
+    `3. Keep the overall page structure, other elements, and styling intact.\n` +
+    `4. Keep all image placeholders like __IMG_0__, __IMG_1__ exactly as they are.\n` +
+    `5. Return ONLY valid HTML. No markdown, no code fences.`,
+  ])
+
+  let html = result.response.text().trim()
+  if (html.startsWith('```html')) html = html.slice(7)
+  else if (html.startsWith('```')) html = html.slice(3)
+  if (html.endsWith('```')) html = html.slice(0, -3)
+  html = html.trim()
+
   for (const [key, dataUrl] of imageMap) {
     html = html.split(key).join(dataUrl)
   }
@@ -357,6 +519,344 @@ Return ONLY the JSON, no other text.`,
   if (json.endsWith('```')) json = json.slice(0, -3)
 
   return JSON.parse(json.trim())
+}
+
+/**
+ * Predict which UI elements will attract the most user attention/clicks.
+ * Returns zones with cssPath, intensity (0-1), label, and reason.
+ */
+export async function generateHeatmap(
+  html: string,
+): Promise<{ cssPath: string; tagName: string; label: string; intensity: number; reason: string }[]> {
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+
+  const result = await model.generateContent([
+    `You are a UX analytics expert. Analyze this HTML UI and predict where users will focus their attention and clicks.
+
+For each high-interest element, provide:
+- cssPath: a CSS selector path to identify the element (use tag names, classes, nth-of-type)
+- tagName: the HTML tag name (lowercase)
+- label: a short human-readable label like "Primary CTA", "Navigation Menu", "Hero Image"
+- intensity: a number from 0.0 to 1.0 where 1.0 = highest predicted attention
+- reason: brief explanation of why this area attracts attention
+
+Identify 5-10 zones covering buttons, headings, images, navigation, forms, and interactive elements.
+Prioritize: CTAs > Navigation > Hero content > Secondary content > Footer.
+
+Return ONLY valid JSON array. No markdown, no code fences.
+Example: [{"cssPath":"body > header > nav","tagName":"nav","label":"Main Navigation","intensity":0.85,"reason":"Primary navigation bar — users scan this first"}]`,
+    stripHeavyContent(html),
+  ])
+
+  let json = result.response.text().trim()
+  if (json.startsWith('```json')) json = json.slice(7)
+  else if (json.startsWith('```')) json = json.slice(3)
+  if (json.endsWith('```')) json = json.slice(0, -3)
+
+  const zones = JSON.parse(json.trim())
+  return Array.isArray(zones) ? zones : []
+}
+
+/**
+ * Generate a complete React + Vite + React Router project from multiple screen HTML designs.
+ * Returns a file map (path -> content) ready to be written to disk.
+ */
+export async function generateFrontendApp(
+  screens: { name: string; html: string }[],
+  deviceType: 'app' | 'web' | 'tablet' = 'web',
+): Promise<Record<string, string>> {
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.5-flash',
+    generationConfig: { responseMimeType: 'application/json' },
+  })
+
+  const routes = screens.map((s, i) => ({
+    name: s.name,
+    component: s.name.replace(/[^a-zA-Z0-9]/g, ''),
+    route: i === 0 ? '/' : `/${slugify(s.name)}`,
+  }))
+
+  const screenSummaries = screens.map((s, i) => {
+    const stripped = stripHeavyContent(s.html)
+    const truncated = stripped.length > 8000 ? stripped.slice(0, 8000) + '\n<!-- truncated -->' : stripped
+    return `Screen ${i + 1}: "${s.name}" (route: ${routes[i].route}, component: ${routes[i].component})\n<html>\n${truncated}\n</html>`
+  }).join('\n\n')
+
+  const result = await model.generateContent([
+    `Convert ${screens.length} HTML screens into a React+Vite+ReactRouter project.
+
+Routes: ${JSON.stringify(routes)}
+
+RULES:
+- Each screen → src/pages/{ComponentName}.tsx as a React functional component
+- Convert class→className, inline style strings→React style objects
+- Wire navigation elements to React Router <Link> or useNavigate()
+- Keep all colors, fonts, layout from original HTML. Use inline styles or CSS.
+- package.json must include: react, react-dom, react-router-dom, vite, @vitejs/plugin-react, @types/react, @types/react-dom, typescript
+- vite.config.ts: use @vitejs/plugin-react
+- src/main.tsx: createRoot + BrowserRouter
+- src/App.tsx: <Routes> with all screen routes
+- src/index.css: shared styles, resets, font imports
+- Replace data:image URLs with placeholder divs using background colors
+
+Return a JSON object: { "filepath": "file content string", ... }
+Include ALL files: package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx, src/App.tsx, src/index.css, and one src/pages/X.tsx per screen.
+
+${screenSummaries}`,
+  ])
+
+  let json = result.response.text().trim()
+  if (json.startsWith('```json')) json = json.slice(7)
+  else if (json.startsWith('```')) json = json.slice(3)
+  if (json.endsWith('```')) json = json.slice(0, -3)
+  json = json.trim()
+
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(json)
+  } catch {
+    const braceStart = json.indexOf('{')
+    const braceEnd = json.lastIndexOf('}')
+    if (braceStart !== -1 && braceEnd > braceStart) {
+      parsed = JSON.parse(json.slice(braceStart, braceEnd + 1))
+    } else {
+      throw new Error('Failed to parse generated project JSON')
+    }
+  }
+
+  const files: Record<string, string> = {}
+  for (const [key, value] of Object.entries(parsed)) {
+    files[key] = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+  }
+  return files
+}
+
+/**
+ * Edit a specific file in the frontend project based on a natural language prompt.
+ * Returns the updated file content.
+ */
+export async function editFrontendFile(
+  filePath: string,
+  currentContent: string,
+  editPrompt: string,
+  projectContext?: { files: string[]; screens: string[] },
+): Promise<string> {
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+
+  const contextInfo = projectContext
+    ? `\nProject files: ${projectContext.files.join(', ')}\nScreens/routes: ${projectContext.screens.join(', ')}`
+    : ''
+
+  const result = await model.generateContent([
+    `You are editing a React component file in a Vite + React Router project.
+
+File: ${filePath}${contextInfo}
+
+Current file content:
+${currentContent}
+
+User's modification request: "${editPrompt}"
+
+Rules:
+1. Return ONLY the complete updated file content
+2. Apply the requested changes while keeping the rest of the file intact
+3. Maintain all imports, exports, and component structure
+4. Keep all existing styling and visual design unless the user specifically asks to change it
+5. If the user asks for behavior changes (navigation, interactions, animations), implement them properly in React
+6. Return ONLY valid TSX/TS code. No markdown, no code fences, no explanation.`,
+  ])
+
+  let code = result.response.text().trim()
+  if (code.startsWith('```tsx') || code.startsWith('```typescript')) {
+    code = code.replace(/^```\w*\n?/, '')
+  } else if (code.startsWith('```')) {
+    code = code.slice(3)
+  }
+  if (code.endsWith('```')) code = code.slice(0, -3)
+
+  return code.trim()
+}
+
+/**
+ * Incremental build: generate React page components only for new/changed screens.
+ * Also regenerates App.tsx to wire all routes (existing + new).
+ *
+ * @param newScreens - screens that need Gemini generation (new or changed)
+ * @param allScreens - all screens (for route wiring in App.tsx)
+ * @param existingFiles - already generated files from previous build (for context)
+ * @param deviceType - device type
+ */
+export async function generateIncrementalFrontend(
+  newScreens: { name: string; html: string }[],
+  allScreens: { name: string; html: string }[],
+  existingFiles: Record<string, string>,
+  deviceType: 'app' | 'web' | 'tablet' = 'web',
+): Promise<Record<string, string>> {
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.5-flash',
+    generationConfig: { responseMimeType: 'application/json' },
+  })
+
+  const allRoutes = allScreens.map((s, i) => ({
+    name: s.name,
+    component: s.name.replace(/[^a-zA-Z0-9]/g, ''),
+    route: i === 0 ? '/' : `/${slugify(s.name)}`,
+  }))
+
+  const newScreenSummaries = newScreens.map((s) => {
+    const route = allRoutes.find(r => r.name === s.name)!
+    const stripped = stripHeavyContent(s.html)
+    const truncated = stripped.length > 8000 ? stripped.slice(0, 8000) + '\n<!-- truncated -->' : stripped
+    return `NEW Screen: "${s.name}" (route: ${route.route}, component: ${route.component})\n<html>\n${truncated}\n</html>`
+  }).join('\n\n')
+
+  const existingScreenNames = allScreens
+    .filter(s => !newScreens.some(ns => ns.name === s.name))
+    .map(s => {
+      const route = allRoutes.find(r => r.name === s.name)!
+      return `"${s.name}" (route: ${route.route}, component: ${route.component}) — ALREADY BUILT, DO NOT regenerate`
+    }).join('\n')
+
+  const existingAppTsx = existingFiles['src/App.tsx'] || ''
+  const existingIndexCss = existingFiles['src/index.css'] || ''
+
+  const result = await model.generateContent([
+    `You are doing an INCREMENTAL BUILD for a React+Vite+ReactRouter project.
+
+Some screens have already been built. You only need to generate files for NEW screens and update App.tsx to include all routes.
+
+ALL routes (existing + new): ${JSON.stringify(allRoutes)}
+
+ALREADY BUILT screens (do NOT regenerate these page files):
+${existingScreenNames || '(none)'}
+
+Existing App.tsx for reference:
+${existingAppTsx.slice(0, 2000)}
+
+Existing index.css for reference:
+${existingIndexCss.slice(0, 1000)}
+
+NEW screens to generate:
+${newScreenSummaries}
+
+RULES:
+- Generate ONLY: src/pages/{Component}.tsx for each NEW screen, and an updated src/App.tsx with ALL routes
+- Convert class→className, inline style strings→React style objects
+- Wire navigation elements to React Router <Link> or useNavigate()
+- Keep all colors, fonts, layout from original HTML
+- Replace data:image URLs with placeholder divs using background colors
+- The updated App.tsx must import ALL page components (existing + new) and define Routes for all of them
+- Do NOT regenerate package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx, or existing page files
+- If new screens need additional CSS (font imports etc), include an src/index.css with the FULL updated content
+
+Return a JSON object: { "filepath": "file content string", ... }
+Only include files that need to be created or updated.`,
+  ])
+
+  let json = result.response.text().trim()
+  if (json.startsWith('```json')) json = json.slice(7)
+  else if (json.startsWith('```')) json = json.slice(3)
+  if (json.endsWith('```')) json = json.slice(0, -3)
+  json = json.trim()
+
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(json)
+  } catch {
+    const braceStart = json.indexOf('{')
+    const braceEnd = json.lastIndexOf('}')
+    if (braceStart !== -1 && braceEnd > braceStart) {
+      parsed = JSON.parse(json.slice(braceStart, braceEnd + 1))
+    } else {
+      throw new Error('Failed to parse incremental build JSON')
+    }
+  }
+
+  const files: Record<string, string> = {}
+  for (const [key, value] of Object.entries(parsed)) {
+    files[key] = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+  }
+  return files
+}
+
+/**
+ * Simple hash of a string for build cache comparison.
+ */
+/**
+ * Fix build errors by sending error output + problematic files to Gemini.
+ * Returns a map of fixed files.
+ */
+export async function fixBuildErrors(
+  errorOutput: string,
+  projectFiles: Record<string, string>,
+): Promise<Record<string, string>> {
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-2.5-flash',
+    generationConfig: { responseMimeType: 'application/json' },
+  })
+
+  const fileList = Object.entries(projectFiles)
+    .map(([path, content]) => `=== ${path} ===\n${content.slice(0, 3000)}`)
+    .join('\n\n')
+
+  const result = await model.generateContent([
+    `A React + Vite + TypeScript project has build/compile errors. Fix them.
+
+ERROR OUTPUT:
+${errorOutput.slice(0, 3000)}
+
+PROJECT FILES:
+${fileList.slice(0, 20000)}
+
+RULES:
+- Analyze the error and identify which file(s) need fixing
+- Return ONLY the files that need changes, with their COMPLETE corrected content
+- Fix TypeScript errors, missing imports, JSX issues, syntax errors
+- Do NOT change the visual design or layout, only fix compilation errors
+- Return a JSON object: { "filepath": "fixed file content", ... }
+- Only include files that actually need changes`,
+  ])
+
+  let json = result.response.text().trim()
+  if (json.startsWith('```json')) json = json.slice(7)
+  else if (json.startsWith('```')) json = json.slice(3)
+  if (json.endsWith('```')) json = json.slice(0, -3)
+  json = json.trim()
+
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(json)
+  } catch {
+    const braceStart = json.indexOf('{')
+    const braceEnd = json.lastIndexOf('}')
+    if (braceStart !== -1 && braceEnd > braceStart) {
+      parsed = JSON.parse(json.slice(braceStart, braceEnd + 1))
+    } else {
+      throw new Error('Failed to parse fix response')
+    }
+  }
+
+  const files: Record<string, string> = {}
+  for (const [key, value] of Object.entries(parsed)) {
+    files[key] = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+  }
+  return files
+}
+
+export function hashString(str: string): string {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i)
+    hash = ((hash << 5) - hash) + ch
+    hash |= 0
+  }
+  return hash.toString(36)
+}
+
+export { slugify }
+
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
 function deriveScreenName(prompt: string): string {

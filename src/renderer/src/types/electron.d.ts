@@ -11,14 +11,28 @@ interface ElectronDBAPI {
   getDbPath: () => Promise<string>
 }
 
+interface ElectronProjectAPI {
+  scaffold: (projectId: string, files: Record<string, string>) => Promise<string>
+  writeFile: (projectId: string, filePath: string, content: string) => Promise<boolean>
+  readFile: (projectId: string, filePath: string) => Promise<string | null>
+  install: (projectId: string) => Promise<{ success: boolean; error?: string }>
+  startDev: (projectId: string, port: number) => Promise<{ success: boolean; url?: string; error?: string }>
+  stopDev: () => Promise<boolean>
+  getStatus: () => Promise<{ running: boolean; projectId: string | null }>
+}
+
 interface ElectronAPI {
   openLiveWindow: (html?: string) => Promise<void>
+  openLiveWindowUrl: (url: string) => Promise<void>
   closeLiveWindow: () => Promise<void>
   updateLiveWindow: (html: string) => Promise<void>
   setLiveWindowAlwaysOnTop: (value: boolean) => Promise<void>
   setLiveWindowSize: (width: number, height: number) => Promise<void>
   openExternal: (url: string) => Promise<void>
   onLiveWindowClosed: (callback: () => void) => () => void
+  onLiveEditRequest: (callback: (prompt: string, currentUrl: string) => void) => () => void
+  sendLiveEditResult: (result: { success: boolean; message: string }) => Promise<void>
+  project: ElectronProjectAPI
   db: ElectronDBAPI
 }
 

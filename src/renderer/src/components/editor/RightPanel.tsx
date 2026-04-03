@@ -108,7 +108,7 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate }: 
 }) {
   const [editingGuideKey, setEditingGuideKey] = useState<keyof DesignGuide | null>(null)
   const [editValue, setEditValue] = useState('')
-  const [showGuide, setShowGuide] = useState(false)
+  const [showGuide, setShowGuide] = useState(true)
 
   const isPlaceholder = designSystem.name === 'Generating...'
 

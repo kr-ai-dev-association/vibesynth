@@ -7,6 +7,10 @@ interface PromptBarProps {
   onSubmit: (prompt: string) => void
   selectedScreen?: string
   onRemoveScreen?: () => void
+  editMode?: boolean
+  selectedElement?: { tagName: string; textPreview: string }
+  onExitEditMode?: () => void
+  onClearElement?: () => void
 }
 
 export function PromptBar({
@@ -16,6 +20,10 @@ export function PromptBar({
   onSubmit,
   selectedScreen,
   onRemoveScreen,
+  editMode,
+  selectedElement,
+  onExitEditMode,
+  onClearElement,
 }: PromptBarProps) {
   const [prompt, setPrompt] = useState('')
   const [model, setModel] = useState('3.0 Flash')
@@ -37,16 +45,38 @@ export function PromptBar({
 
   return (
     <div className="rounded-2xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 shadow-sm">
-      {/* Selected screen tag */}
-      {selectedScreen && (
-        <div className="px-4 pt-3">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-sm rounded-full bg-neutral-100 dark:bg-neutral-700">
-            <span className="w-4 h-4 rounded-full bg-amber-400" />
-            {selectedScreen}
-            <button onClick={onRemoveScreen} className="ml-1 hover:text-neutral-600">
-              <XIcon className="w-3.5 h-3.5" />
-            </button>
-          </span>
+      {/* Selected screen tag + edit mode + element info */}
+      {(selectedScreen || editMode) && (
+        <div className="px-4 pt-3 flex flex-wrap items-center gap-2">
+          {selectedScreen && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-sm rounded-full bg-neutral-100 dark:bg-neutral-700">
+              <span className="w-4 h-4 rounded-full bg-amber-400" />
+              {selectedScreen}
+              <button onClick={onRemoveScreen} className="ml-1 hover:text-neutral-600">
+                <XIcon className="w-3.5 h-3.5" />
+              </button>
+            </span>
+          )}
+          {editMode && (
+            <span className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+              <EditPenIcon className="w-3 h-3" />
+              Edit Mode
+              <button onClick={onExitEditMode} className="ml-0.5 hover:text-blue-900 dark:hover:text-blue-100">
+                <XIcon className="w-3 h-3" />
+              </button>
+            </span>
+          )}
+          {editMode && selectedElement && (
+            <span className="inline-flex items-center gap-1.5 px-2 py-1 text-xs rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 max-w-xs truncate">
+              &lt;{selectedElement.tagName}&gt;
+              {selectedElement.textPreview && (
+                <span className="text-violet-500 dark:text-violet-400 truncate">"{selectedElement.textPreview.slice(0, 30)}"</span>
+              )}
+              <button onClick={onClearElement} className="ml-0.5 shrink-0 hover:text-violet-900 dark:hover:text-violet-100">
+                <XIcon className="w-3 h-3" />
+              </button>
+            </span>
+          )}
         </div>
       )}
 
@@ -198,4 +228,7 @@ function ArrowUpIcon({ className }: { className?: string }) {
 }
 function XIcon({ className }: { className?: string }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+}
+function EditPenIcon({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
 }

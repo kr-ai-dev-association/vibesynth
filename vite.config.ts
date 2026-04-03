@@ -14,6 +14,9 @@ export default defineConfig({
     electron([
       {
         entry: path.resolve(__dirname, 'electron/main.ts'),
+        onstart(args) {
+          if (!process.env.VIBESYNTH_NO_ELECTRON) args.startup()
+        },
         vite: {
           build: {
             outDir: path.resolve(__dirname, 'dist-electron'),
@@ -25,6 +28,17 @@ export default defineConfig({
       },
       {
         entry: path.resolve(__dirname, 'electron/preload.ts'),
+        onstart(args) {
+          args.reload()
+        },
+        vite: {
+          build: {
+            outDir: path.resolve(__dirname, 'dist-electron'),
+          },
+        },
+      },
+      {
+        entry: path.resolve(__dirname, 'electron/preload-live.ts'),
         onstart(args) {
           args.reload()
         },

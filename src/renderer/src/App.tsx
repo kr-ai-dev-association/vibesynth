@@ -16,10 +16,22 @@ export interface Project {
   deviceType: 'app' | 'web' | 'tablet'
 }
 
+export interface HeatmapZone {
+  cssPath: string
+  tagName: string
+  label: string
+  intensity: number
+  reason: string
+  rect: { x: number; y: number; w: number; h: number }
+}
+
 export interface Screen {
   id: string
   name: string
   html: string
+  heatmap?: HeatmapZone[]
+  /** True while AI is still generating this screen's HTML */
+  generating?: boolean
 }
 
 export interface DesignGuide {

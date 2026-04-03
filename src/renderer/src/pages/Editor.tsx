@@ -1,11 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import type { Project, Screen, DesignSystem } from '../App'
+import type { Project, Screen, DesignSystem, HeatmapZone } from '../App'
 import { PromptBar } from '../components/common/PromptBar'
 import { AppearanceToggle } from '../components/common/AppearanceToggle'
 import { AgentLog } from '../components/editor/AgentLog'
 import { ScreenContextToolbar, ScreenContextMenu } from '../components/editor/ScreenContextToolbar'
 import { RightPanel } from '../components/editor/RightPanel'
-import { generateDesign, generateMultiScreen, editDesign, generateDesignSystem } from '../lib/gemini'
+import { generateDesign, generateMultiScreen, editDesign, generateDesignSystem, generateHeatmap, generateFrontendApp, generateIncrementalFrontend, editFrontendFile, fixBuildErrors, hashString } from '../lib/gemini'
 import { DEFAULT_DESIGN_GUIDE } from '../lib/default-design-guide'
 import { designGuideDB } from '../lib/design-guide-db'
 
@@ -49,7 +49,25 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   const [isGenerating, setIsGenerating] = useState(false)
   const [logEntries, setLogEntries] = useState<AgentLogEntry[]>([])
   const [showCodeModal, setShowCodeModal] = useState(false)
+  const [editMode, setEditMode] = useState(false)
+  const [selectedElement, setSelectedElement] = useState<{
+    cssPath: string
+    tagName: string
+    textPreview: string
+    outerHtml: string
+  } | null>(null)
+  const [heatmapMode, setHeatmapMode] = useState(false)
+  const [heatmapData, setHeatmapData] = useState<Map<string, HeatmapZone[]>>(new Map())
+  const [heatmapLoading, setHeatmapLoading] = useState(false)
+  const [heatmapActionMenu, setHeatmapActionMenu] = useState<{
+    zone: HeatmapZone; screenName: string; x: number; y: number
+  } | null>(null)
+  const [devServerUrl, setDevServerUrl] = useState<string | null>(null)
+  const [buildingFrontend, setBuildingFrontend] = useState(false)
   const canvasRef = useRef<HTMLDivElement>(null)
+  const autoZoomDone = useRef(false)
+  // Incremental build cache: screenId → { htmlHash, generatedFiles }
+  const buildCacheRef = useRef<Map<string, { htmlHash: string; files: Record<string, string> }>>(new Map())
 
   // Canvas pan state
   const [pan, setPan] = useState({ x: 0, y: 0 })
@@ -60,12 +78,17 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
 
   // Auto-generate initial screen if project has no screens (just created from dashboard)
   const initialGenerationDone = useRef(false)
+  const prevScreenCount = useRef(project.screens.length)
   useEffect(() => {
     if (project.screens.length === 0 && !initialGenerationDone.current) {
       initialGenerationDone.current = true
       handlePromptSubmit(project.prompt || project.name)
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    if (project.screens.length !== prevScreenCount.current) {
+      prevScreenCount.current = project.screens.length
+      autoZoomDone.current = false
+    }
+  }, [project.screens.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Listen for live window close events from main process
   useEffect(() => {
@@ -75,16 +98,23 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     return () => cleanup?.()
   }, [])
 
-  // Sync current screen HTML to live window when screens update
+  // Cleanup dev server when leaving the editor
   useEffect(() => {
-    if (!isRunning) return
+    return () => {
+      window.electronAPI?.project.stopDev()
+    }
+  }, [])
+
+  // Sync current screen HTML to live window when screens update (only for single-screen data URL mode)
+  useEffect(() => {
+    if (!isRunning || devServerUrl) return
     const screen = selectedScreen
       ? project.screens.find((s) => s.name === selectedScreen)
       : project.screens[0]
     if (screen) {
       window.electronAPI?.updateLiveWindow(screen.html)
     }
-  }, [project.screens, selectedScreen, isRunning])
+  }, [project.screens, selectedScreen, isRunning, devServerUrl])
 
   const addLog = (message: string, type: AgentLogEntry['type'] = 'info') => {
     const entry: AgentLogEntry = {
@@ -113,7 +143,18 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     const logId = addLog(`Generating design: "${prompt}"...`, 'generating')
     let imgLogId: string | null = null
 
+    // Pre-create placeholder screen with generating=true
+    const placeholderId = crypto.randomUUID()
+    const screenName = prompt.split(/\s+/).slice(0, 4).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+    const placeholder: Screen = { id: placeholderId, name: screenName, html: '', generating: true }
+    onProjectUpdate({
+      ...project,
+      screens: [...project.screens, placeholder],
+      updatedAt: new Date().toLocaleDateString(),
+    })
+
     try {
+      const existingRefHtml = project.screens.length > 0 ? project.screens[0].html : undefined
       const results = await generateDesign(prompt, deviceType, activeGuide, {
         onImageGenStart: () => {
           imgLogId = addLog('Generating images with Nano Banana...', 'generating')
@@ -127,27 +168,25 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         onDesignGenComplete: () => {
           updateLog(logId, 'Design layout generated, assembling...', 'generating')
         },
-      })
-      const newScreens: Screen[] = results.map((r) => ({
-        id: crypto.randomUUID(),
-        name: r.screenName,
-        html: r.html,
-      }))
+      }, existingRefHtml)
 
-      updateLog(logId, `Generated screen: ${newScreens[0].name}`, 'success')
+      const r = results[0]
+      const finishedScreen: Screen = { id: placeholderId, name: r.screenName, html: r.html }
+      const updatedScreens = [...project.screens, finishedScreen]
 
-      if (!project.designSystem && newScreens[0]) {
+      updateLog(logId, `Generated screen: ${r.screenName}`, 'success')
+
+      if (!project.designSystem) {
         const dsLogId = addLog('Extracting design system & guide...', 'generating')
         try {
-          const ds = await generateDesignSystem(newScreens[0].html, activeGuide)
+          const ds = await generateDesignSystem(r.html, activeGuide)
           updateLog(dsLogId, `Design system "${ds.name}" with guide extracted`, 'success')
-          // Save guide to DB for future prompt-based matching
           if (ds.guide) {
             designGuideDB.saveFromGeneration(project.name, prompt, ds.guide)
           }
           onProjectUpdate({
             ...project,
-            screens: [...project.screens, ...newScreens],
+            screens: updatedScreens,
             designSystem: ds,
             updatedAt: new Date().toLocaleDateString(),
           })
@@ -155,20 +194,26 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           updateLog(dsLogId, 'Could not extract design system', 'error')
           onProjectUpdate({
             ...project,
-            screens: [...project.screens, ...newScreens],
+            screens: updatedScreens,
             updatedAt: new Date().toLocaleDateString(),
           })
         }
       } else {
         onProjectUpdate({
           ...project,
-          screens: [...project.screens, ...newScreens],
+          screens: updatedScreens,
           updatedAt: new Date().toLocaleDateString(),
         })
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       updateLog(logId, `Generation failed: ${message}`, 'error')
+      // Remove placeholder on failure
+      onProjectUpdate({
+        ...project,
+        screens: project.screens.filter(s => s.id !== placeholderId),
+        updatedAt: new Date().toLocaleDateString(),
+      })
     } finally {
       setIsGenerating(false)
     }
@@ -182,8 +227,26 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     const logId = addLog(`Generating ${screenNames.length} screens: ${screenNames.join(', ')}...`, 'generating')
     let imgLogId: string | null = null
 
+    // Pre-create placeholder screens with generating=true so they appear on canvas immediately
+    const placeholderIds = screenNames.map(() => crypto.randomUUID())
+    const placeholderScreens: Screen[] = screenNames.map((name, i) => ({
+      id: placeholderIds[i],
+      name,
+      html: '',
+      generating: true,
+    }))
+    onProjectUpdate({
+      ...project,
+      screens: [...project.screens, ...placeholderScreens],
+      updatedAt: new Date().toLocaleDateString(),
+    })
+
+    // We need a mutable ref to track the latest project state since onProjectUpdate is async
+    let latestScreens = [...project.screens, ...placeholderScreens]
+    let firstScreenHtml = ''
+
     try {
-      const results = await generateMultiScreen(appDescription, screenNames, deviceType, activeGuide, {
+      await generateMultiScreen(appDescription, screenNames, deviceType, activeGuide, {
         onImageGenStart: () => {
           imgLogId = addLog('Generating images with Nano Banana...', 'generating')
         },
@@ -194,54 +257,55 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           updateLog(logId, `Generating ${screenNames.length} screens...`, 'generating')
         },
         onDesignGenComplete: () => {
-          updateLog(logId, `All ${screenNames.length} screens generated`, 'generating')
+          updateLog(logId, `All ${screenNames.length} screens generated`, 'success')
         },
-        onScreenComplete: (i, total, name) => {
+        onScreenComplete: (i, total, name, html) => {
           addLog(`Screen ${i}/${total} done: ${name}`, 'success')
+          if (i === 1) firstScreenHtml = html
+
+          // Replace the placeholder with the real screen (generating → false)
+          latestScreens = latestScreens.map(s =>
+            s.id === placeholderIds[i - 1]
+              ? { ...s, html, generating: false }
+              : s
+          )
+          onProjectUpdate({
+            ...project,
+            screens: latestScreens,
+            updatedAt: new Date().toLocaleDateString(),
+          })
         },
       })
 
-      const newScreens: Screen[] = results.map((r) => ({
-        id: crypto.randomUUID(),
-        name: r.screenName,
-        html: r.html,
-      }))
-
-      updateLog(logId, `Generated ${newScreens.length} screens`, 'success')
-
       // Extract design system from first screen
-      if (!project.designSystem && newScreens[0]) {
+      if (!project.designSystem && firstScreenHtml) {
         const dsLogId = addLog('Extracting design system & guide...', 'generating')
         try {
-          const ds = await generateDesignSystem(newScreens[0].html, activeGuide)
+          const ds = await generateDesignSystem(firstScreenHtml, activeGuide)
           updateLog(dsLogId, `Design system "${ds.name}" with guide extracted`, 'success')
           if (ds.guide) {
             designGuideDB.saveFromGeneration(project.name, appDescription, ds.guide)
           }
           onProjectUpdate({
             ...project,
-            screens: [...project.screens, ...newScreens],
+            screens: latestScreens,
             designSystem: ds,
             updatedAt: new Date().toLocaleDateString(),
           })
         } catch {
           updateLog(dsLogId, 'Could not extract design system', 'error')
-          onProjectUpdate({
-            ...project,
-            screens: [...project.screens, ...newScreens],
-            updatedAt: new Date().toLocaleDateString(),
-          })
         }
-      } else {
-        onProjectUpdate({
-          ...project,
-          screens: [...project.screens, ...newScreens],
-          updatedAt: new Date().toLocaleDateString(),
-        })
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       updateLog(logId, `Multi-screen generation failed: ${message}`, 'error')
+      // Remove any remaining placeholder screens on failure
+      latestScreens = latestScreens.filter(s => !s.generating)
+      onProjectUpdate({
+        ...project,
+        screens: latestScreens,
+        updatedAt: new Date().toLocaleDateString(),
+      })
     } finally {
       setIsGenerating(false)
     }
@@ -340,14 +404,137 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     return globalKeywords.some(kw => p.includes(kw))
   }
 
+  const handleElementEdit = async (prompt: string) => {
+    if (isGenerating || !selectedScreen || !selectedElement) return
+    const screen = project.screens.find((s) => s.name === selectedScreen)
+    if (!screen) return
+
+    setIsGenerating(true)
+    setAgentLogOpen(true)
+    const logId = addLog(`Editing element <${selectedElement.tagName}> in "${screen.name}": "${prompt}"...`, 'generating')
+
+    try {
+      const { editDesignElement } = await import('../lib/gemini')
+      const newHtml = await editDesignElement(screen.html, selectedElement.cssPath, selectedElement.outerHtml, prompt)
+      updateLog(logId, `Updated element in ${screen.name}`, 'success')
+
+      const updatedScreens = project.screens.map((s) =>
+        s.id === screen.id ? { ...s, html: newHtml } : s
+      )
+      onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
+      setSelectedElement(null)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      updateLog(logId, `Element edit failed: ${message}`, 'error')
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  const handleToggleHeatmap = async () => {
+    if (heatmapMode) {
+      setHeatmapMode(false)
+      setHeatmapActionMenu(null)
+      addLog('Exited heatmap mode', 'info')
+      return
+    }
+
+    if (!selectedScreen) {
+      addLog('Select a screen first to generate heatmap', 'info')
+      return
+    }
+
+    const screen = project.screens.find((s) => s.name === selectedScreen)
+    if (!screen) return
+
+    if (heatmapData.has(screen.id)) {
+      setHeatmapMode(true)
+      addLog(`Showing cached heatmap for "${screen.name}"`, 'info')
+      return
+    }
+
+    setHeatmapLoading(true)
+    setAgentLogOpen(true)
+    const logId = addLog(`Generating predictive heatmap for "${screen.name}"...`, 'generating')
+
+    try {
+      const zones = await generateHeatmap(screen.html)
+      updateLog(logId, `Heatmap generated: ${zones.length} attention zones identified`, 'success')
+
+      const resolvedZones: HeatmapZone[] = zones.map((z) => ({
+        ...z,
+        rect: { x: 0, y: 0, w: 0, h: 0 },
+      }))
+
+      setHeatmapData((prev) => new Map(prev).set(screen.id, resolvedZones))
+      setHeatmapMode(true)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      updateLog(logId, `Heatmap generation failed: ${message}`, 'error')
+    } finally {
+      setHeatmapLoading(false)
+    }
+  }
+
+  const handleHeatmapAction = async (action: string, zone: HeatmapZone, screenName: string) => {
+    setHeatmapActionMenu(null)
+    const screen = project.screens.find((s) => s.name === screenName)
+    if (!screen || isGenerating) return
+
+    setIsGenerating(true)
+    setAgentLogOpen(true)
+
+    const actionPrompts: Record<string, string> = {
+      'hover-effect': `Add a smooth CSS hover effect to this element: scale up slightly (1.02-1.05), add a subtle shadow transition, and cursor:pointer. Use CSS transition: all 0.2s ease. Do NOT change the element's content or layout.`,
+      'click-animation': `Add a CSS click/active animation to this element: a ripple effect or a brief scale-down (0.97) on :active, with a smooth transition back. Add cursor:pointer. Do NOT change the element's content or layout.`,
+      'focus-state': `Add an accessible CSS :focus-visible state to this element: a 2px ring/outline with proper offset, using the design's accent color. Add tabindex="0" if needed. Do NOT change the element's content or layout.`,
+      'make-prominent': `Make this UI element more visually prominent and attention-grabbing. Increase its size slightly, use bolder colors, add more contrast against the background, and ensure it stands out in the visual hierarchy. Keep the same content.`,
+      'improve-hierarchy': `Improve the visual hierarchy of this element to make it more scannable and user-friendly. Adjust font weight, size, color contrast, and spacing to better guide the user's eye. Keep the same content.`,
+      'micro-animation': `Add a subtle, professional CSS micro-animation to this element. Choose one: gentle fade-in on load, a soft pulse/glow, or a slight float effect using @keyframes. Keep it tasteful and non-distracting. Do NOT change content.`,
+    }
+
+    const prompt = actionPrompts[action]
+    if (!prompt) return
+
+    const logId = addLog(`Applying "${action}" to <${zone.tagName}> "${zone.label}" in "${screenName}"...`, 'generating')
+
+    try {
+      const { editDesignElement } = await import('../lib/gemini')
+
+      const doc = new DOMParser().parseFromString(screen.html, 'text/html')
+      const el = doc.querySelector(zone.cssPath)
+      const outerHtml = el?.outerHTML || `<${zone.tagName}></${zone.tagName}>`
+
+      const newHtml = await editDesignElement(screen.html, zone.cssPath, outerHtml, prompt)
+      updateLog(logId, `Applied "${action}" to <${zone.tagName}> in ${screenName}`, 'success')
+
+      const updatedScreens = project.screens.map((s) =>
+        s.id === screen.id ? { ...s, html: newHtml } : s
+      )
+      onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
+
+      setHeatmapData((prev) => {
+        const next = new Map(prev)
+        next.delete(screen.id)
+        return next
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      updateLog(logId, `Action "${action}" failed: ${message}`, 'error')
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
   const handlePromptSubmit = (prompt: string) => {
-    if (selectedScreen && project.screens.some((s) => s.name === selectedScreen)) {
+    if (editMode && selectedElement && selectedScreen) {
+      handleElementEdit(prompt)
+    } else if (selectedScreen && project.screens.some((s) => s.name === selectedScreen)) {
       handleEditScreen(prompt)
     } else {
-      // Detect multi-screen prompt (e.g., "screens: Home, Profile, Settings")
       const multiMatch = prompt.match(/screens?\s*:\s*(.+)/i)
       if (multiMatch) {
-        const screenNames = multiMatch[1].split(/[,;]+/).map(s => s.trim()).filter(Boolean)
+        const screenNames = multiMatch[1].split(/;/).map(s => s.trim()).filter(Boolean)
         const appDescription = prompt.replace(multiMatch[0], '').trim()
         if (screenNames.length > 1 && appDescription) {
           handleGenerateMultiScreen(appDescription, screenNames)
@@ -464,9 +651,12 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         addLog('Desktop web version — coming soon', 'info')
         break
       case 'heatmap':
-        addLog('Predictive heatmap — coming soon', 'info')
+        handleToggleHeatmap()
         break
       case 'edit':
+        setEditMode(!editMode)
+        setSelectedElement(null)
+        addLog(editMode ? 'Exited edit mode' : 'Entered edit mode — click an element in the screen to select it', 'info')
         break
       case 'annotate':
         addLog('Annotate — coming soon', 'info')
@@ -496,10 +686,26 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !e.repeat && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      if (e.code === 'Space' && !e.repeat) {
         e.preventDefault()
         spaceHeld.current = true
         setSpaceDown(true)
+      }
+      if (e.code === 'KeyE' && selectedScreen && !e.repeat) {
+        setEditMode((v) => !v)
+        setSelectedElement(null)
+      }
+      if (e.code === 'KeyH' && selectedScreen && !e.repeat) {
+        handleToggleHeatmap()
+      }
+      if (e.code === 'Escape' && editMode) {
+        setEditMode(false)
+        setSelectedElement(null)
+      }
+      if (e.code === 'Escape' && heatmapMode) {
+        setHeatmapMode(false)
+        setHeatmapActionMenu(null)
       }
     }
     const up = (e: KeyboardEvent) => {
@@ -514,7 +720,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       window.removeEventListener('keydown', down)
       window.removeEventListener('keyup', up)
     }
-  }, [])
+  }, [selectedScreen, editMode, heatmapMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const isMiddle = e.button === 1
@@ -545,22 +751,226 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     }
   }, [])
 
-  const handleRun = () => {
-    if (!isRunning) {
+  useEffect(() => {
+    const cleanup = window.electronAPI?.onLiveEditRequest(async (prompt: string) => {
+      if (!devServerUrl || !project.id) return
+      addLog(`Live edit request: "${prompt}"`, 'generating')
+
+      try {
+        const targetFile = 'src/App.tsx'
+        const currentContent = await window.electronAPI?.project.readFile(project.id, targetFile)
+        if (!currentContent) {
+          window.electronAPI?.sendLiveEditResult({ success: false, message: 'Could not read file' })
+          return
+        }
+
+        const fileList = project.screens.map(s => `src/pages/${s.name.replace(/\s+/g, '')}.tsx`)
+        fileList.push('src/App.tsx', 'src/main.tsx', 'src/index.css')
+
+        const updated = await editFrontendFile(targetFile, currentContent, prompt, {
+          files: fileList,
+          screens: project.screens.map(s => s.name),
+        })
+
+        await window.electronAPI?.project.writeFile(project.id, targetFile, updated)
+        addLog('Live edit applied — Vite HMR will refresh automatically', 'success')
+        window.electronAPI?.sendLiveEditResult({ success: true, message: 'Changes applied' })
+      } catch (err: any) {
+        addLog(`Live edit failed: ${err.message}`, 'error')
+        window.electronAPI?.sendLiveEditResult({ success: false, message: err.message })
+      }
+    })
+    return () => cleanup?.()
+  }, [devServerUrl, project.id, project.screens]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleRun = async () => {
+    if (isRunning) {
+      window.electronAPI?.closeLiveWindow()
+      await window.electronAPI?.project.stopDev()
+      setIsRunning(false)
+      setDevServerUrl(null)
+      return
+    }
+
+    if (project.screens.length >= 2) {
+      setBuildingFrontend(true)
+      setAgentLogOpen(true)
+
+      try {
+        const cache = buildCacheRef.current
+        const allScreensData = project.screens.map(s => ({ name: s.name, html: s.html }))
+
+        // Diff: find new/changed screens vs cache
+        const newOrChanged: { name: string; html: string }[] = []
+        const unchanged: string[] = []
+        for (const s of project.screens) {
+          const h = hashString(s.html)
+          const cached = cache.get(s.id)
+          if (cached && cached.htmlHash === h) {
+            unchanged.push(s.name)
+          } else {
+            newOrChanged.push({ name: s.name, html: s.html })
+          }
+        }
+
+        const isIncremental = unchanged.length > 0 && newOrChanged.length > 0
+        let files: Record<string, string>
+
+        if (isIncremental) {
+          // ─── Incremental build: only generate new/changed screens ───
+          const logId = addLog(
+            `Incremental build: ${newOrChanged.length} new/changed, ${unchanged.length} cached`,
+            'generating',
+          )
+          addLog(`Cached: ${unchanged.join(', ')}`, 'info')
+          addLog(`Building: ${newOrChanged.map(s => s.name).join(', ')}`, 'info')
+
+          // Collect existing generated files from cache
+          const existingFiles: Record<string, string> = {}
+          for (const s of project.screens) {
+            const cached = cache.get(s.id)
+            if (cached) {
+              for (const [path, content] of Object.entries(cached.files)) {
+                existingFiles[path] = content
+              }
+            }
+          }
+
+          files = await generateIncrementalFrontend(
+            newOrChanged,
+            allScreensData,
+            existingFiles,
+            deviceType,
+          )
+          updateLog(logId, `Generated ${Object.keys(files).length} files (incremental), writing to disk...`, 'generating')
+
+          // Merge: keep cached files, overwrite with new
+          const mergedFiles = { ...existingFiles, ...files }
+          files = mergedFiles
+        } else {
+          // ─── Full build: all screens are new ───
+          const logId = addLog('Generating React frontend from screens...', 'generating')
+          files = await generateFrontendApp(allScreensData, deviceType)
+          updateLog(logId, `Generated ${Object.keys(files).length} files, writing to disk...`, 'generating')
+        }
+
+        await window.electronAPI?.project.scaffold(project.id, files)
+
+        // Update build cache
+        for (const s of project.screens) {
+          const component = s.name.replace(/[^a-zA-Z0-9]/g, '')
+          const screenFiles: Record<string, string> = {}
+          for (const [path, content] of Object.entries(files)) {
+            if (path.includes(component) || path === 'src/App.tsx' || path === 'src/index.css') {
+              screenFiles[path] = content
+            }
+          }
+          cache.set(s.id, { htmlHash: hashString(s.html), files: screenFiles })
+        }
+
+        // Skip npm install if dev server is already running (incremental)
+        if (!devServerUrl) {
+          addLog('Installing dependencies (npm install)...', 'generating')
+          const installResult = await window.electronAPI?.project.install(project.id)
+          if (!installResult?.success) {
+            addLog(`npm install failed: ${installResult?.error}`, 'error')
+            setBuildingFrontend(false)
+            return
+          }
+
+          const MAX_FIX_ATTEMPTS = 2
+          let lastError = ''
+          let devStarted = false
+
+          for (let attempt = 0; attempt <= MAX_FIX_ATTEMPTS; attempt++) {
+            addLog(attempt === 0 ? 'Starting Vite dev server...' : `Retry ${attempt}/${MAX_FIX_ATTEMPTS}: restarting dev server...`, 'generating')
+            const port = 5173 + Math.floor(Math.random() * 100)
+            const devResult = await window.electronAPI?.project.startDev(project.id, port)
+
+            if (devResult?.success) {
+              const url = devResult.url || `http://localhost:${port}`
+              setDevServerUrl(url)
+              addLog(`Dev server running at ${url}`, 'success')
+              await window.electronAPI?.openLiveWindowUrl(url)
+              devStarted = true
+              break
+            }
+
+            lastError = devResult?.error || 'Unknown error'
+            addLog(`Build error: ${lastError.slice(0, 200)}`, 'error')
+
+            if (attempt < MAX_FIX_ATTEMPTS) {
+              addLog('Auto-fixing build errors with AI...', 'generating')
+              try {
+                // Read problematic files from project
+                const filesToFix: Record<string, string> = {}
+                for (const [path, content] of Object.entries(files)) {
+                  if (path.endsWith('.tsx') || path.endsWith('.ts') || path.endsWith('.css') || path === 'index.html') {
+                    filesToFix[path] = content
+                  }
+                }
+
+                const fixedFiles = await fixBuildErrors(lastError, filesToFix)
+                const fixedCount = Object.keys(fixedFiles).length
+                addLog(`AI fixed ${fixedCount} file(s): ${Object.keys(fixedFiles).join(', ')}`, 'info')
+
+                // Write fixed files
+                for (const [path, content] of Object.entries(fixedFiles)) {
+                  await window.electronAPI?.project.writeFile(project.id, path, content)
+                  files[path] = content
+                }
+
+                // Stop previous failed dev server before retry
+                await window.electronAPI?.project.stopDev()
+              } catch (fixErr: any) {
+                addLog(`Auto-fix failed: ${fixErr.message}`, 'error')
+              }
+            }
+          }
+
+          if (!devStarted) {
+            addLog(`Dev server failed after ${MAX_FIX_ATTEMPTS} fix attempts: ${lastError}`, 'error')
+            setBuildingFrontend(false)
+            return
+          }
+        } else {
+          // Dev server already running — just write files, HMR picks up changes
+          addLog('Files updated — Vite HMR will refresh automatically', 'success')
+        }
+        setIsRunning(true)
+      } catch (err: any) {
+        addLog(`Frontend generation failed: ${err.message}`, 'error')
+      } finally {
+        setBuildingFrontend(false)
+      }
+    } else {
       const screen = selectedScreen
         ? project.screens.find((s) => s.name === selectedScreen)
         : project.screens[0]
       window.electronAPI?.openLiveWindow(screen?.html)
       setIsRunning(true)
-    } else {
-      window.electronAPI?.closeLiveWindow()
-      setIsRunning(false)
     }
   }
 
   const screenWidth = deviceType === 'app' ? 390 : deviceType === 'tablet' ? 1024 : 1280
-  const screenHeight = deviceType === 'app' ? 844 : deviceType === 'tablet' ? 1366 : 800
+  const screenMinHeight = deviceType === 'app' ? 844 : deviceType === 'tablet' ? 1366 : 900
   const selectedScreenObj = selectedScreen ? project.screens.find((s) => s.name === selectedScreen) : null
+
+  const handleScreenHeightMeasured = useCallback((_screenId: string, measuredHeight: number) => {
+    if (autoZoomDone.current) return
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const canvasHeight = canvas.clientHeight
+    const cardScale = 0.5
+    const padding = 80
+    const displayHeight = measuredHeight * cardScale + padding
+    if (displayHeight > canvasHeight) {
+      const fitZoom = Math.floor((canvasHeight / displayHeight) * 100)
+      const clampedZoom = Math.max(10, Math.min(100, fitZoom))
+      setZoom(clampedZoom)
+      autoZoomDone.current = true
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="h-screen flex flex-col bg-neutral-50 dark:bg-neutral-900">
@@ -607,19 +1017,40 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
               Generating...
             </span>
           )}
+          {editMode && !isGenerating && (
+            <span className="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400">
+              <PenSmallIcon />
+              Edit Mode
+            </span>
+          )}
+          {heatmapMode && !isGenerating && (
+            <span className="flex items-center gap-1.5 text-xs text-orange-600 dark:text-orange-400">
+              <HeatmapSmallIcon />
+              Heatmap
+            </span>
+          )}
+          {heatmapLoading && (
+            <span className="flex items-center gap-1.5 text-xs text-orange-600 dark:text-orange-400">
+              <LoadingSpinner />
+              Analyzing...
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2 no-drag">
           {/* Run/Stop button */}
           <button
             onClick={handleRun}
+            disabled={buildingFrontend}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg ${
-              isRunning
-                ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-200'
-                : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 hover:bg-emerald-200'
+              buildingFrontend
+                ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 cursor-wait'
+                : isRunning
+                  ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-200'
+                  : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 hover:bg-emerald-200'
             }`}
           >
-            {isRunning ? '■ Stop' : '▶ Run'}
+            {buildingFrontend ? '⏳ Building...' : isRunning ? '■ Stop' : '▶ Run'}
           </button>
 
           <AppearanceToggle />
@@ -655,7 +1086,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         {/* Canvas */}
         <div
           ref={canvasRef}
-          className={`flex-1 overflow-hidden ${isPanning ? 'cursor-grabbing' : spaceDown ? 'cursor-grab' : 'cursor-default'}`}
+          className={`flex-1 overflow-hidden relative ${isPanning ? 'cursor-grabbing' : spaceDown ? 'cursor-grab' : 'cursor-default'}`}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
@@ -678,20 +1109,33 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                       key={screen.id}
                       screen={screen}
                       width={screenWidth}
-                      height={screenHeight}
+                      minHeight={screenMinHeight}
                       isSelected={selectedScreen === screen.name}
+                      editMode={editMode}
+                      heatmapMode={heatmapMode}
+                      heatmapZones={heatmapData.get(screen.id)}
                       deviceType={deviceType}
-                      onClick={() => setSelectedScreen(selectedScreen === screen.name ? null : screen.name)}
+                      onClick={() => {
+                        if (!editMode && !heatmapMode) setSelectedScreen(selectedScreen === screen.name ? null : screen.name)
+                      }}
                       onContextMenu={(e) => {
                         e.preventDefault()
                         setSelectedScreen(screen.name)
                         setContextMenu({ x: e.clientX, y: e.clientY })
                       }}
+                      onElementSelect={(info) => {
+                        setSelectedElement(info)
+                        addLog(`Selected <${info.tagName}>: "${info.textPreview.slice(0, 40)}..."`, 'info')
+                      }}
+                      onHeatmapZoneClick={(zone, x, y) => {
+                        setHeatmapActionMenu({ zone, screenName: screen.name, x, y })
+                      }}
+                      onHeightMeasured={handleScreenHeightMeasured}
                     />
                   ))
                 ) : (
                   /* Empty state placeholder */
-                  <div className="flex flex-col items-center justify-center" style={{ width: screenWidth * 0.5, height: screenHeight * 0.5 }}>
+                  <div className="flex flex-col items-center justify-center" style={{ width: screenWidth * 0.5, height: screenMinHeight * 0.5 }}>
                     <div className="rounded-xl border-2 border-dashed border-neutral-300 dark:border-neutral-600 flex flex-col items-center justify-center w-full h-full bg-neutral-100 dark:bg-neutral-800">
                       {isGenerating ? (
                         <div className="flex flex-col items-center gap-3">
@@ -708,6 +1152,16 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                 )}
               </div>
             </div>
+          </div>
+          {/* Zoom indicator */}
+          <div className="absolute bottom-3 left-3 z-20">
+            <button
+              data-testid="zoom-indicator"
+              onClick={() => { setZoom(100); autoZoomDone.current = false }}
+              className="px-2.5 py-1 text-xs font-medium rounded-lg bg-white/90 dark:bg-neutral-800/90 border border-neutral-200 dark:border-neutral-700 shadow-sm backdrop-blur-sm"
+            >
+              {Math.round(zoom)}%
+            </button>
           </div>
         </div>
 
@@ -730,15 +1184,21 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         <div className="max-w-2xl mx-auto px-4 py-2">
           <PromptBar
             placeholder={
-              selectedScreen
+              editMode && selectedElement
+                ? `Describe changes for <${selectedElement.tagName}>: "${selectedElement.textPreview.slice(0, 30)}"...`
+                : selectedScreen
                 ? `Describe changes for "${selectedScreen}"...`
                 : 'What would you like to change or create?'
             }
             deviceType={deviceType}
-            onDeviceTypeChange={setDeviceType}
+            onDeviceTypeChange={(dt) => { setDeviceType(dt); autoZoomDone.current = false }}
             onSubmit={handlePromptSubmit}
             selectedScreen={selectedScreen || undefined}
-            onRemoveScreen={() => setSelectedScreen(null)}
+            onRemoveScreen={() => { setSelectedScreen(null); setEditMode(false); setSelectedElement(null) }}
+            editMode={editMode}
+            selectedElement={selectedElement ? { tagName: selectedElement.tagName, textPreview: selectedElement.textPreview } : undefined}
+            onExitEditMode={() => { setEditMode(false); setSelectedElement(null) }}
+            onClearElement={() => setSelectedElement(null)}
           />
         </div>
 
@@ -750,15 +1210,6 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         />
       </div>
 
-      {/* Zoom indicator */}
-      <div className="absolute bottom-20 right-14 flex items-center gap-2">
-        <button
-          onClick={() => setZoom(100)}
-          className="px-2 py-1 text-xs font-medium rounded bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 shadow-sm"
-        >
-          {Math.round(zoom)}%
-        </button>
-      </div>
 
       {/* Right-click context menu */}
       {contextMenu && selectedScreen && (
@@ -767,6 +1218,17 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           y={contextMenu.y}
           onAction={handleScreenAction}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* Heatmap action menu */}
+      {heatmapActionMenu && (
+        <HeatmapActionMenu
+          x={heatmapActionMenu.x}
+          y={heatmapActionMenu.y}
+          zone={heatmapActionMenu.zone}
+          onAction={(action) => handleHeatmapAction(action, heatmapActionMenu.zone, heatmapActionMenu.screenName)}
+          onClose={() => setHeatmapActionMenu(null)}
         />
       )}
 
@@ -786,36 +1248,399 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   )
 }
 
-// Screen card with iframe rendering
+// Script injected into iframe to enable element selection in edit mode
+const EDIT_MODE_SCRIPT = `
+<script>
+(function() {
+  let hoverEl = null;
+  const overlay = document.createElement('div');
+  overlay.id = '__vs_overlay';
+  overlay.style.cssText = 'position:fixed;pointer-events:none;border:2px solid #3b82f6;background:rgba(59,130,246,0.08);z-index:99999;transition:all 0.1s;display:none;border-radius:4px;';
+  document.body.appendChild(overlay);
+
+  const label = document.createElement('div');
+  label.id = '__vs_label';
+  label.style.cssText = 'position:fixed;z-index:100000;background:#3b82f6;color:#fff;font:500 11px/1.3 system-ui;padding:2px 6px;border-radius:4px;pointer-events:none;display:none;white-space:nowrap;';
+  document.body.appendChild(label);
+
+  function cssPath(el) {
+    const parts = [];
+    while (el && el.nodeType === 1 && el.tagName !== 'HTML') {
+      let sel = el.tagName.toLowerCase();
+      if (el.id) { sel += '#' + el.id; parts.unshift(sel); break; }
+      const sib = el.parentNode ? Array.from(el.parentNode.children) : [];
+      const same = sib.filter(s => s.tagName === el.tagName);
+      if (same.length > 1) sel += ':nth-of-type(' + (same.indexOf(el) + 1) + ')';
+      parts.unshift(sel);
+      el = el.parentNode;
+    }
+    return parts.join(' > ');
+  }
+
+  document.addEventListener('mousemove', function(e) {
+    const t = e.target;
+    if (t === overlay || t === label || t.id === '__vs_overlay' || t.id === '__vs_label') return;
+    if (t === hoverEl) return;
+    hoverEl = t;
+    const r = t.getBoundingClientRect();
+    overlay.style.display = 'block';
+    overlay.style.left = r.left + 'px';
+    overlay.style.top = r.top + 'px';
+    overlay.style.width = r.width + 'px';
+    overlay.style.height = r.height + 'px';
+    const tag = t.tagName.toLowerCase();
+    const cls = t.className && typeof t.className === 'string' ? '.' + t.className.trim().split(/\\s+/).slice(0,2).join('.') : '';
+    label.textContent = tag + cls;
+    label.style.display = 'block';
+    label.style.left = r.left + 'px';
+    label.style.top = Math.max(0, r.top - 22) + 'px';
+  });
+
+  document.addEventListener('mouseleave', function() {
+    overlay.style.display = 'none';
+    label.style.display = 'none';
+    hoverEl = null;
+  });
+
+  document.addEventListener('click', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const t = e.target;
+    if (t.id === '__vs_overlay' || t.id === '__vs_label') return;
+    const path = cssPath(t);
+    const text = (t.textContent || '').trim().slice(0, 80);
+    const outer = t.outerHTML.slice(0, 500);
+    window.parent.postMessage({
+      type: '__vs_element_selected',
+      cssPath: path,
+      tagName: t.tagName.toLowerCase(),
+      textPreview: text,
+      outerHtml: outer,
+    }, '*');
+  }, true);
+})();
+</script>`;
+
+// Script injected into iframe to resolve CSS paths to bounding rects
+const HEATMAP_PROBE_SCRIPT = `
+<script>
+(function() {
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === '__vs_heatmap_probe') {
+      var results = [];
+      var paths = e.data.cssPaths || [];
+      for (var i = 0; i < paths.length; i++) {
+        try {
+          var el = document.querySelector(paths[i]);
+          if (el) {
+            var r = el.getBoundingClientRect();
+            results.push({ cssPath: paths[i], x: r.left, y: r.top, w: r.width, h: r.height });
+          } else {
+            results.push({ cssPath: paths[i], x: 0, y: 0, w: 0, h: 0 });
+          }
+        } catch(ex) {
+          results.push({ cssPath: paths[i], x: 0, y: 0, w: 0, h: 0 });
+        }
+      }
+      window.parent.postMessage({ type: '__vs_heatmap_rects', rects: results }, '*');
+    }
+  });
+})();
+</script>`;
+
+function intensityColor(intensity: number): string {
+  if (intensity >= 0.8) return 'rgba(239,68,68,0.45)'
+  if (intensity >= 0.6) return 'rgba(249,115,22,0.40)'
+  if (intensity >= 0.4) return 'rgba(234,179,8,0.35)'
+  if (intensity >= 0.2) return 'rgba(34,197,94,0.30)'
+  return 'rgba(59,130,246,0.25)'
+}
+
+function intensityBorder(intensity: number): string {
+  if (intensity >= 0.8) return 'rgba(239,68,68,0.8)'
+  if (intensity >= 0.6) return 'rgba(249,115,22,0.7)'
+  if (intensity >= 0.4) return 'rgba(234,179,8,0.6)'
+  if (intensity >= 0.2) return 'rgba(34,197,94,0.5)'
+  return 'rgba(59,130,246,0.4)'
+}
+
 function ScreenCard({
-  screen, width, height, isSelected, deviceType, onClick, onContextMenu,
+  screen, width, minHeight, isSelected, deviceType, editMode, heatmapMode, heatmapZones,
+  onClick, onContextMenu, onElementSelect, onHeatmapZoneClick, onHeightMeasured,
 }: {
-  screen: Screen; width: number; height: number; deviceType: 'app' | 'web' | 'tablet'
-  isSelected?: boolean; onClick?: () => void; onContextMenu?: (e: React.MouseEvent) => void
+  screen: Screen; width: number; minHeight: number; deviceType: 'app' | 'web' | 'tablet'
+  isSelected?: boolean; editMode?: boolean; heatmapMode?: boolean; heatmapZones?: HeatmapZone[]
+  onClick?: () => void; onContextMenu?: (e: React.MouseEvent) => void
+  onElementSelect?: (info: { cssPath: string; tagName: string; textPreview: string; outerHtml: string }) => void
+  onHeatmapZoneClick?: (zone: HeatmapZone, x: number, y: number) => void
+  onHeightMeasured?: (screenId: string, height: number) => void
 }) {
+  const isGenerating = screen.generating === true
+  const [revealed, setRevealed] = useState(!isGenerating)
+
+  // When generation completes (generating goes from true to false), trigger reveal animation
+  useEffect(() => {
+    if (!isGenerating && !revealed) {
+      const t = setTimeout(() => setRevealed(true), 50)
+      return () => clearTimeout(t)
+    }
+  }, [isGenerating]) // eslint-disable-line react-hooks/exhaustive-deps
+  const iframeRef = useRef<HTMLIFrameElement>(null)
   const scale = 0.5
+  const isFixedHeight = deviceType === 'app' || deviceType === 'tablet'
+  const initialHeight = isFixedHeight ? minHeight : 4000
+  const [contentHeight, setContentHeight] = useState(initialHeight)
+  const measuredRef = useRef(false)
+
+  useEffect(() => {
+    measuredRef.current = false
+    setContentHeight(isFixedHeight ? minHeight : 4000)
+  }, [screen.html, isFixedHeight, minHeight])
+
+  // Direct DOM measurement via allow-same-origin sandbox + polling
+  useEffect(() => {
+    if (isFixedHeight) { setContentHeight(minHeight); return }
+    const iframe = iframeRef.current
+    if (!iframe) return
+
+    const measure = () => {
+      try {
+        const doc = iframe.contentDocument || iframe.contentWindow?.document
+        if (!doc || !doc.body) return
+        const h = Math.max(
+          doc.documentElement.scrollHeight,
+          doc.body.scrollHeight,
+          doc.body.offsetHeight,
+        )
+        if (h > 100) {
+          const measured = Math.max(h, minHeight)
+          if (Math.abs(measured - contentHeight) > 10 || !measuredRef.current) {
+            setContentHeight(measured)
+            measuredRef.current = true
+            onHeightMeasured?.(screen.id, measured)
+          }
+        }
+      } catch { /* sandbox may block */ }
+    }
+
+    const onLoad = () => setTimeout(measure, 200)
+    iframe.addEventListener('load', onLoad)
+
+    // Polling: measure every 600ms for the first 5s, then stop
+    const intervals: ReturnType<typeof setInterval>[] = []
+    const poll = setInterval(measure, 600)
+    intervals.push(poll)
+    const stop = setTimeout(() => clearInterval(poll), 5000)
+
+    return () => {
+      iframe.removeEventListener('load', onLoad)
+      intervals.forEach(clearInterval)
+      clearTimeout(stop)
+    }
+  }, [screen.html, isFixedHeight, minHeight]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const height = contentHeight
   const displayWidth = width * scale
   const displayHeight = height * scale
 
+  const isEditable = isSelected && editMode
+  const showHeatmap = isSelected && heatmapMode && heatmapZones && heatmapZones.length > 0
+
+  // Inject edit mode script and listen for element selection messages
+  useEffect(() => {
+    if (!isEditable || !onElementSelect) return
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type === '__vs_element_selected') {
+        onElementSelect({
+          cssPath: e.data.cssPath,
+          tagName: e.data.tagName,
+          textPreview: e.data.textPreview,
+          outerHtml: e.data.outerHtml,
+        })
+      }
+    }
+    window.addEventListener('message', handler)
+    return () => window.removeEventListener('message', handler)
+  }, [isEditable, onElementSelect])
+
+  // Resolve heatmap zone rects via iframe postMessage
+  const [resolvedZones, setResolvedZones] = useState<HeatmapZone[]>([])
+
+  useEffect(() => {
+    if (!showHeatmap || !heatmapZones) { setResolvedZones([]); return }
+
+    const hasUnresolved = heatmapZones.some(z => z.rect.w === 0 && z.rect.h === 0)
+    if (!hasUnresolved) { setResolvedZones(heatmapZones); return }
+
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type === '__vs_heatmap_rects') {
+        const rects: { cssPath: string; x: number; y: number; w: number; h: number }[] = e.data.rects
+        const updated = heatmapZones.map(zone => {
+          const match = rects.find(r => r.cssPath === zone.cssPath)
+          return match && match.w > 0 ? { ...zone, rect: match } : zone
+        })
+        setResolvedZones(updated)
+      }
+    }
+    window.addEventListener('message', handler)
+
+    const timer = setTimeout(() => {
+      const iframe = iframeRef.current
+      if (iframe?.contentWindow) {
+        iframe.contentWindow.postMessage({
+          type: '__vs_heatmap_probe',
+          cssPaths: heatmapZones.map(z => z.cssPath),
+        }, '*')
+      }
+    }, 500)
+
+    return () => {
+      window.removeEventListener('message', handler)
+      clearTimeout(timer)
+    }
+  }, [showHeatmap, heatmapZones])
+
+  const HEIGHT_OVERRIDE_CSS = `<style data-vs-height-fix>
+html,body,[data-vs-root]{height:auto!important;max-height:none!important;overflow:visible!important;min-height:0!important;}
+*{max-height:none!important;}
+</style>`
+
+  // Height is now measured directly via allow-same-origin; no injected script needed
+
+  /**
+   * Pre-process HTML for dynamic height: replace fixed viewport heights
+   * with min-height so content can grow naturally beyond the iframe viewport.
+   */
+  function prepareHtmlForDynamicHeight(html: string): string {
+    let h = html
+    // In <style> blocks: height:100vh → min-height:100vh
+    h = h.replace(/(<style[\s\S]*?<\/style>)/gi, (styleBlock) => {
+      return styleBlock
+        .replace(/\bheight\s*:\s*100vh/gi, 'min-height:100vh')
+        .replace(/\bheight\s*:\s*100%/gi, 'min-height:100%')
+        .replace(/\boverflow\s*:\s*hidden/gi, 'overflow:visible')
+    })
+    // In inline styles: style="...height:100vh..." → min-height
+    h = h.replace(/style="([^"]*)"/gi, (_match, inner: string) => {
+      const fixed = inner
+        .replace(/\bheight\s*:\s*100vh/gi, 'min-height:100vh')
+        .replace(/\bheight\s*:\s*100%/gi, 'min-height:100%')
+      return `style="${fixed}"`
+    })
+    return h
+  }
+
+  // Build iframe HTML
+  let iframeHtml = screen.html
+  const injectedScripts: string[] = []
+  if (isEditable) injectedScripts.push(EDIT_MODE_SCRIPT)
+  else if (showHeatmap) injectedScripts.push(HEATMAP_PROBE_SCRIPT)
+
+  // Pre-process HTML for dynamic height (desktop/web only)
+  if (!isFixedHeight) {
+    iframeHtml = prepareHtmlForDynamicHeight(iframeHtml)
+  }
+
+  // Inject CSS override and scripts robustly
+  const cssToInject = !isFixedHeight ? HEIGHT_OVERRIDE_CSS : ''
+  const scriptsToInject = injectedScripts.filter(Boolean).join('\n')
+
+  if (cssToInject) {
+    if (iframeHtml.includes('</head>')) {
+      iframeHtml = iframeHtml.replace('</head>', cssToInject + '</head>')
+    } else if (iframeHtml.includes('<body')) {
+      iframeHtml = iframeHtml.replace(/<body/i, cssToInject + '<body')
+    } else {
+      iframeHtml = cssToInject + iframeHtml
+    }
+  }
+
+  if (scriptsToInject) {
+    if (iframeHtml.includes('</body>')) {
+      iframeHtml = iframeHtml.replace('</body>', scriptsToInject + '</body>')
+    } else {
+      iframeHtml = iframeHtml + scriptsToInject
+    }
+  }
+
+  // Generating placeholder: show animated skeleton
+  if (isGenerating) {
+    return (
+      <div data-screen-card data-screen-dims={`${width}x${minHeight}`} className="flex flex-col cursor-default">
+        <div className="flex items-center gap-1 mb-1 text-xs text-neutral-500">
+          {deviceType === 'app' ? <PhoneSmallIcon /> : deviceType === 'tablet' ? <TabletSmallIcon /> : <MonitorSmallIcon />}
+          <span>{screen.name}</span>
+          <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300 rounded animate-pulse">
+            GENERATING
+          </span>
+        </div>
+        <div
+          className="relative rounded-xl border-2 border-neutral-200 dark:border-neutral-700 overflow-hidden"
+          style={{ width: displayWidth, height: displayHeight }}
+        >
+          <div className="absolute inset-0 bg-gradient-to-br from-neutral-100 via-neutral-50 to-neutral-100 dark:from-neutral-800 dark:via-neutral-900 dark:to-neutral-800 animate-pulse" />
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+            <div className="w-10 h-10 rounded-full border-2 border-violet-400 border-t-transparent animate-spin" />
+            <span className="text-xs font-medium text-neutral-400 dark:text-neutral-500">AI Generating...</span>
+          </div>
+          {/* Shimmer skeleton lines */}
+          <div className="absolute inset-x-6 top-[15%] space-y-3 opacity-30">
+            <div className="h-4 bg-neutral-300 dark:bg-neutral-600 rounded animate-pulse w-3/4" />
+            <div className="h-3 bg-neutral-300 dark:bg-neutral-600 rounded animate-pulse w-full" />
+            <div className="h-3 bg-neutral-300 dark:bg-neutral-600 rounded animate-pulse w-5/6" />
+            <div className="h-8 bg-neutral-300 dark:bg-neutral-600 rounded-lg animate-pulse w-1/2 mt-4" />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div data-screen-card className="flex flex-col cursor-pointer" onClick={onClick} onContextMenu={onContextMenu}>
+    <div
+      data-screen-card
+      data-screen-dims={`${width}x${height}`}
+      className="flex flex-col cursor-pointer"
+      style={{
+        transition: 'opacity 700ms ease-out, transform 700ms ease-out, filter 700ms ease-out',
+        opacity: revealed ? 1 : 0,
+        transform: revealed ? 'scale(1)' : 'scale(0.95)',
+        filter: revealed ? 'blur(0px)' : 'blur(8px)',
+      }}
+      onClick={onClick}
+      onContextMenu={onContextMenu}
+    >
       <div className="flex items-center gap-1 mb-1 text-xs text-neutral-500">
         {deviceType === 'app' ? <PhoneSmallIcon /> : deviceType === 'tablet' ? <TabletSmallIcon /> : <MonitorSmallIcon />}
         <span>{screen.name}</span>
+        {isEditable && (
+          <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 rounded">
+            EDIT
+          </span>
+        )}
+        {showHeatmap && (
+          <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300 rounded">
+            HEATMAP
+          </span>
+        )}
       </div>
       <div
-        className={`rounded-xl border-2 overflow-hidden transition-colors ${
-          isSelected
+        className={`relative rounded-xl border-2 overflow-hidden transition-colors ${
+          showHeatmap
+            ? 'border-orange-500 shadow-lg shadow-orange-500/30 ring-2 ring-orange-500/20'
+            : isEditable
+            ? 'border-blue-500 shadow-lg shadow-blue-500/30 ring-2 ring-blue-500/20'
+            : isSelected
             ? 'border-blue-500 shadow-lg shadow-blue-500/20'
             : 'border-neutral-200 dark:border-neutral-600 hover:border-neutral-400'
         }`}
         style={{ width: displayWidth, height: displayHeight }}
       >
         <iframe
-          srcDoc={screen.html}
+          ref={iframeRef}
+          srcDoc={iframeHtml}
           title={screen.name}
-          sandbox="allow-scripts"
-          className="pointer-events-none"
+          sandbox={isFixedHeight ? 'allow-scripts' : 'allow-scripts allow-same-origin'}
+          className={isEditable ? '' : 'pointer-events-none'}
           style={{
             width: width,
             height: height,
@@ -824,9 +1649,93 @@ function ScreenCard({
             border: 'none',
           }}
         />
+
+        {/* Heatmap overlay */}
+        {showHeatmap && resolvedZones.length > 0 && (
+          <div
+            data-heatmap-overlay
+            className="absolute inset-0 pointer-events-auto"
+            style={{ zIndex: 10 }}
+          >
+            {resolvedZones.filter(z => z.rect.w > 0).map((zone, i) => (
+              <div
+                key={i}
+                data-heatmap-zone
+                className="absolute cursor-pointer transition-all hover:brightness-110"
+                title={`${zone.label} (${Math.round(zone.intensity * 100)}%)\n${zone.reason}`}
+                style={{
+                  left: zone.rect.x * scale,
+                  top: zone.rect.y * scale,
+                  width: zone.rect.w * scale,
+                  height: zone.rect.h * scale,
+                  background: `radial-gradient(ellipse at center, ${intensityColor(zone.intensity)}, transparent 70%)`,
+                  border: `2px solid ${intensityBorder(zone.intensity)}`,
+                  borderRadius: 8,
+                }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onHeatmapZoneClick?.(zone, e.clientX, e.clientY)
+                }}
+              >
+                <span
+                  className="absolute -top-5 left-1 text-[9px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap"
+                  style={{
+                    background: intensityBorder(zone.intensity),
+                    color: '#fff',
+                  }}
+                >
+                  {zone.label} {Math.round(zone.intensity * 100)}%
+                </span>
+              </div>
+            ))}
+
+            {/* Fallback: show zones as evenly distributed grid if rects not resolved */}
+            {resolvedZones.every(z => z.rect.w === 0) && resolvedZones.map((zone, i) => {
+              const cols = 2
+              const row = Math.floor(i / cols)
+              const col = i % cols
+              const zoneW = displayWidth / cols
+              const zoneH = displayHeight / Math.ceil(resolvedZones.length / cols)
+              return (
+                <div
+                  key={`fb-${i}`}
+                  data-heatmap-zone
+                  className="absolute cursor-pointer transition-all hover:brightness-110"
+                  title={`${zone.label} (${Math.round(zone.intensity * 100)}%)\n${zone.reason}`}
+                  style={{
+                    left: col * zoneW + 4,
+                    top: row * zoneH + 4,
+                    width: zoneW - 8,
+                    height: zoneH - 8,
+                    background: `radial-gradient(ellipse at center, ${intensityColor(zone.intensity)}, transparent 70%)`,
+                    border: `2px solid ${intensityBorder(zone.intensity)}`,
+                    borderRadius: 8,
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onHeatmapZoneClick?.(zone, e.clientX, e.clientY)
+                  }}
+                >
+                  <span
+                    className="absolute -top-5 left-1 text-[9px] font-semibold px-1.5 py-0.5 rounded whitespace-nowrap"
+                    style={{ background: intensityBorder(zone.intensity), color: '#fff' }}
+                  >
+                    {zone.label} {Math.round(zone.intensity * 100)}%
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
-      {isSelected && (
+      {isSelected && !isEditable && !showHeatmap && (
         <div className="text-[10px] text-blue-500 mt-1 text-center">{width} x {height}</div>
+      )}
+      {isEditable && (
+        <div className="text-[10px] text-blue-500 mt-1 text-center">Click an element to select it</div>
+      )}
+      {showHeatmap && (
+        <div className="text-[10px] text-orange-500 mt-1 text-center">Click a zone for actions</div>
       )}
     </div>
   )
@@ -929,6 +1838,9 @@ function SettingsIcon({ className }: { className?: string }) {
 function StarIcon() {
   return <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
 }
+function PenSmallIcon() {
+  return <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+}
 function PhoneSmallIcon() {
   return <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="14" height="20" rx="2" /><path d="M12 18h.01" /></svg>
 }
@@ -937,4 +1849,73 @@ function TabletSmallIcon() {
 }
 function MonitorSmallIcon() {
   return <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8M12 17v4" /></svg>
+}
+function HeatmapSmallIcon() {
+  return <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><circle cx="12" cy="12" r="7" opacity="0.5" /><circle cx="12" cy="12" r="10" opacity="0.25" /></svg>
+}
+
+function HeatmapActionMenu({ x, y, zone, onAction, onClose }: {
+  x: number; y: number; zone: HeatmapZone
+  onAction: (action: string) => void; onClose: () => void
+}) {
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  const clampedX = Math.min(x, window.innerWidth - 260)
+  const clampedY = Math.min(y, window.innerHeight - 340)
+
+  return (
+    <div
+      ref={menuRef}
+      className="fixed z-[100] w-60 bg-white dark:bg-neutral-800 rounded-xl shadow-xl border border-neutral-200 dark:border-neutral-700 py-1 text-sm"
+      style={{ left: clampedX, top: clampedY }}
+    >
+      <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-700">
+        <div className="text-xs font-semibold text-orange-600 dark:text-orange-400">{zone.label}</div>
+        <div className="text-[10px] text-neutral-500 mt-0.5">{zone.reason}</div>
+        <div className="text-[10px] text-neutral-400 mt-0.5">Attention: {Math.round(zone.intensity * 100)}%</div>
+      </div>
+
+      <div className="py-1">
+        <div className="px-3 pt-1.5 pb-0.5 text-[10px] font-semibold text-neutral-400 tracking-wider">ADD INTERACTION</div>
+        <button onClick={() => onAction('hover-effect')} className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-700">
+          <span>Hover effect</span>
+          <span className="text-xs text-neutral-400">scale + shadow</span>
+        </button>
+        <button onClick={() => onAction('click-animation')} className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-700">
+          <span>Click animation</span>
+          <span className="text-xs text-neutral-400">ripple / bounce</span>
+        </button>
+        <button onClick={() => onAction('focus-state')} className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-700">
+          <span>Focus state</span>
+          <span className="text-xs text-neutral-400">a11y ring</span>
+        </button>
+      </div>
+
+      <div className="h-px bg-neutral-200 dark:bg-neutral-700" />
+
+      <div className="py-1">
+        <div className="px-3 pt-1.5 pb-0.5 text-[10px] font-semibold text-neutral-400 tracking-wider">AI ENHANCE</div>
+        <button onClick={() => onAction('make-prominent')} className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-700">
+          <span>Make more prominent</span>
+          <span className="text-xs text-neutral-400">size + contrast</span>
+        </button>
+        <button onClick={() => onAction('improve-hierarchy')} className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-700">
+          <span>Improve hierarchy</span>
+          <span className="text-xs text-neutral-400">visual weight</span>
+        </button>
+        <button onClick={() => onAction('micro-animation')} className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-700">
+          <span>Add micro-animation</span>
+          <span className="text-xs text-neutral-400">fade / pulse / float</span>
+        </button>
+      </div>
+    </div>
+  )
 }
