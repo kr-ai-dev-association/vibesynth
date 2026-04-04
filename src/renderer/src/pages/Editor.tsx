@@ -290,6 +290,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       updateLog(logId, t('editor.log.screenGenerated', { name: r.screenName }), 'success')
 
       if (!project.designSystem) {
+        // DS가 없을 때만 AI로 추출 — DS가 이미 선택되어 있으면 건너뜀
         const dsLogId = addLog(t('editor.log.extractingDS'), 'generating')
         try {
           const ds = await generateDesignSystem(r.html, activeGuide)
@@ -389,7 +390,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         },
       }, project.designSystem)
 
-      // Extract design system from first screen
+      // Extract design system from first screen — ONLY if no DS was pre-selected
       if (!project.designSystem && firstScreenHtml) {
         const dsLogId = addLog(t('editor.log.extractingDS'), 'generating')
         try {
