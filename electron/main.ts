@@ -268,6 +268,19 @@ ipcMain.handle('db:get-path', () => {
 
 // ─── Project Filesystem + Dev Server IPC ──────────────────────
 
+ipcMain.handle('project:clean', async (_event, projectId: string) => {
+  // Stop dev server if running for this project
+  if (devServerProjectId === projectId) {
+    killDevServer()
+  }
+  const projectDir = getProjectDir(projectId)
+  if (fs.existsSync(projectDir)) {
+    fs.rmSync(projectDir, { recursive: true, force: true })
+    console.log(`[VibeSynth] Cleaned project directory: ${projectDir}`)
+  }
+  return { success: true }
+})
+
 ipcMain.handle('project:scaffold', (_event, projectId: string, files: Record<string, string>) => {
   const projectDir = getProjectDir(projectId)
   ensureDir(projectDir)
@@ -552,6 +565,22 @@ ipcMain.handle('live-edit:open', () => {
   button.submit{background:#7c3aed;color:white;border:none;border-radius:10px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:background 0.15s}
   button.submit:hover{background:#6d28d9}
   button.submit:disabled{opacity:0.4;cursor:not-allowed}
+  .palette{display:none;background:#1a1a2e;border-radius:8px;padding:10px;margin-bottom:4px}
+  .palette.visible{display:block}
+  .palette h4{font-size:10px;font-weight:600;color:#a5b4fc;margin-bottom:6px}
+  .color-row{display:flex;gap:3px;margin-bottom:6px;flex-wrap:wrap}
+  .color-swatch{width:24px;height:24px;border-radius:6px;cursor:pointer;border:2px solid transparent;transition:all 0.15s}
+  .color-swatch:hover{border-color:white;transform:scale(1.15)}
+  .font-list{display:flex;flex-wrap:wrap;gap:4px}
+  .font-item{padding:3px 8px;border-radius:99px;cursor:pointer;font-size:10px;color:#94a3b8;transition:all 0.15s;background:#0f0f17;border:1px solid #2d2d44;white-space:nowrap}
+  .font-item:hover{background:#2d2d44;color:white;border-color:#7c3aed}
+  .attach-bar{display:flex;align-items:center;gap:6px;padding:4px 0}
+  .attach-btn{background:none;border:1px solid #2d2d44;border-radius:8px;padding:4px 10px;color:#94a3b8;font-size:11px;cursor:pointer;display:flex;align-items:center;gap:4px}
+  .attach-btn:hover{border-color:#7c3aed;color:#e2e8f0}
+  .attach-chips{display:flex;flex-wrap:wrap;gap:4px}
+  .attach-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:99px;background:#2d2d44;color:#94a3b8;font-size:10px}
+  .attach-chip button{background:none;border:none;color:#64748b;cursor:pointer;font-size:10px}
+  .attach-chip button:hover{color:#f87171}
   .feedback{font-size:12px;line-height:1.6;color:#94a3b8;white-space:pre-wrap;max-height:200px;overflow-y:auto;padding:10px;background:#1a1a2e;border-radius:8px;display:none}
   .feedback.visible{display:block}
   .feedback.success{border-left:3px solid #34d399}
@@ -561,6 +590,7 @@ ipcMain.handle('live-edit:open', () => {
   .feedback pre{background:#000;padding:8px;border-radius:6px;font-size:10px;overflow-x:auto;margin:4px 0}
   .feedback code{background:#ffffff10;padding:1px 4px;border-radius:3px;font-size:10px}
   .status{font-size:11px;color:#64748b;text-align:center;padding:2px}
+  .section-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;margin-bottom:4px}
   @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 </style></head><body>
 <div class="header">
@@ -571,11 +601,38 @@ ipcMain.handle('live-edit:open', () => {
   </div>
 </div>
 <div class="content">
+  <!-- Designer Palette (colors + fonts) -->
+  <div class="palette" id="le-palette">
+    <h4>🎨 Color Palette</h4>
+    <div id="le-colors"></div>
+    <h4 style="margin-top:8px">🔤 Fonts</h4>
+    <div class="font-list" id="le-fonts"></div>
+  </div>
+
+  <!-- File Attachment Bar (common to both modes) -->
+  <div class="attach-bar" id="le-attach-bar">
+    <button class="attach-btn" id="le-attach-btn">+ Attach</button>
+    <input type="file" id="le-file-input" accept="image/*,.txt,.csv,.md" multiple style="display:none">
+    <div class="attach-chips" id="le-attach-chips"></div>
+  </div>
+
   <div class="input-area">
     <textarea id="le-input" rows="4" placeholder="Describe changes to apply..."></textarea>
     <button class="submit" id="le-submit">Apply</button>
   </div>
+
+  <!-- Selected DOM element preview -->
+  <div id="le-dom-preview" style="display:none;background:#1a1a2e;border:1px solid #2d2d44;border-radius:8px;padding:8px;margin-bottom:4px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+      <span class="section-label">Selected Element</span>
+      <button id="le-dom-clear" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:10px">✕ Clear</button>
+    </div>
+    <pre id="le-dom-html" style="background:#000;padding:6px;border-radius:4px;font-size:9px;color:#94a3b8;max-height:80px;overflow:auto;white-space:pre-wrap"></pre>
+  </div>
+
   <div class="feedback" id="le-feedback"></div>
+
+  <!-- Developer mode: project info -->
   <div id="le-project-info" style="display:none;font-size:11px;color:#64748b;background:#1a1a2e;border-radius:8px;padding:10px;max-height:250px;overflow-y:auto">
     <div style="font-weight:600;color:#60a5fa;margin-bottom:6px">📁 Workspace</div>
     <div id="le-project-path" style="font-family:monospace;font-size:10px;color:#94a3b8;margin-bottom:8px;word-break:break-all"></div>
@@ -592,22 +649,146 @@ ipcMain.handle('live-edit:open', () => {
   const status = document.getElementById('le-status');
   const designerBtn = document.getElementById('le-mode-designer');
   const developerBtn = document.getElementById('le-mode-developer');
-
+  const palette = document.getElementById('le-palette');
+  const colorsDiv = document.getElementById('le-colors');
+  const fontsDiv = document.getElementById('le-fonts');
   const projectInfo = document.getElementById('le-project-info');
   const projectPath = document.getElementById('le-project-path');
   const projectFiles = document.getElementById('le-project-files');
+  const attachBtn = document.getElementById('le-attach-btn');
+  const fileInput = document.getElementById('le-file-input');
+  const attachChips = document.getElementById('le-attach-chips');
+  const domPreview = document.getElementById('le-dom-preview');
+  const domHtml = document.getElementById('le-dom-html');
+  const domClear = document.getElementById('le-dom-clear');
 
+  let attachedFiles = [];
+
+  // ── Palette: load DS colors + fonts ──
+  const POPULAR_FONTS = [
+    'Inter','Roboto','Poppins','Montserrat','Lato','DM Sans','Space Grotesk',
+    'Outfit','Playfair Display','Merriweather','Lora','Bebas Neue','Oswald',
+    'JetBrains Mono','Fira Code','Nunito','Raleway','Quicksand','Sora','Urbanist'
+  ];
+
+  async function loadPalette() {
+    try {
+      const ds = await window.electronAPI?.liveEdit?.getDesignSystem?.();
+      colorsDiv.innerHTML = '';
+      if (ds && ds.colors) {
+        const roles = ['primary','secondary','tertiary','neutral'];
+        roles.forEach(role => {
+          const c = ds.colors[role];
+          if (!c) return;
+          const label = document.createElement('div');
+          label.className = 'section-label';
+          label.textContent = role.charAt(0).toUpperCase() + role.slice(1);
+          colorsDiv.appendChild(label);
+          const row = document.createElement('div');
+          row.className = 'color-row';
+          // Base color + tones
+          const allColors = [c.base, ...(c.tones || [])];
+          allColors.forEach(hex => {
+            if (!hex) return;
+            const swatch = document.createElement('div');
+            swatch.className = 'color-swatch';
+            swatch.style.background = hex;
+            swatch.title = hex;
+            swatch.addEventListener('click', () => insertAtCursor(hex + ' '));
+            row.appendChild(swatch);
+          });
+          colorsDiv.appendChild(row);
+        });
+      } else {
+        colorsDiv.innerHTML = '<div style="color:#64748b;font-size:10px">No design system loaded</div>';
+      }
+      // Fonts: DS fonts first, then popular fonts
+      fontsDiv.innerHTML = '';
+      const dsfonts = [];
+      if (ds && ds.typography) {
+        ['headline','body','label'].forEach(level => {
+          if (ds.typography[level]?.family) dsfonts.push(ds.typography[level].family);
+        });
+      }
+      const allFonts = [...new Set([...dsfonts, ...POPULAR_FONTS])];
+      allFonts.forEach(font => {
+        const item = document.createElement('div');
+        item.className = 'font-item';
+        item.textContent = font;
+        if (dsfonts.includes(font)) item.style.color = '#a5b4fc';
+        item.addEventListener('click', () => insertAtCursor(font + ' '));
+        fontsDiv.appendChild(item);
+      });
+    } catch(e) { console.error('[LiveEdit] loadPalette error:', e); }
+  }
+
+  function insertAtCursor(text) {
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    input.value = input.value.substring(0, start) + text + input.value.substring(end);
+    input.selectionStart = input.selectionEnd = start + text.length;
+    input.focus();
+  }
+
+  // ── File Attachment ──
+  attachBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    for (const file of fileInput.files) {
+      const ext = file.name.split('.').pop().toLowerCase();
+      if (['txt','csv','md'].includes(ext)) {
+        const text = await file.text();
+        attachedFiles.push({ name: file.name, type: 'text', content: text });
+      } else if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        const b64 = await new Promise(r => { reader.onload = () => r(reader.result); reader.readAsDataURL(file); });
+        attachedFiles.push({ name: file.name, type: 'image', content: b64 });
+      }
+    }
+    renderChips();
+    fileInput.value = '';
+  });
+
+  function renderChips() {
+    attachChips.innerHTML = attachedFiles.map((f, i) =>
+      '<span class="attach-chip">' + f.name + '<button data-idx="' + i + '">✕</button></span>'
+    ).join('');
+    attachChips.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        attachedFiles.splice(parseInt(btn.dataset.idx), 1);
+        renderChips();
+      });
+    });
+  }
+
+  // ── DOM element preview (received from Live App) ──
+  domClear.addEventListener('click', () => {
+    domPreview.style.display = 'none';
+    domHtml.textContent = '';
+  });
+
+  // Listen for selected DOM element from Live App
+  window.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'vibesynth-dom-selected') {
+      domHtml.textContent = e.data.html;
+      domPreview.style.display = 'block';
+    }
+  });
+
+  // ── Mode switching ──
   function setMode(mode) {
     currentMode = mode;
     localStorage.setItem('vibesynth-live-feedback-mode', mode);
     designerBtn.className = 'mode-btn designer' + (mode === 'designer' ? ' active' : '');
     developerBtn.className = 'mode-btn developer' + (mode === 'developer' ? ' active' : '');
-    // Show/hide project info based on mode
-    if (mode === 'developer' && projectInfo) {
+    // Designer: show palette, hide project info
+    if (mode === 'designer') {
+      palette.classList.add('visible');
+      projectInfo.style.display = 'none';
+      loadPalette();
+    } else {
+      palette.classList.remove('visible');
       projectInfo.style.display = 'block';
       loadProjectInfo();
-    } else if (projectInfo) {
-      projectInfo.style.display = 'none';
     }
   }
 
@@ -629,16 +810,32 @@ ipcMain.handle('live-edit:open', () => {
   developerBtn.addEventListener('click', () => setMode('developer'));
 
   async function handleSubmit() {
-    const prompt = input.value.trim();
-    if (!prompt) return;
+    let prompt = input.value.trim();
+    if (!prompt && attachedFiles.length === 0) return;
+
+    // Append text file contents to prompt
+    attachedFiles.filter(f => f.type === 'text').forEach(f => {
+      prompt += '\\n\\n[File: ' + f.name + ']\\n' + f.content;
+    });
+
+    // Append DOM element context if present
+    const domCtx = domHtml.textContent;
+    if (domCtx) {
+      prompt += '\\n\\n[Selected Element]\\n' + domCtx;
+    }
+
     submit.disabled = true;
     status.textContent = 'Applying changes...';
     feedback.className = 'feedback generating visible';
     feedback.innerHTML = '<div style="display:flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="animation:spin 1s linear infinite"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" opacity="0.2"/><path d="M12 2a10 10 0 019.95 9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg> Processing...</div>';
     console.log('[LiveEdit] Sending edit request:', prompt);
     try {
-      // Send edit request to main process → forwarded to Editor
       await window.electronAPI?.liveEdit?.sendRequest?.(prompt);
+      // Clear attachments + DOM preview after send
+      attachedFiles = [];
+      renderChips();
+      domPreview.style.display = 'none';
+      domHtml.textContent = '';
     } catch (err) {
       console.error('[LiveEdit] Send failed:', err);
       feedback.textContent = 'Failed to send request';
@@ -662,6 +859,13 @@ ipcMain.handle('live-edit:open', () => {
   liveEditWindow.loadFile(tmpFile)
 
   liveEditWindow.on('closed', () => { liveEditWindow = null })
+})
+
+// Get current design system for Live Edit palette
+ipcMain.handle('live-edit:get-design-system', () => {
+  if (!devServerProjectId) return null
+  const project = db.getProject(devServerProjectId)
+  return project?.designSystem || null
 })
 
 // Get project workspace info for Developer mode display
@@ -703,7 +907,41 @@ ipcMain.handle('live-edit:update-feedback', (_event, message: string, type: 'suc
         }
         if (st) { st.textContent = '${type === 'success' ? '✓ Applied' : type === 'error' ? '✗ Failed' : '⏳ Processing...'}'; }
         if (sub) { sub.disabled = ${type === 'generating'}; }
-        if ('${type}' === 'success' && sub) { document.getElementById('le-input').value = ''; }
+        if ('${type}' === 'success' && sub) {
+          document.getElementById('le-input').value = '';
+          // Refresh project info (file list may have changed after LLM edit)
+          if (mode === 'developer' && typeof loadProjectInfo === 'function') loadProjectInfo();
+          // Refresh palette (DS may have changed)
+          if (mode === 'designer' && typeof loadPalette === 'function') loadPalette();
+        }
+      })();
+    `)
+  }
+})
+
+// Forward DOM selection from Live App to Live Edit popup
+ipcMain.handle('live-edit:dom-selected', (_event, html: string) => {
+  if (liveEditWindow) {
+    const escapedHtml = JSON.stringify(html)
+    liveEditWindow.webContents.executeJavaScript(`
+      (function() {
+        const preview = document.getElementById('le-dom-preview');
+        const pre = document.getElementById('le-dom-html');
+        const input = document.getElementById('le-input');
+        if (preview && pre) {
+          pre.textContent = ${escapedHtml};
+          preview.style.display = 'block';
+        }
+        // Insert into textarea at cursor position
+        if (input) {
+          const tag = ${escapedHtml};
+          const snippet = '\\n[Element]: ' + tag + '\\n';
+          const start = input.selectionStart;
+          const end = input.selectionEnd;
+          input.value = input.value.substring(0, start) + snippet + input.value.substring(end);
+          input.selectionStart = input.selectionEnd = start + snippet.length;
+          input.focus();
+        }
       })();
     `)
   }

@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld('__vsLiveEdit', {
     ipcRenderer.on('live-edit-result', handler)
     return () => ipcRenderer.removeListener('live-edit-result', handler)
   },
+  sendDomSelection: (html: string) => {
+    return ipcRenderer.invoke('live-edit:dom-selected', html)
+  },
 })
 
 function injectPromptBar() {
@@ -272,30 +275,102 @@ function injectPromptBar() {
   })
 }
 
-// Prompt bar removed from Live App — editing is done via separate Live Edit popup window
-// MD panel for developer feedback is still injected for result display
-if (document.readyState === 'complete' || document.readyState === 'interactive') {
-  // Only inject MD panel listener, not the full prompt bar
-  setTimeout(() => {
-    // Inject MD panel only (no prompt bar)
-    const mdPanel = document.getElementById('__vs-md-panel')
-    if (!mdPanel) {
-      const panel = document.createElement('div')
-      panel.id = '__vs-md-panel'
-      panel.innerHTML = `<div class="md-header"><span>💻 Developer Summary</span><button class="md-close" onclick="this.parentElement.parentElement.classList.remove('visible')">✕</button></div><div class="md-body" id="__vs-md-body"></div>`
-      document.body.appendChild(panel)
+// ─── DOM Element Picker ───────────────────────────────────────
+// Alt+Click on any element sends its outerHTML to Live Edit popup
+
+function injectDomPicker() {
+  if (document.getElementById('__vs-dom-picker-style')) return
+
+  const style = document.createElement('style')
+  style.id = '__vs-dom-picker-style'
+  style.textContent = `
+    .__vs-picker-highlight {
+      outline: 2px solid #7c3aed !important;
+      outline-offset: 2px !important;
+      cursor: crosshair !important;
     }
-  }, 500)
-} else {
-  window.addEventListener('DOMContentLoaded', () => {
-    setTimeout(() => {
-      const mdPanel = document.getElementById('__vs-md-panel')
-      if (!mdPanel) {
-        const panel = document.createElement('div')
-        panel.id = '__vs-md-panel'
-        panel.innerHTML = `<div class="md-header"><span>💻 Developer Summary</span><button class="md-close" onclick="this.parentElement.parentElement.classList.remove('visible')">✕</button></div><div class="md-body" id="__vs-md-body"></div>`
-        document.body.appendChild(panel)
-      }
-    }, 500)
+    #__vs-picker-badge {
+      position: fixed;
+      bottom: 8px;
+      right: 8px;
+      z-index: 999999;
+      background: rgba(124,58,237,0.9);
+      color: white;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 99px;
+      font-family: -apple-system, sans-serif;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    #__vs-picker-badge.active { opacity: 1; }
+  `
+  document.head.appendChild(style)
+
+  const badge = document.createElement('div')
+  badge.id = '__vs-picker-badge'
+  badge.textContent = '⊹ Alt+Click to select element'
+  document.body.appendChild(badge)
+
+  let highlighted: HTMLElement | null = null
+  let pickerMode = false
+
+  document.addEventListener('keydown', (e) => {
+    if (e.altKey && !pickerMode) {
+      pickerMode = true
+      badge.classList.add('active')
+    }
   })
+  document.addEventListener('keyup', (e) => {
+    if (!e.altKey && pickerMode) {
+      pickerMode = false
+      badge.classList.remove('active')
+      if (highlighted) {
+        highlighted.classList.remove('__vs-picker-highlight')
+        highlighted = null
+      }
+    }
+  })
+
+  document.addEventListener('mouseover', (e) => {
+    if (!pickerMode) return
+    const el = e.target as HTMLElement
+    if (el.id === '__vs-picker-badge' || el.closest('#__vs-md-panel')) return
+    if (highlighted) highlighted.classList.remove('__vs-picker-highlight')
+    highlighted = el
+    el.classList.add('__vs-picker-highlight')
+  })
+
+  document.addEventListener('click', (e) => {
+    if (!pickerMode || !e.altKey) return
+    e.preventDefault()
+    e.stopPropagation()
+    const el = e.target as HTMLElement
+    if (el.id === '__vs-picker-badge') return
+    // Get concise outerHTML (truncate if too long)
+    let html = el.outerHTML
+    if (html.length > 2000) html = html.substring(0, 2000) + '...'
+    const tag = el.tagName.toLowerCase()
+    const cls = el.className ? '.' + el.className.split(/\s+/).filter(c => !c.startsWith('__vs')).join('.') : ''
+    console.log('[VibeSynth] DOM selected:', tag + cls)
+    // Send to Live Edit popup via IPC (use ipcRenderer directly — contextBridge APIs aren't accessible from preload context)
+    ipcRenderer.invoke('live-edit:dom-selected', html)
+    // Visual feedback
+    el.style.outline = '2px solid #34d399'
+    el.style.outlineOffset = '2px'
+    setTimeout(() => { el.style.outline = ''; el.style.outlineOffset = '' }, 1500)
+  }, true)
+}
+
+// Inject DOM picker when page is ready
+function injectTools() {
+  injectDomPicker()
+}
+
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  setTimeout(injectTools, 500)
+} else {
+  window.addEventListener('DOMContentLoaded', () => setTimeout(injectTools, 500))
 }

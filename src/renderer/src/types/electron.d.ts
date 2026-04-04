@@ -12,6 +12,7 @@ interface ElectronDBAPI {
 }
 
 interface ElectronProjectAPI {
+  clean: (projectId: string) => Promise<{ success: boolean }>
   scaffold: (projectId: string, files: Record<string, string>) => Promise<string>
   writeFile: (projectId: string, filePath: string, content: string) => Promise<boolean>
   readFile: (projectId: string, filePath: string) => Promise<string | null>
@@ -54,6 +55,8 @@ interface ElectronAPI {
   liveEdit: {
     open: () => Promise<void>
     sendRequest: (prompt: string) => Promise<void>
+    getProjectInfo: () => Promise<{ projectId: string; path: string; files: string[] } | null>
+    getDesignSystem: () => Promise<any | null>
     updateFeedback: (message: string, type: 'success' | 'error' | 'generating', devMarkdown?: string) => Promise<void>
     close: () => Promise<void>
   }

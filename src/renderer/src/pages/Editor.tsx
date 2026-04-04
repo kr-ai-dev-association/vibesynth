@@ -53,6 +53,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   const { t, locale, setLocale } = useI18n()
   const [zoom, setZoom] = useState(100)
   const [isRunning, setIsRunning] = useState(false)
+  const [showRunMenu, setShowRunMenu] = useState(false)
   const [showHamburger, setShowHamburger] = useState(false)
   const [deviceType, setDeviceType] = useState<'app' | 'web' | 'tablet'>(project.deviceType)
   const [colorScheme, setColorScheme] = useState<'light' | 'dark' | 'auto'>(project.designSystem?.colorScheme || 'auto')
@@ -1334,6 +1335,84 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     }
   }
 
+  const handleRebuild = async () => {
+    setShowRunMenu(false)
+    // Stop running app if active
+    if (isRunning) {
+      window.electronAPI?.closeLiveWindow()
+      window.electronAPI?.liveEdit.close()
+      window.electronAPI?.feedback.close()
+      await window.electronAPI?.project.stopDev()
+      setIsRunning(false)
+      setDevServerUrl(null)
+    }
+
+    // Clean workspace (delete all built files)
+    addLog('🧹 Clean rebuild — removing existing build files...', 'info')
+    setAgentLogOpen(true)
+    await window.electronAPI?.project.clean(project.id)
+    buildCacheRef.current.clear()
+    addLog('Workspace cleaned. Starting fresh build...', 'info')
+
+    // Now run as if no build exists (full build path)
+    setBuildingFrontend(true)
+    try {
+      const allScreensData = project.screens
+        .filter(s => !s.generating && s.html && s.html.length > 100)
+        .map(s => ({ name: s.name, html: s.html }))
+
+      if (allScreensData.length === 0) {
+        addLog('No completed screens to build.', 'error')
+        setBuildingFrontend(false)
+        return
+      }
+
+      const logId = addLog(t('editor.log.generatingFrontend'), 'generating')
+      const files = await generateFrontendApp(allScreensData, deviceType, project.prompt, project.designSystem || undefined)
+      updateLog(logId, t('editor.log.generatedFiles', { count: Object.keys(files).length }), 'generating')
+
+      await window.electronAPI?.project.scaffold(project.id, files)
+
+      // Update build cache
+      for (const s of project.screens) {
+        const component = s.name.replace(/[^a-zA-Z0-9]/g, '')
+        const screenFiles: Record<string, string> = {}
+        for (const [p, content] of Object.entries(files)) {
+          if (p.includes(component) || p === 'src/App.tsx' || p === 'src/index.css') {
+            screenFiles[p] = content
+          }
+        }
+        buildCacheRef.current.set(s.id, { htmlHash: hashString(s.html), files: screenFiles })
+      }
+
+      addLog(t('editor.log.installingDeps'), 'generating')
+      const installResult = await window.electronAPI?.project.install(project.id)
+      if (!installResult?.success) {
+        addLog(t('editor.log.npmFailed', { error: installResult?.error || '' }), 'error')
+        setBuildingFrontend(false)
+        return
+      }
+
+      addLog(t('editor.log.startingDevServer'), 'generating')
+      const port = 5173 + Math.floor(Math.random() * 100)
+      const devResult = await window.electronAPI?.project.startDev(project.id, port)
+      if (devResult?.success) {
+        const url = devResult.url || `http://localhost:${port}`
+        setDevServerUrl(url)
+        addLog(t('editor.log.devServerRunning', { url }), 'success')
+        await window.electronAPI?.openLiveWindowUrl(url, deviceType)
+        setIsRunning(true)
+        window.electronAPI?.liveEdit.open()
+      } else {
+        addLog(t('editor.log.buildError', { error: devResult?.error || 'Unknown' }), 'error')
+      }
+    } catch (err: any) {
+      addLog(t('editor.log.frontendFailed', { error: err.message }), 'error')
+    } finally {
+      setBuildingFrontend(false)
+    }
+  }
+
   const screenWidth = deviceType === 'app' ? 390 : deviceType === 'tablet' ? 1024 : 1280
   const screenMinHeight = deviceType === 'app' ? 844 : deviceType === 'tablet' ? 1366 : 900
   const selectedScreenObj = selectedScreen ? project.screens.find((s) => s.name === selectedScreen) : null
@@ -1456,25 +1535,62 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         </div>
 
         <div className="flex items-center gap-2 no-drag">
-          {/* Run/Stop button */}
-          <button
-            onClick={handleRun}
-            disabled={buildingFrontend}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg ${
-              buildingFrontend
-                ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 cursor-wait'
-                : isRunning
-                  ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-200'
-                  : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 hover:bg-emerald-200'
-            }`}
-          >
-            {buildingFrontend ? (
-              <span className="flex items-center gap-1.5">
-                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-20" /><path d="M12 2a10 10 0 019.95 9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" /></svg>
-                Building...
-              </span>
-            ) : isRunning ? t('editor.stop') : t('editor.run')}
-          </button>
+          {/* Run/Stop + Rebuild dropdown */}
+          <div className="relative">
+            <div className="flex">
+              <button
+                onClick={handleRun}
+                disabled={buildingFrontend}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-l-lg border-r ${
+                  buildingFrontend
+                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 cursor-wait border-amber-200 dark:border-amber-700'
+                    : isRunning
+                      ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-200 border-red-200 dark:border-red-700'
+                      : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 hover:bg-emerald-200 border-emerald-200 dark:border-emerald-700'
+                }`}
+              >
+                {buildingFrontend ? (
+                  <span className="flex items-center gap-1.5">
+                    <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-20" /><path d="M12 2a10 10 0 019.95 9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" /></svg>
+                    Building...
+                  </span>
+                ) : isRunning ? t('editor.stop') : t('editor.run')}
+              </button>
+              <button
+                onClick={() => setShowRunMenu(v => !v)}
+                disabled={buildingFrontend}
+                className={`flex items-center px-1.5 py-1.5 text-sm rounded-r-lg ${
+                  buildingFrontend
+                    ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 cursor-wait'
+                    : isRunning
+                      ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-200'
+                      : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 hover:bg-emerald-200'
+                }`}
+              >
+                <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none"><path d="M3 5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+            </div>
+            {showRunMenu && (
+              <>
+              <div className="fixed inset-0 z-40" onClick={() => setShowRunMenu(false)} />
+              <div className="absolute right-0 top-full mt-1 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg z-50 min-w-[160px] py-1">
+                <button
+                  onClick={() => { setShowRunMenu(false); handleRun() }}
+                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2"
+                >
+                  {isRunning ? '⏹ Stop' : '▶ Run'}
+                </button>
+                <button
+                  onClick={handleRebuild}
+                  disabled={project.screens.length < 2}
+                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  🔄 Rebuild (Clean)
+                </button>
+              </div>
+              </>
+            )}
+          </div>
 
           {/* §11.1 Designer / Developer mode toggle */}
           {isRunning && (

@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Project filesystem + dev server API
   project: {
+    clean: (projectId: string) =>
+      ipcRenderer.invoke('project:clean', projectId) as Promise<{ success: boolean }>,
     scaffold: (projectId: string, files: Record<string, string>) =>
       ipcRenderer.invoke('project:scaffold', projectId, files),
     writeFile: (projectId: string, filePath: string, content: string) =>
@@ -60,6 +62,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     open: () => ipcRenderer.invoke('live-edit:open'),
     sendRequest: (prompt: string) => ipcRenderer.invoke('live-edit-request', prompt, window.location.href),
     getProjectInfo: () => ipcRenderer.invoke('live-edit:get-project-info'),
+    getDesignSystem: () => ipcRenderer.invoke('live-edit:get-design-system'),
     updateFeedback: (message: string, type: 'success' | 'error' | 'generating', devMarkdown?: string) =>
       ipcRenderer.invoke('live-edit:update-feedback', message, type, devMarkdown),
     close: () => ipcRenderer.invoke('live-edit:close'),
