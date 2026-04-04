@@ -180,13 +180,15 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
   const [pendingDS, setPendingDS] = useState<DesignSystem>(designSystem)
   const [hasChanges, setHasChanges] = useState(false)
 
-  // Sync pendingDS when external designSystem changes (including after steal)
+  // Sync pendingDS when external designSystem fundamentally changes
+  // (e.g., loaded from DB, steal result, NOT from our own pending updates)
+  const dsFingerprint = `${designSystem.name}|${designSystem.colors.primary.base}|${designSystem.typography.headline.family}`
   useEffect(() => {
     setPendingDS(designSystem)
     setHasChanges(false)
     setNameValue(designSystem.name)
-    setStealUrlLoading(false) // Stop loading spinner when DS is updated
-  }, [designSystem]) // eslint-disable-line react-hooks/exhaustive-deps
+    setStealUrlLoading(false)
+  }, [dsFingerprint]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const updatePending = (ds: DesignSystem) => {
     setPendingDS(ds)
