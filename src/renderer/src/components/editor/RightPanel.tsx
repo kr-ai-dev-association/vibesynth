@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import type { DesignSystem, DesignGuide } from '../../App'
 import { PINTEREST_DESIGNS } from '../../lib/pinterest-designs'
 import { useI18n } from '../../lib/i18n'
@@ -180,12 +180,12 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
   const [pendingDS, setPendingDS] = useState<DesignSystem>(designSystem)
   const [hasChanges, setHasChanges] = useState(false)
 
-  // Sync when external designSystem changes (e.g., loaded from DB)
-  useMemo(() => {
+  // Sync pendingDS when external designSystem changes
+  useEffect(() => {
     setPendingDS(designSystem)
     setHasChanges(false)
     setNameValue(designSystem.name)
-  }, [designSystem.name, designSystem.colors.primary.base]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [designSystem]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const updatePending = (ds: DesignSystem) => {
     setPendingDS(ds)

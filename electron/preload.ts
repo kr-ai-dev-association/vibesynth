@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setLiveWindowSize: (width: number, height: number) =>
     ipcRenderer.invoke('set-live-window-size', width, height),
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
+  onLiveAppError: (callback: (message: string) => void) => {
+    const handler = (_e: any, msg: string) => callback(msg)
+    ipcRenderer.on('live-app-error', handler)
+    return () => ipcRenderer.removeListener('live-app-error', handler)
+  },
   onLiveWindowClosed: (callback: () => void) => {
     ipcRenderer.on('live-window-closed', callback)
     return () => ipcRenderer.removeListener('live-window-closed', callback)

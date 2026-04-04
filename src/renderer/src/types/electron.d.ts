@@ -45,6 +45,7 @@ interface ElectronAPI {
   setLiveWindowAlwaysOnTop: (value: boolean) => Promise<void>
   setLiveWindowSize: (width: number, height: number) => Promise<void>
   openExternal: (url: string) => Promise<void>
+  onLiveAppError: (callback: (message: string) => void) => () => void
   onLiveWindowClosed: (callback: () => void) => () => void
   onLiveEditRequest: (callback: (prompt: string, currentUrl: string) => void) => () => void
   sendLiveEditResult: (result: { success: boolean; message: string; devMarkdown?: string }) => Promise<void>

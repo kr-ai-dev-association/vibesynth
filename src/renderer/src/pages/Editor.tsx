@@ -117,6 +117,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   const [buildingFrontend, setBuildingFrontend] = useState(false)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(40)
   const sidebarResizing = useRef(false)
+  const lastLiveErrorRef = useRef(0)
 
   // §11.1 Designer / Developer feedback mode
   type FeedbackMode = 'designer' | 'developer'
@@ -177,8 +178,36 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     const cleanup = window.electronAPI?.onLiveWindowClosed(() => {
       setIsRunning(false)
     })
-    return () => cleanup?.()
-  }, [])
+
+    // Catch Live App errors and auto-fix via LLM
+    const errorCleanup = window.electronAPI?.onLiveAppError?.(async (errorMsg: string) => {
+      if (!devServerUrl || !project.id || isGenerating) return
+      // Debounce: ignore repeated errors within 10s
+      const now = Date.now()
+      if (now - lastLiveErrorRef.current < 10_000) return
+      lastLiveErrorRef.current = now
+
+      addLog(`Live app error detected: ${errorMsg.slice(0, 100)}`, 'error')
+
+      try {
+        const targetFile = 'src/App.tsx'
+        const content = await window.electronAPI?.project.readFile(project.id, targetFile)
+        if (!content) return
+
+        const fixed = await editFrontendFile(targetFile, content, `Fix this runtime error: ${errorMsg}`, {
+          files: project.screens.map(s => `src/pages/${s.name.replace(/\s+/g, '')}.tsx`),
+          screens: project.screens.map(s => s.name),
+        })
+
+        await window.electronAPI?.project.writeFile(project.id, targetFile, fixed)
+        addLog('Auto-fixed Live app error via AI', 'success')
+      } catch {
+        addLog('Could not auto-fix Live app error', 'error')
+      }
+    })
+
+    return () => { cleanup?.(); errorCleanup?.() }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cleanup dev server when leaving the editor
   useEffect(() => {
@@ -1319,7 +1348,12 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                   : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 hover:bg-emerald-200'
             }`}
           >
-            {buildingFrontend ? t('editor.building') : isRunning ? t('editor.stop') : t('editor.run')}
+            {buildingFrontend ? (
+              <span className="flex items-center gap-1.5">
+                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-20" /><path d="M12 2a10 10 0 019.95 9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" /></svg>
+                Building...
+              </span>
+            ) : isRunning ? t('editor.stop') : t('editor.run')}
           </button>
 
           {/* §11.1 Designer / Developer mode toggle */}

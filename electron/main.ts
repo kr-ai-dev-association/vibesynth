@@ -154,6 +154,13 @@ function createLiveAppWindow(url?: string, deviceType?: string) {
     liveAppWindow.loadURL('about:blank')
   }
 
+  // Catch Live App console errors and forward to main window for LLM fix
+  liveAppWindow.webContents.on('console-message', (_event, level, message) => {
+    if (level >= 2 && mainWindow) { // level 2 = error
+      mainWindow.webContents.send('live-app-error', message)
+    }
+  })
+
   liveAppWindow.on('closed', () => {
     liveAppWindow = null
     mainWindow?.webContents.send('live-window-closed')
