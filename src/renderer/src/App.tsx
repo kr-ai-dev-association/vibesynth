@@ -70,8 +70,11 @@ export interface TypographyLevel {
   lineHeight?: string
 }
 
+export type ColorSchemeMode = 'light' | 'dark' | 'auto'
+
 export interface DesignSystem {
   name: string
+  colorScheme?: ColorSchemeMode  // default: 'auto' (AI decides based on prompt)
   colors: {
     primary: { base: string; tones: string[] }
     secondary: { base: string; tones: string[] }

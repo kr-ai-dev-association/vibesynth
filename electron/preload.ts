@@ -48,6 +48,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('shell:open-vscode', folderPath) as Promise<{ success: boolean; error?: string }>,
   },
 
+  // Feedback popup (Designer/Developer mode)
+  feedback: {
+    show: (content: string, mode: 'designer' | 'developer') =>
+      ipcRenderer.invoke('feedback:show', content, mode),
+    close: () => ipcRenderer.invoke('feedback:close'),
+  },
+
   // Pinterest Design Steal
   pinterest: {
     connect: () => ipcRenderer.invoke('pinterest:connect'),

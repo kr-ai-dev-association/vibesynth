@@ -50,6 +50,10 @@ interface ElectronAPI {
   pinterest: ElectronPinterestAPI
   project: ElectronProjectAPI
   shell: ElectronShellAPI
+  feedback: {
+    show: (content: string, mode: 'designer' | 'developer') => Promise<void>
+    close: () => Promise<void>
+  }
   db: ElectronDBAPI
 }
 

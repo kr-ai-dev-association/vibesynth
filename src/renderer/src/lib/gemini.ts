@@ -110,6 +110,7 @@ function formatDesignSystemTokens(ds: DesignSystem): string {
     '╚══════════════════════════════════════════════════════════╝',
     '',
     `Theme Name: "${ds.name}"`,
+    `Color Scheme: ${ds.colorScheme || 'auto'} ${ds.colorScheme === 'dark' ? '— USE DARK BACKGROUNDS (#0a0a0a, #111, #1a1a2e). White/light text.' : ds.colorScheme === 'light' ? '— USE LIGHT BACKGROUNDS (#ffffff, #fafafa, #f5f5f5). Dark text.' : '— AI decides based on prompt context.'}`,
     '',
     `PRIMARY COLOR: ${ds.colors.primary.base} — Use for CTAs, active states, key accents`,
     `SECONDARY COLOR: ${ds.colors.secondary.base} — Use for secondary elements, badges`,

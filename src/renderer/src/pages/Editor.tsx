@@ -868,18 +868,19 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
 
         await window.electronAPI?.project.writeFile(project.id, targetFile, updated)
 
-        // §11.1 Designer / Developer mode feedback
+        // §11.1 Designer / Developer mode feedback — show in popup window
         if (feedbackMode === 'designer') {
           const friendlyMsg = await paraphraseLiveEditForDesigner(
             prompt, targetFile, beforeContent.slice(0, 500), updated.slice(0, 500), locale,
           )
           addLog(friendlyMsg, 'success')
+          window.electronAPI?.feedback.show(friendlyMsg, 'designer')
           window.electronAPI?.sendLiveEditResult({ success: true, message: friendlyMsg })
         } else {
           const md = buildLiveEditDeveloperMarkdown(prompt, targetFile, beforeContent, updated, locale)
           setDevMarkdown(md)
           addLog(t('editor.log.liveEditApplied'), 'success')
-          // Send devMarkdown to Live Window for in-app MD viewer
+          window.electronAPI?.feedback.show(md, 'developer')
           window.electronAPI?.sendLiveEditResult({ success: true, message: 'Changes applied', devMarkdown: md })
         }
       } catch (err: any) {
@@ -1782,6 +1783,12 @@ function ScreenCard({
     }
   }, [isGenerating]) // eslint-disable-line react-hooks/exhaustive-deps
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  // Re-trigger height measurement when iframe is mounted (ref callback)
+  const [iframeMounted, setIframeMounted] = useState(false)
+  const iframeRefCallback = useCallback((node: HTMLIFrameElement | null) => {
+    (iframeRef as any).current = node
+    setIframeMounted(!!node)
+  }, [])
   const scale = 0.5
   const isFixedHeight = deviceType === 'app' || deviceType === 'tablet'
   const initialHeight = isFixedHeight ? minHeight : 4000
@@ -1795,11 +1802,11 @@ function ScreenCard({
 
   // Direct DOM measurement via allow-same-origin sandbox + polling
   useEffect(() => {
-    // #region agent log
-    // #endregion
     if (isFixedHeight) { setContentHeight(minHeight); return }
     const iframe = iframeRef.current
     if (!iframe) return
+    // Skip if no real HTML yet (generating placeholder)
+    if (!screen.html || screen.html.length < 100) return
 
     const measure = () => {
       try {
@@ -1853,7 +1860,7 @@ function ScreenCard({
       clearTimeout(obsTimer)
       resizeObs?.disconnect()
     }
-  }, [screen.html, isFixedHeight, minHeight]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [screen.html, isFixedHeight, minHeight, iframeMounted]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const height = contentHeight
   const displayWidth = width * scale
@@ -2052,7 +2059,7 @@ html,body,[data-vs-root]{height:auto!important;max-height:none!important;overflo
         style={{ width: displayWidth, height: displayHeight }}
       >
         <iframe
-          ref={iframeRef}
+          ref={iframeRefCallback}
           srcDoc={iframeHtml}
           title={screen.name}
           sandbox={isFixedHeight ? 'allow-scripts' : 'allow-scripts allow-same-origin'}

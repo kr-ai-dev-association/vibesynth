@@ -7,6 +7,7 @@ import { db } from './database'
 
 let mainWindow: BrowserWindow | null = null
 let liveAppWindow: BrowserWindow | null = null
+let feedbackWindow: BrowserWindow | null = null
 let pinterestWindow: BrowserWindow | null = null
 let pinterestConnected = false
 let currentLiveHtml: string | null = null
@@ -331,6 +332,128 @@ ipcMain.handle('project:get-status', () => {
 
 ipcMain.handle('open-live-window-url', (_event, url: string) => {
   createLiveAppWindow(url)
+})
+
+// ─── Feedback Popup Window (Designer/Developer mode) ──────────────
+
+function createFeedbackWindow(content: string, mode: 'designer' | 'developer') {
+  if (feedbackWindow) {
+    feedbackWindow.webContents.send('feedback-update', { content, mode })
+    feedbackWindow.focus()
+    return
+  }
+
+  feedbackWindow = new BrowserWindow({
+    width: mode === 'developer' ? 720 : 480,
+    height: mode === 'developer' ? 600 : 400,
+    minWidth: 400,
+    minHeight: 300,
+    title: mode === 'designer' ? '🎨 Designer Feedback' : '💻 Developer Summary',
+    alwaysOnTop: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+
+  const bgColor = mode === 'developer' ? '#0f0f17' : '#1a1a2e'
+  const accentColor = mode === 'developer' ? '#60a5fa' : '#a78bfa'
+
+  const html = `<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: ${bgColor}; color: #e2e8f0;
+    padding: 24px; overflow-y: auto; height: 100vh;
+  }
+  .header { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+  .header .badge {
+    font-size: 11px; font-weight: 600; padding: 3px 10px;
+    border-radius: 99px; background: ${accentColor}22; color: ${accentColor};
+    border: 1px solid ${accentColor}44;
+  }
+  .header h1 { font-size: 15px; font-weight: 600; color: #f1f5f9; }
+  .content {
+    font-size: 13px; line-height: 1.7; color: #cbd5e1;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .content h2 { font-size: 15px; color: #e0e7ff; margin: 14px 0 6px; }
+  .content h3 { font-size: 13px; color: ${accentColor}; margin: 10px 0 4px; }
+  .content pre {
+    background: #000; padding: 12px; border-radius: 8px;
+    font-family: 'SF Mono', Menlo, monospace; font-size: 11px;
+    overflow-x: auto; margin: 8px 0;
+  }
+  .content code { background: #ffffff10; padding: 1px 4px; border-radius: 3px; font-size: 11px; }
+  .actions { margin-top: 20px; display: flex; gap: 8px; }
+  .actions button {
+    padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer;
+    font-size: 12px; font-weight: 600; transition: opacity 0.15s;
+  }
+  .actions button:hover { opacity: 0.85; }
+  .btn-export { background: #10b981; color: white; }
+  .btn-vscode { background: #3b82f6; color: white; }
+  .btn-close { background: #374151; color: #9ca3af; }
+</style>
+</head><body>
+<div class="header">
+  <span class="badge">${mode === 'designer' ? '🎨 Designer' : '💻 Developer'}</span>
+  <h1>${mode === 'designer' ? 'Edit Feedback' : 'Edit Summary'}</h1>
+</div>
+<div class="content" id="feedback-content">${escapeHtml(content)}</div>
+${mode === 'developer' ? `<div class="actions">
+  <button class="btn-export" onclick="window.electronAPI?.project.exportToFolder('current','~/VibeSynth/export/current')">📦 Export</button>
+  <button class="btn-vscode" onclick="window.electronAPI?.shell.openVscode('~/VibeSynth/export/current')">💻 VS Code</button>
+  <button class="btn-close" onclick="window.close()">Close</button>
+</div>` : '<div class="actions"><button class="btn-close" onclick="window.close()">Close</button></div>'}
+<script>
+  const { ipcRenderer } = require('electron') || {};
+  if (typeof window.__feedbackUpdate === 'undefined') {
+    window.__feedbackUpdate = true;
+    // Listen for content updates from main process
+    const el = document.getElementById('feedback-content');
+    window.addEventListener('message', (e) => {
+      if (e.data?.type === 'feedback-update' && el) el.innerHTML = e.data.content;
+    });
+  }
+</script>
+</body></html>`
+
+  feedbackWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+
+  feedbackWindow.on('closed', () => {
+    feedbackWindow = null
+  })
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    // Simple markdown rendering
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/^- (.+)$/gm, '• $1')
+}
+
+ipcMain.handle('feedback:show', (_event, content: string, mode: 'designer' | 'developer') => {
+  createFeedbackWindow(content, mode)
+})
+
+ipcMain.handle('feedback:close', () => {
+  if (feedbackWindow) {
+    feedbackWindow.close()
+    feedbackWindow = null
+  }
 })
 
 // ─── Live Export + VS Code (§11.2) ────────────────────────────────
