@@ -2119,15 +2119,14 @@ function ScreenCard({
         h += 20
         w += 20
 
-        // Auto-adjust width if content is wider than current width (and no manual override)
+        // Auto-adjust width if content is wider than default (only when no manual override)
         if (w > width && w < 5000 && !manualWidth) {
           setManualWidth(w)
         }
 
-        if (h > 100 && h < 10000) {
+        // Auto-adjust height (only when no manual override)
+        if (!manualHeight && h > 100 && h < 10000) {
           const measured = Math.max(h, minHeight)
-          // #region agent log
-          // #endregion
           if (Math.abs(measured - contentHeight) > 10 || !measuredRef.current) {
             setContentHeight(measured)
             measuredRef.current = true
