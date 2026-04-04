@@ -115,6 +115,8 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   } | null>(null)
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null)
   const [buildingFrontend, setBuildingFrontend] = useState(false)
+  const [editingProjectName, setEditingProjectName] = useState(false)
+  const [projectNameValue, setProjectNameValue] = useState(project.name)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(40)
   const sidebarResizing = useRef(false)
   const lastLiveErrorRef = useRef(0)
@@ -1307,7 +1309,32 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             )}
           </div>
 
-          <span className="text-sm font-medium">{project.name}</span>
+          {editingProjectName ? (
+            <input
+              autoFocus
+              value={projectNameValue}
+              onChange={(e) => setProjectNameValue(e.target.value)}
+              onBlur={() => {
+                if (projectNameValue.trim() && projectNameValue.trim() !== project.name) {
+                  onProjectUpdate({ ...project, name: projectNameValue.trim() })
+                }
+                setEditingProjectName(false)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                if (e.key === 'Escape') { setProjectNameValue(project.name); setEditingProjectName(false) }
+              }}
+              className="text-sm font-medium bg-transparent border-b border-blue-400 outline-none w-48 no-drag"
+            />
+          ) : (
+            <button
+              onClick={() => { setEditingProjectName(true); setProjectNameValue(project.name) }}
+              className="text-sm font-medium hover:text-blue-500 transition-colors no-drag"
+              title="Click to rename project"
+            >
+              {project.name}
+            </button>
+          )}
 
           {isGenerating && (
             <span className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
