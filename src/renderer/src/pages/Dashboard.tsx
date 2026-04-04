@@ -1,64 +1,9 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import type { Project, DesignSystem } from '../App'
 import { PromptBar } from '../components/common/PromptBar'
 import { AppearanceToggle } from '../components/common/AppearanceToggle'
 import { PINTEREST_DESIGNS } from '../lib/pinterest-designs'
-
-interface ExampleThumbnail {
-  gradient: string
-  emoji: string
-}
-
-const EXAMPLE_THUMBNAILS: Record<string, ExampleThumbnail> = {
-  ex1: { gradient: 'linear-gradient(135deg, #0d1117 0%, #1a3a1a 50%, #CCFF00 100%)', emoji: '🌿' },
-  ex2: { gradient: 'linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)', emoji: '🚀' },
-  ex3: { gradient: 'linear-gradient(135deg, #FFF8E1 0%, #D7CCC8 50%, #C75B39 100%)', emoji: '🏺' },
-  ex4: { gradient: 'linear-gradient(135deg, #E8F5E9 0%, #66BB6A 50%, #2E7D32 100%)', emoji: '📖' },
-  ex5: { gradient: 'linear-gradient(135deg, #1a1a1a 0%, #8B0000 50%, #E53935 100%)', emoji: '🍕' },
-}
-
-const EXAMPLE_PROJECTS: Project[] = [
-  {
-    id: 'ex1',
-    name: 'Indoor Plant Care Dashboard',
-    prompt: 'A mobile app dashboard for tracking indoor plants. Show a dark themed home screen with plant health stats (total plants, need water, health score), a list of plants with emoji icons, watering schedule status, and a bottom navigation bar. Use neon green (#CCFF00) as the accent color on dark background.',
-    updatedAt: 'May 19, 2025',
-    screens: [],
-    deviceType: 'app',
-  },
-  {
-    id: 'ex2',
-    name: 'SaaS Startup Landing Page',
-    prompt: 'A modern SaaS startup landing page for a project management tool. Include a bold hero section with headline, subheading, CTA buttons ("Start Free Trial", "Watch Demo"), a floating dashboard mockup preview. Below: feature cards in a 3-column grid (Task boards, Time tracking, Team chat), testimonial carousel, pricing table (Free/Pro/Enterprise tiers), and a dark footer with newsletter signup. Use a deep indigo-to-purple gradient (#302b63 to #24243e) hero with white text and bright cyan (#00E5FF) accent buttons. Sticky top navigation with logo, nav links (Features, Pricing, About), and Sign In / Get Started buttons.',
-    updatedAt: 'May 19, 2025',
-    screens: [],
-    deviceType: 'web',
-  },
-  {
-    id: 'ex3',
-    name: 'Ceramic & Pottery Marketplace',
-    prompt: 'A desktop web marketplace for handmade ceramics and pottery. Show a browse page with a search bar, filter chips (Bowls, Vases, Plates, Mugs, Sculptures), a grid of product cards with price tags, artisan names, and star ratings. Use warm earthy tones — terracotta (#C75B39) primary, cream background, elegant serif headings. Include a top nav with logo, categories, cart icon, and user avatar.',
-    updatedAt: 'May 19, 2025',
-    screens: [],
-    deviceType: 'web',
-  },
-  {
-    id: 'ex4',
-    name: 'Digital Magazine Reader',
-    prompt: 'A tablet reading app for a digital magazine (1024px width, portrait). Show a content browsing screen with a large featured article hero card with image placeholder (gradient), headline and author. Below: a two-column grid of article cards with thumbnails, category tags (Tech, Design, Culture, Science), read time estimates, and bookmark icons. Include a left sidebar with magazine sections (Home, Trending, Saved, Settings) and a top bar with search and user avatar. Use rich green (#2E7D32) as primary with an elegant serif headline font feel. Clean white background with subtle card shadows.',
-    updatedAt: 'May 17, 2025',
-    screens: [],
-    deviceType: 'tablet',
-  },
-  {
-    id: 'ex5',
-    name: 'Homemade Pizza Cooking Elite Class',
-    prompt: 'A mobile app for a premium pizza cooking class. Show a lesson detail screen with a large hero area for the pizza photo (use a warm gradient placeholder), lesson title "Neapolitan Margherita", instructor info, ingredient list with checkboxes, step-by-step instructions preview, and a "Start Cooking" CTA button. Use warm red (#E53935) as primary with Italian-inspired design, dark mode. Include a progress bar showing "Lesson 3 of 8".',
-    updatedAt: 'May 19, 2025',
-    screens: [],
-    deviceType: 'app',
-  },
-]
+import { EXAMPLE_PROJECTS, EXAMPLE_CATEGORIES, type ExampleProject } from '../lib/example-projects'
 
 const PROMPT_SUGGESTIONS = [
   'A recipe discovery app for making cocktails at home with step-by-step guides',
@@ -79,6 +24,8 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
   const [selectedDesignId, setSelectedDesignId] = useState<string | null>(null)
   const [sidebarTab, setSidebarTab] = useState<'my' | 'shared'>('my')
   const [showMoreMenu, setShowMoreMenu] = useState(false)
+  const [prdModal, setPrdModal] = useState<ExampleProject | null>(null)
+  const [prdDesignId, setPrdDesignId] = useState<string | null>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
 
   const selectedDesignSystem = selectedDesignId
@@ -95,13 +42,32 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const filteredExamples = EXAMPLE_PROJECTS.filter((p) =>
-    p.name.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredExamples = useMemo(() =>
+    EXAMPLE_PROJECTS.filter((ex) =>
+      ex.project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      ex.categoryLabel.toLowerCase().includes(searchQuery.toLowerCase())
+    ),
+    [searchQuery]
   )
+
+  const handleOpenExample = (ex: ExampleProject) => {
+    setPrdDesignId(ex.recommendedDesignId)
+    setPrdModal(ex)
+  }
+
+  const handleGenerateFromPrd = () => {
+    if (!prdModal) return
+    const ds = prdDesignId
+      ? PINTEREST_DESIGNS.find(d => d.id === prdDesignId)?.designSystem
+      : undefined
+    const project = ds ? { ...prdModal.project, designSystem: ds } : prdModal.project
+    setPrdModal(null)
+    onOpenProject(project)
+  }
 
   return (
     <div className="h-screen flex flex-col">
-      {/* Header — matches Stitch: logo left, icons right */}
+      {/* Header */}
       <header className="h-13 flex items-center justify-between px-4 border-b border-neutral-200 dark:border-neutral-700 shrink-0 draggable">
         <div className="flex items-center gap-2 no-drag">
           <span className="text-xl font-bold tracking-tight">VibeSynth</span>
@@ -135,10 +101,9 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar — Stitch-style: tabs, thumbnails, date groups */}
-        <aside className="w-60 border-r border-neutral-200 dark:border-neutral-700 flex flex-col overflow-y-auto shrink-0">
+        {/* Left Sidebar */}
+        <aside className="w-64 border-r border-neutral-200 dark:border-neutral-700 flex flex-col overflow-y-auto shrink-0">
           <div className="p-3">
-            {/* Tabs: My projects / Shared with me */}
             <div className="flex gap-0 mb-3 rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden">
               <button
                 onClick={() => setSidebarTab('my')}
@@ -164,7 +129,6 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
               </button>
             </div>
 
-            {/* Search */}
             <div className="relative mb-3">
               <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400 w-4 h-4" />
               <input
@@ -179,25 +143,47 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
 
           {sidebarTab === 'my' ? (
             <>
-              {/* Recent Projects — grouped by date like Stitch */}
               {recentProjects.length > 0 && (
                 <div className="px-3 mb-2">
-                  <p className="text-[11px] font-medium text-neutral-400 mb-1.5 px-1">Yesterday</p>
+                  <p className="text-[11px] font-medium text-neutral-400 mb-1.5 px-1">Recent</p>
                   {recentProjects.map((project) => (
-                    <ProjectItem key={project.id} project={project} onClick={() => onOpenProject(project)} />
+                    <SidebarProjectItem key={project.id} project={project} onClick={() => onOpenProject(project)} />
                   ))}
                 </div>
               )}
 
-              {/* Examples — with thumbnails */}
+              {/* LifeFlow Examples by category */}
               <div className="px-3 pb-3">
-                <p className="text-[11px] font-medium text-neutral-400 mb-1.5 px-1">Examples</p>
-                {filteredExamples.map((project) => (
-                  <ProjectItem key={project.id} project={project} onClick={() => {
-                    const p = selectedDesignSystem ? { ...project, designSystem: selectedDesignSystem } : project
-                    onOpenProject(p)
-                  }} />
-                ))}
+                <p className="text-[11px] font-medium text-neutral-400 mb-1.5 px-1">
+                  LifeFlow Examples
+                </p>
+                {EXAMPLE_CATEGORIES.map((cat) => {
+                  const ex = filteredExamples.find(e => e.category === cat.id)
+                  if (!ex) return null
+                  return (
+                    <button
+                      key={cat.id}
+                      onClick={() => handleOpenExample(ex)}
+                      className="w-full flex items-center gap-2.5 px-1.5 py-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-left group"
+                    >
+                      <div
+                        className="w-8 h-8 rounded-md shrink-0 flex items-center justify-center text-sm border border-neutral-200 dark:border-neutral-700"
+                        style={{ background: ex.gradient }}
+                      >
+                        {ex.emoji}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate group-hover:text-neutral-900 dark:group-hover:text-white">
+                          {ex.project.name}
+                        </p>
+                        <p className="text-[11px] text-neutral-400 flex items-center gap-1 mt-0.5">
+                          <DeviceIcon type={ex.project.deviceType} />
+                          {ex.categoryLabel}
+                        </p>
+                      </div>
+                    </button>
+                  )
+                })}
               </div>
             </>
           ) : (
@@ -210,6 +196,28 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
         {/* Main Content */}
         <main className="flex-1 flex flex-col items-center justify-center px-8">
           <h1 className="text-5xl font-light mb-8 tracking-tight">Welcome to VibeSynth.</h1>
+
+          {/* Example Cards — LifeFlow showcase */}
+          <div className="grid grid-cols-3 gap-3 mb-8 max-w-3xl w-full">
+            {EXAMPLE_PROJECTS.map((ex) => (
+              <button
+                key={ex.project.id}
+                onClick={() => handleOpenExample(ex)}
+                className="group relative rounded-2xl border border-neutral-200 dark:border-neutral-700 overflow-hidden hover:border-neutral-400 dark:hover:border-neutral-500 transition-all hover:shadow-lg text-left"
+              >
+                <div className="h-20 relative" style={{ background: ex.gradient }}>
+                  <span className="absolute bottom-2 right-2 text-2xl drop-shadow-md">{ex.emoji}</span>
+                </div>
+                <div className="p-3">
+                  <p className="text-xs font-semibold truncate">{ex.project.name}</p>
+                  <p className="text-[10px] text-neutral-400 mt-0.5 flex items-center gap-1">
+                    <DeviceIcon type={ex.project.deviceType} />
+                    {ex.categoryLabel}
+                  </p>
+                </div>
+              </button>
+            ))}
+          </div>
 
           {/* Suggestion Chips */}
           <div className="flex gap-2 mb-4 flex-wrap justify-center max-w-2xl">
@@ -247,7 +255,263 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
           </div>
         </main>
       </div>
+
+      {/* PRD Modal */}
+      {prdModal && (
+        <PrdModal
+          example={prdModal}
+          selectedDesignId={prdDesignId}
+          onSelectDesign={setPrdDesignId}
+          onGenerate={handleGenerateFromPrd}
+          onClose={() => setPrdModal(null)}
+        />
+      )}
     </div>
+  )
+}
+
+// ─── PRD Modal ────────────────────────────────────────────────
+
+function PrdModal({
+  example,
+  selectedDesignId,
+  onSelectDesign,
+  onGenerate,
+  onClose,
+}: {
+  example: ExampleProject
+  selectedDesignId: string | null
+  onSelectDesign: (id: string | null) => void
+  onGenerate: () => void
+  onClose: () => void
+}) {
+  const selectedDS = selectedDesignId
+    ? PINTEREST_DESIGNS.find(d => d.id === selectedDesignId)
+    : null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="w-[900px] max-h-[85vh] bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-200 dark:border-neutral-700">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
+              style={{ background: example.gradient }}
+            >
+              {example.emoji}
+            </div>
+            <div>
+              <h2 className="font-semibold text-lg">{example.project.name}</h2>
+              <p className="text-xs text-neutral-400 flex items-center gap-1">
+                <DeviceIcon type={example.project.deviceType} />
+                {example.categoryLabel}
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          <MarkdownRenderer content={example.prd} />
+        </div>
+
+        {/* Footer — Design System Selector + Generate */}
+        <div className="border-t border-neutral-200 dark:border-neutral-700 px-6 py-4">
+          <div className="flex items-center justify-between gap-4">
+            {/* DS Selector */}
+            <div className="flex-1">
+              <p className="text-xs text-neutral-400 mb-2">Design Style</p>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {PINTEREST_DESIGNS.slice(0, 8).map((d) => (
+                  <button
+                    key={d.id}
+                    onClick={() => onSelectDesign(d.id === selectedDesignId ? null : d.id)}
+                    className={`shrink-0 rounded-xl border-2 transition-all p-1.5 w-16 ${
+                      selectedDesignId === d.id
+                        ? 'border-blue-500 ring-2 ring-blue-500/20'
+                        : 'border-neutral-200 dark:border-neutral-700 hover:border-neutral-400'
+                    }`}
+                    title={d.name}
+                  >
+                    <div className="flex h-2.5 rounded overflow-hidden">
+                      <div className="flex-1" style={{ backgroundColor: d.designSystem.colors.primary.base }} />
+                      <div className="flex-1" style={{ backgroundColor: d.designSystem.colors.secondary.base }} />
+                      <div className="flex-1" style={{ backgroundColor: d.designSystem.colors.tertiary.base }} />
+                    </div>
+                    <div className="text-[7px] text-neutral-400 mt-0.5 truncate text-center">{d.name}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Generate Button */}
+            <button
+              onClick={onGenerate}
+              className="shrink-0 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition-colors flex items-center gap-2"
+            >
+              {selectedDS && (
+                <div className="flex h-3 w-8 rounded overflow-hidden">
+                  <div className="flex-1" style={{ backgroundColor: selectedDS.designSystem.colors.primary.base }} />
+                  <div className="flex-1" style={{ backgroundColor: selectedDS.designSystem.colors.secondary.base }} />
+                </div>
+              )}
+              Generate
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M12 5l7 7-7 7" /></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Simple Markdown Renderer ─────────────────────────────────
+
+function MarkdownRenderer({ content }: { content: string }) {
+  const lines = content.split('\n')
+  const elements: JSX.Element[] = []
+  let tableRows: string[][] = []
+  let inTable = false
+  let key = 0
+
+  const flushTable = () => {
+    if (tableRows.length < 2) { tableRows = []; return }
+    const headers = tableRows[0]
+    const rows = tableRows.slice(2) // skip separator
+    elements.push(
+      <div key={key++} className="overflow-x-auto my-3">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr>
+              {headers.map((h, i) => (
+                <th key={i} className="text-left px-3 py-2 border-b-2 border-neutral-200 dark:border-neutral-600 font-semibold text-neutral-700 dark:text-neutral-200 text-xs">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, ri) => (
+              <tr key={ri} className="border-b border-neutral-100 dark:border-neutral-700/50">
+                {row.map((cell, ci) => (
+                  <td key={ci} className="px-3 py-1.5 text-xs text-neutral-600 dark:text-neutral-300">{cell}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+    tableRows = []
+  }
+
+  const inlineFormat = (text: string) => {
+    const parts: (string | JSX.Element)[] = []
+    let remaining = text
+    let idx = 0
+    while (remaining.length > 0) {
+      const boldMatch = remaining.match(/\*\*(.+?)\*\*/)
+      if (boldMatch && boldMatch.index !== undefined) {
+        if (boldMatch.index > 0) parts.push(remaining.slice(0, boldMatch.index))
+        parts.push(<strong key={`b${idx++}`} className="font-semibold text-neutral-800 dark:text-neutral-100">{boldMatch[1]}</strong>)
+        remaining = remaining.slice(boldMatch.index + boldMatch[0].length)
+      } else {
+        parts.push(remaining)
+        break
+      }
+    }
+    return parts
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+
+    // Table row
+    if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+      if (!inTable) inTable = true
+      const cells = line.split('|').slice(1, -1).map(c => c.trim())
+      tableRows.push(cells)
+      continue
+    } else if (inTable) {
+      inTable = false
+      flushTable()
+    }
+
+    // Empty line
+    if (!line.trim()) {
+      continue
+    }
+
+    // Headings
+    if (line.startsWith('# ')) {
+      elements.push(<h1 key={key++} className="text-2xl font-bold mt-1 mb-3 text-neutral-900 dark:text-white">{line.slice(2)}</h1>)
+    } else if (line.startsWith('## ')) {
+      elements.push(<h2 key={key++} className="text-lg font-bold mt-5 mb-2 text-neutral-800 dark:text-neutral-100 border-b border-neutral-200 dark:border-neutral-700 pb-1">{line.slice(3)}</h2>)
+    } else if (line.startsWith('### ')) {
+      elements.push(<h3 key={key++} className="text-sm font-bold mt-4 mb-1.5 text-neutral-700 dark:text-neutral-200">{line.slice(4)}</h3>)
+    }
+    // List items
+    else if (line.match(/^\s*[-*]\s/)) {
+      const indent = line.search(/\S/)
+      const text = line.replace(/^\s*[-*]\s/, '')
+      elements.push(
+        <div key={key++} className="flex gap-2 text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed" style={{ paddingLeft: Math.max(0, indent * 4) + 'px' }}>
+          <span className="text-neutral-300 dark:text-neutral-500 mt-0.5">•</span>
+          <span>{inlineFormat(text)}</span>
+        </div>
+      )
+    }
+    // Numbered list
+    else if (line.match(/^\d+\.\s/)) {
+      const num = line.match(/^(\d+)\.\s/)![1]
+      const text = line.replace(/^\d+\.\s/, '')
+      elements.push(
+        <div key={key++} className="flex gap-2 text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed">
+          <span className="text-neutral-400 dark:text-neutral-500 font-medium w-4 shrink-0 text-right">{num}.</span>
+          <span>{inlineFormat(text)}</span>
+        </div>
+      )
+    }
+    // Regular paragraph
+    else {
+      elements.push(<p key={key++} className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed mb-1">{inlineFormat(line)}</p>)
+    }
+  }
+
+  if (inTable) flushTable()
+
+  return <div className="space-y-0.5">{elements}</div>
+}
+
+// ─── Subcomponents ────────────────────────────────────────────
+
+function SidebarProjectItem({ project, onClick }: { project: Project; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-2.5 px-1.5 py-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-left group"
+    >
+      <div className="w-8 h-8 rounded-md shrink-0 overflow-hidden border border-neutral-200 dark:border-neutral-700">
+        <div
+          className="w-full h-full flex items-center justify-center text-sm"
+          style={{ background: project.deviceType === 'web' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'linear-gradient(135deg, #a3a3a3, #737373)' }}
+        >
+          {project.deviceType === 'web' ? '🌐' : project.deviceType === 'tablet' ? '📋' : '📱'}
+        </div>
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium truncate group-hover:text-neutral-900 dark:group-hover:text-white">{project.name}</p>
+        <p className="text-[11px] text-neutral-400 flex items-center gap-1 mt-0.5">
+          <DeviceIcon type={project.deviceType} />
+          {project.updatedAt}
+        </p>
+      </div>
+    </button>
   )
 }
 
@@ -272,7 +536,6 @@ function DesignSystemPicker({ selectedId, onSelect }: { selectedId: string | nul
 
       {expanded && (
         <div className="mt-3 grid grid-cols-4 sm:grid-cols-5 md:grid-cols-7 gap-2 max-w-2xl" data-testid="design-system-picker-grid">
-          {/* None option */}
           <button
             onClick={() => { onSelect(null); setExpanded(false) }}
             className={`rounded-xl border-2 transition-all p-1.5 ${
@@ -312,51 +575,6 @@ function DesignSystemPicker({ selectedId, onSelect }: { selectedId: string | nul
   )
 }
 
-function ProjectItem({ project, onClick }: { project: Project; onClick: () => void }) {
-  const hasScreens = project.screens.length > 0
-  const thumb = EXAMPLE_THUMBNAILS[project.id]
-
-  return (
-    <button
-      onClick={onClick}
-      className="w-full flex items-center gap-2.5 px-1.5 py-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-left group"
-    >
-      {/* Thumbnail */}
-      <div className="w-8 h-8 rounded-md shrink-0 overflow-hidden border border-neutral-200 dark:border-neutral-700">
-        {hasScreens ? (
-          <iframe
-            srcDoc={project.screens[0].html}
-            title={project.name}
-            className="pointer-events-none"
-            style={{ width: 390, height: 844, transform: 'scale(0.0205)', transformOrigin: '0 0', border: 'none' }}
-          />
-        ) : thumb ? (
-          <div
-            className="w-full h-full flex items-center justify-center text-sm"
-            style={{ background: thumb.gradient }}
-          >
-            {thumb.emoji}
-          </div>
-        ) : (
-          <div
-            className="w-full h-full flex items-center justify-center text-sm"
-            style={{ background: project.deviceType === 'web' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'linear-gradient(135deg, #a3a3a3, #737373)' }}
-          >
-            {project.deviceType === 'web' ? '🌐' : '📱'}
-          </div>
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium truncate group-hover:text-neutral-900 dark:group-hover:text-white">{project.name}</p>
-        <p className="text-[11px] text-neutral-400 flex items-center gap-1 mt-0.5">
-          {project.deviceType === 'web' ? <MonitorTinyIcon /> : project.deviceType === 'tablet' ? <TabletTinyIcon /> : <PhoneTinyIcon />}
-          {project.updatedAt}
-        </p>
-      </div>
-    </button>
-  )
-}
-
 function MoreMenuItem({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
@@ -368,7 +586,14 @@ function MoreMenuItem({ label, onClick }: { label: string; onClick: () => void }
   )
 }
 
-// Icons
+function DeviceIcon({ type }: { type: 'app' | 'web' | 'tablet' }) {
+  if (type === 'web') return <MonitorTinyIcon />
+  if (type === 'tablet') return <TabletTinyIcon />
+  return <PhoneTinyIcon />
+}
+
+// ─── Icons ────────────────────────────────────────────────────
+
 function SettingsIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
