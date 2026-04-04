@@ -56,6 +56,10 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   const [showHamburger, setShowHamburger] = useState(false)
   const [deviceType, setDeviceType] = useState<'app' | 'web' | 'tablet'>(project.deviceType)
   const [colorScheme, setColorScheme] = useState<'light' | 'dark' | 'auto'>(project.designSystem?.colorScheme || 'auto')
+
+  // Left toolbar active tool
+  type CanvasTool = 'cursor' | 'select' | 'pen' | 'image'
+  const [activeTool, setActiveTool] = useState<CanvasTool>('cursor')
   const [agentLogOpen, setAgentLogOpen] = useState(true)
   const [selectedScreen, setSelectedScreen] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
@@ -105,6 +109,22 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   const designSystem = project.designSystem || PLACEHOLDER_DESIGN_SYSTEM
 
   // Auto-generate initial screen if project has no screens (just created from dashboard)
+  // Auto-save project to DB when screens/designSystem change
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (project.screens.length === 0) return
+    // Debounce save — wait 2s after last change
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => {
+      window.electronAPI?.db.saveProject({
+        ...project,
+        userId: 'default',
+        createdAt: project.updatedAt,
+      }).catch(() => {})
+    }, 2000)
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
+  }, [project.screens, project.designSystem, project.updatedAt]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const initialGenerationDone = useRef(false)
   const prevScreenCount = useRef(project.screens.length)
   useEffect(() => {
@@ -1090,7 +1110,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
               const url = devResult.url || `http://localhost:${port}`
               setDevServerUrl(url)
               addLog(t('editor.log.devServerRunning', { url }), 'success')
-              await window.electronAPI?.openLiveWindowUrl(url)
+              await window.electronAPI?.openLiveWindowUrl(url, deviceType)
               devStarted = true
               break
             }
@@ -1146,7 +1166,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       const screen = selectedScreen
         ? project.screens.find((s) => s.name === selectedScreen)
         : project.screens[0]
-      window.electronAPI?.openLiveWindow(screen?.html)
+      window.electronAPI?.openLiveWindow(screen?.html, deviceType)
       setIsRunning(true)
     }
   }
@@ -1301,12 +1321,37 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           style={{ width: leftSidebarWidth }}
         >
           <div className={`flex flex-col gap-1 ${leftSidebarWidth > 80 ? 'items-start px-2' : 'items-center'}`}>
-            <ToolButton icon={<CursorIcon />} title={t('editor.tool.cursor')} active label={leftSidebarWidth > 80 ? t('editor.tool.cursor') : undefined} />
-            <ToolButton icon={<SelectIcon />} title={t('editor.tool.select')} label={leftSidebarWidth > 80 ? t('editor.tool.select') : undefined} />
-            <ToolButton icon={<PenIcon />} title={t('editor.tool.pen')} label={leftSidebarWidth > 80 ? t('editor.tool.pen') : undefined} />
+            <ToolButton icon={<CursorIcon />} title={t('editor.tool.cursor')} active={activeTool === 'cursor'} label={leftSidebarWidth > 80 ? t('editor.tool.cursor') : undefined} onClick={() => setActiveTool('cursor')} />
+            <ToolButton icon={<SelectIcon />} title={t('editor.tool.select')} active={activeTool === 'select'} label={leftSidebarWidth > 80 ? t('editor.tool.select') : undefined} onClick={() => setActiveTool('select')} />
+            <ToolButton icon={<PenIcon />} title={t('editor.tool.pen')} active={activeTool === 'pen'} label={leftSidebarWidth > 80 ? t('editor.tool.pen') : undefined} onClick={() => { setActiveTool('pen'); addLog('Pen tool — coming soon', 'info') }} />
             <div className="h-px w-6 bg-neutral-200 dark:bg-neutral-700 my-1 self-center" />
             {/* 마이크 아이콘 제거됨 */}
-            <ToolButton icon={<ImageIcon />} title={t('editor.tool.image')} label={leftSidebarWidth > 80 ? t('editor.tool.image') : undefined} />
+            <ToolButton icon={<ImageIcon />} title={t('editor.tool.image')} active={activeTool === 'image'} label={leftSidebarWidth > 80 ? t('editor.tool.image') : undefined} onClick={() => {
+              setActiveTool('image')
+              // Open file picker for image reference
+              const input = document.createElement('input')
+              input.type = 'file'
+              input.accept = 'image/*'
+              input.onchange = async (e) => {
+                const file = (e.target as HTMLInputElement).files?.[0]
+                if (!file) return
+                const reader = new FileReader()
+                reader.onload = async () => {
+                  const base64 = (reader.result as string).split(',')[1]
+                  addLog(`Image loaded: ${file.name} — analyzing...`, 'generating')
+                  try {
+                    const ds = await analyzeDesignFromImage(base64, file.type)
+                    addLog(`Design extracted from image: "${ds.name}"`, 'success')
+                    onProjectUpdate({ ...project, designSystem: ds, updatedAt: new Date().toLocaleDateString() })
+                  } catch (err: any) {
+                    addLog(`Image analysis failed: ${err.message}`, 'error')
+                  }
+                }
+                reader.readAsDataURL(file)
+                setActiveTool('cursor')
+              }
+              input.click()
+            }} />
           </div>
           {/* Resize handle */}
           <div
@@ -2236,10 +2281,11 @@ function MenuItem({ icon, label, shortcut, onClick }: { icon: string; label: str
   )
 }
 
-function ToolButton({ icon, title, active, label }: { icon: React.ReactNode; title: string; active?: boolean; label?: string }) {
+function ToolButton({ icon, title, active, label, onClick }: { icon: React.ReactNode; title: string; active?: boolean; label?: string; onClick?: () => void }) {
   return (
     <button
       title={title}
+      onClick={onClick}
       className={`p-1.5 rounded-lg flex items-center gap-2 ${
         active ? 'bg-neutral-100 dark:bg-neutral-700' : 'hover:bg-neutral-100 dark:hover:bg-neutral-700'
       }`}

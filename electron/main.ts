@@ -100,8 +100,28 @@ function createMainWindow() {
   })
 }
 
-function createLiveAppWindow(url?: string) {
+function getDeviceWindowSize(deviceType?: string): { width: number; height: number } {
+  switch (deviceType) {
+    case 'iphone':
+    case 'android':
+    case 'app':
+      return { width: 420, height: 900 }
+    case 'ipad':
+    case 'tablet':
+      return { width: 820, height: 1100 }
+    case 'web':
+    case 'desktop':
+      return { width: 1280, height: 800 }
+    default:
+      return { width: 420, height: 750 }
+  }
+}
+
+function createLiveAppWindow(url?: string, deviceType?: string) {
+  const size = getDeviceWindowSize(deviceType)
+
   if (liveAppWindow) {
+    liveAppWindow.setSize(size.width, size.height)
     liveAppWindow.focus()
     if (url) liveAppWindow.loadURL(url)
     return
@@ -112,11 +132,11 @@ function createLiveAppWindow(url?: string) {
     : path.join(__dirname, 'preload.js')
 
   liveAppWindow = new BrowserWindow({
-    width: 420,
-    height: 750,
+    width: size.width,
+    height: size.height,
     minWidth: 320,
     minHeight: 480,
-    title: 'Live App',
+    title: `Live App — ${(deviceType || 'app').toUpperCase()}`,
     webPreferences: {
       preload: preloadFile,
       contextIsolation: true,
@@ -145,9 +165,9 @@ function loadHtmlInLiveWindow(html: string) {
 }
 
 // IPC Handlers
-ipcMain.handle('open-live-window', (_event, html?: string) => {
+ipcMain.handle('open-live-window', (_event, html?: string, deviceType?: string) => {
   if (html) currentLiveHtml = html
-  createLiveAppWindow()
+  createLiveAppWindow(undefined, deviceType)
 })
 
 ipcMain.handle('close-live-window', () => {
@@ -331,8 +351,8 @@ ipcMain.handle('project:get-status', () => {
   }
 })
 
-ipcMain.handle('open-live-window-url', (_event, url: string) => {
-  createLiveAppWindow(url)
+ipcMain.handle('open-live-window-url', (_event, url: string, deviceType?: string) => {
+  createLiveAppWindow(url, deviceType)
 })
 
 // ─── Feedback Popup Window (Designer/Developer mode) ──────────────

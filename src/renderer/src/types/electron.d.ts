@@ -37,8 +37,8 @@ interface ElectronPinterestAPI {
 }
 
 interface ElectronAPI {
-  openLiveWindow: (html?: string) => Promise<void>
-  openLiveWindowUrl: (url: string) => Promise<void>
+  openLiveWindow: (html?: string, deviceType?: string) => Promise<void>
+  openLiveWindowUrl: (url: string, deviceType?: string) => Promise<void>
   closeLiveWindow: () => Promise<void>
   updateLiveWindow: (html: string) => Promise<void>
   setLiveWindowAlwaysOnTop: (value: boolean) => Promise<void>

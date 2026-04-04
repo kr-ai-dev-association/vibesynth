@@ -15,7 +15,29 @@ interface DashboardProps {
 
 export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: DashboardProps) {
   const { t, locale, setLocale } = useI18n()
-  const [recentProjects] = useState<Project[]>([])
+  const [recentProjects, setRecentProjects] = useState<Project[]>([])
+
+  // Load saved projects from DB on mount
+  useEffect(() => {
+    window.electronAPI?.db.getAllProjects('default').then((saved: any[]) => {
+      if (saved && saved.length > 0) {
+        // Sort by updatedAt descending, take top 20
+        const projects: Project[] = saved
+          .sort((a: any, b: any) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+          .slice(0, 20)
+          .map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            prompt: p.prompt,
+            updatedAt: p.updatedAt,
+            screens: p.screens || [],
+            deviceType: p.deviceType || 'app',
+            designSystem: p.designSystem,
+          }))
+        setRecentProjects(projects)
+      }
+    }).catch(() => {})
+  }, [])
   const [searchQuery, setSearchQuery] = useState('')
   const [deviceType, setDeviceType] = useState<'app' | 'web' | 'tablet'>('app')
   const [selectedDesignId, setSelectedDesignId] = useState<string | null>(null)
@@ -155,7 +177,15 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
                 <div className="px-3 mb-2">
                   <p className="text-[11px] font-medium text-neutral-400 mb-1.5 px-1">{t('dashboard.recent')}</p>
                   {recentProjects.map((project) => (
-                    <SidebarProjectItem key={project.id} project={project} onClick={() => onOpenProject(project)} />
+                    <SidebarProjectItem
+                      key={project.id}
+                      project={project}
+                      onClick={() => onOpenProject(project)}
+                      onDelete={() => {
+                        window.electronAPI?.db.deleteProject(project.id)
+                        setRecentProjects(prev => prev.filter(p => p.id !== project.id))
+                      }}
+                    />
                   ))}
                 </div>
               )}
@@ -383,28 +413,39 @@ function PrdModal({
 
 // ─── Subcomponents ────────────────────────────────────────────
 
-function SidebarProjectItem({ project, onClick }: { project: Project; onClick: () => void }) {
+function SidebarProjectItem({ project, onClick, onDelete }: { project: Project; onClick: () => void; onDelete?: () => void }) {
   return (
-    <button
-      onClick={onClick}
-      className="w-full flex items-center gap-2.5 px-1.5 py-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-left group"
-    >
-      <div className="w-8 h-8 rounded-md shrink-0 overflow-hidden border border-neutral-200 dark:border-neutral-700">
-        <div
-          className="w-full h-full flex items-center justify-center text-sm"
-          style={{ background: project.deviceType === 'web' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'linear-gradient(135deg, #a3a3a3, #737373)' }}
-        >
-          {project.deviceType === 'web' ? '🌐' : project.deviceType === 'tablet' ? '📋' : '📱'}
+    <div className="relative group">
+      <button
+        onClick={onClick}
+        className="w-full flex items-center gap-2.5 px-1.5 py-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800 text-left"
+      >
+        <div className="w-8 h-8 rounded-md shrink-0 overflow-hidden border border-neutral-200 dark:border-neutral-700">
+          <div
+            className="w-full h-full flex items-center justify-center text-sm"
+            style={{ background: project.deviceType === 'web' ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : 'linear-gradient(135deg, #a3a3a3, #737373)' }}
+          >
+            {project.deviceType === 'web' ? '🌐' : project.deviceType === 'tablet' ? '📋' : '📱'}
+          </div>
         </div>
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium truncate group-hover:text-neutral-900 dark:group-hover:text-white">{project.name}</p>
-        <p className="text-[11px] text-neutral-400 flex items-center gap-1 mt-0.5">
-          <DeviceIcon type={project.deviceType} />
-          {project.updatedAt}
-        </p>
-      </div>
-    </button>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium truncate group-hover:text-neutral-900 dark:group-hover:text-white">{project.name}</p>
+          <p className="text-[11px] text-neutral-400 flex items-center gap-1 mt-0.5">
+            <DeviceIcon type={project.deviceType} />
+            {project.updatedAt}
+          </p>
+        </div>
+      </button>
+      {onDelete && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete() }}
+          className="absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-red-100 dark:hover:bg-red-900/30 text-neutral-400 hover:text-red-500 transition-all"
+          title="Delete project"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+        </button>
+      )}
+    </div>
   )
 }
 
