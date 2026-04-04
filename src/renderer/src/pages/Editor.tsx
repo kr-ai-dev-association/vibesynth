@@ -1643,9 +1643,11 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           selectedScreen={selectedScreen}
           onSelectScreen={(name) => setSelectedScreen(selectedScreen === name ? null : name)}
           onDesignSystemUpdate={async (ds) => {
-            // Update DS immediately for panel display
+            // Update DS + set all screens to generating (blur animation)
+            const blurredScreens = project.screens.map(s => ({ ...s, generating: true }))
             onProjectUpdate({
               ...project,
+              screens: blurredScreens,
               designSystem: ds,
               updatedAt: new Date().toLocaleDateString(),
             })
@@ -1672,7 +1674,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                       `Keep the exact same layout, content, and functionality. ` +
                       `${dsDescription}`
                     )
-                    return { ...s, html: newHtml }
+                    return { ...s, html: newHtml, generating: false }
                   })
 
                 const updatedScreens = await Promise.all(editPromises)
@@ -1686,6 +1688,13 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                 })
               } catch (err: any) {
                 updateLog(logId, `Failed to apply DS: ${err.message}`, 'error')
+                // Remove blur on failure
+                onProjectUpdate({
+                  ...project,
+                  screens: project.screens.map(s => ({ ...s, generating: false })),
+                  designSystem: ds,
+                  updatedAt: new Date().toLocaleDateString(),
+                })
               } finally {
                 setIsGenerating(false)
               }
