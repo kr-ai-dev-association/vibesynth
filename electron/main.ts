@@ -619,7 +619,12 @@ ipcMain.handle('live-edit:open', () => {
 </script>
 </body></html>`
 
-  liveEditWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+  // Write HTML to temp file — data: URLs block inline scripts with CSP
+  const tmpDir = path.join(app.getPath('userData'), 'vibesynth-data')
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
+  const tmpFile = path.join(tmpDir, 'live-edit.html')
+  fs.writeFileSync(tmpFile, html, 'utf-8')
+  liveEditWindow.loadFile(tmpFile)
 
   liveEditWindow.on('closed', () => { liveEditWindow = null })
 })
