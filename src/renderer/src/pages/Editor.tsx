@@ -2007,10 +2007,21 @@ function ScreenCard({
         // #region agent log
         // #endregion
         if (!doc || !doc.body) return
-        // Use body measurements only; documentElement.scrollHeight reflects the
-        // iframe's explicit height attribute (4000px initial), not content size.
-        const h = Math.max(doc.body.scrollHeight, doc.body.offsetHeight)
-        if (h > 100) {
+        // Calculate actual content height by finding the bottommost child element
+        // (body.scrollHeight often reflects the iframe's 4000px height attribute)
+        let h = 0
+        const children = doc.body.children
+        for (let ci = 0; ci < children.length; ci++) {
+          const child = children[ci] as HTMLElement
+          if (child.tagName === 'STYLE' || child.tagName === 'SCRIPT') continue
+          const bottom = child.offsetTop + child.offsetHeight
+          if (bottom > h) h = bottom
+        }
+        // Fallback: if no children measured, use body
+        if (h < 50) h = Math.max(doc.body.scrollHeight, doc.body.offsetHeight)
+        // Add small padding
+        h += 20
+        if (h > 100 && h < 10000) {
           const measured = Math.max(h, minHeight)
           // #region agent log
           // #endregion
@@ -2117,8 +2128,11 @@ function ScreenCard({
   }, [showHeatmap, heatmapZones])
 
   const HEIGHT_OVERRIDE_CSS = `<style data-vs-height-fix>
-html,body,[data-vs-root]{height:auto!important;max-height:none!important;overflow:visible!important;min-height:0!important;}
+html,body{height:auto!important;max-height:none!important;overflow:visible!important;min-height:0!important;}
+body>*{min-height:0!important;}
 *{max-height:none!important;}
+[style*="min-height:100vh"],[style*="min-height: 100vh"]{min-height:0!important;}
+[style*="height:100vh"],[style*="height: 100vh"]{height:auto!important;}
 </style>`
 
   // Height is now measured directly via allow-same-origin; no injected script needed
@@ -2129,18 +2143,22 @@ html,body,[data-vs-root]{height:auto!important;max-height:none!important;overflo
    */
   function prepareHtmlForDynamicHeight(html: string): string {
     let h = html
-    // In <style> blocks: height:100vh → min-height:100vh
+    // In <style> blocks: remove all fixed heights that prevent shrinking
     h = h.replace(/(<style[\s\S]*?<\/style>)/gi, (styleBlock) => {
       return styleBlock
-        .replace(/\bheight\s*:\s*100vh/gi, 'min-height:100vh')
-        .replace(/\bheight\s*:\s*100%/gi, 'min-height:100%')
+        .replace(/\bheight\s*:\s*100vh/gi, 'height:auto')
+        .replace(/\bmin-height\s*:\s*100vh/gi, 'min-height:0')
+        .replace(/\bheight\s*:\s*100%/gi, 'height:auto')
+        .replace(/\bmin-height\s*:\s*100%/gi, 'min-height:0')
         .replace(/\boverflow\s*:\s*hidden/gi, 'overflow:visible')
     })
-    // In inline styles: style="...height:100vh..." → min-height
+    // In inline styles
     h = h.replace(/style="([^"]*)"/gi, (_match, inner: string) => {
       const fixed = inner
-        .replace(/\bheight\s*:\s*100vh/gi, 'min-height:100vh')
-        .replace(/\bheight\s*:\s*100%/gi, 'min-height:100%')
+        .replace(/\bheight\s*:\s*100vh/gi, 'height:auto')
+        .replace(/\bmin-height\s*:\s*100vh/gi, 'min-height:0')
+        .replace(/\bheight\s*:\s*100%/gi, 'height:auto')
+        .replace(/\bmin-height\s*:\s*100%/gi, 'min-height:0')
       return `style="${fixed}"`
     })
     return h

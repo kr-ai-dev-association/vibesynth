@@ -633,18 +633,32 @@ test('VibeSynth 전체 기능 E2E', async ({ electronApp, page }) => {
   await page.waitForTimeout(DELAY)
 
   // ═══════════════════════════════════════════════════════════════
-  // 19. 스크린 높이 자동 조절 확인
+  // 19. 스크린 높이 자동 조절 확인 — 스크린별 스크린샷 캡처
   // ═══════════════════════════════════════════════════════════════
   const iframes = page.locator('[data-screen-card] iframe')
   const iframeCount = await iframes.count()
   let heightOk = 0
+  let heightTooSmall = 0
   for (let i = 0; i < Math.min(iframeCount, 3); i++) {
-    const box = await iframes.nth(i).boundingBox()
-    if (box && box.height > 100) {
+    const card = page.locator('[data-screen-card]').nth(i)
+    const box = await card.boundingBox()
+    const cardHeight = box?.height || 0
+
+    // 각 스크린 카드의 스크린샷 캡처
+    await card.screenshot({ path: `test-results/full-19-screen${i + 1}.png` })
+
+    if (cardHeight > 150) {
       heightOk++
+    } else {
+      heightTooSmall++
     }
+    console.log(`  스크린 ${i + 1}: 카드 높이 ${Math.round(cardHeight)}px`)
   }
-  console.log(`✅ 19. 스크린 높이: ${heightOk}/${Math.min(iframeCount, 3)}개 정상 (>100px)`)
+  if (heightTooSmall > 0) {
+    console.log(`⚠️ 19. ${heightTooSmall}개 스크린 높이가 너무 작음 (<150px)`)
+  } else {
+    console.log(`✅ 19. 스크린 높이: ${heightOk}/${Math.min(iframeCount, 3)}개 정상`)
+  }
   await page.waitForTimeout(DELAY)
 
   // ═══════════════════════════════════════════════════════════════
