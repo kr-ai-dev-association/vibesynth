@@ -512,7 +512,7 @@ ipcMain.handle('live-edit:open', () => {
   const { screen: electronScreen } = require('electron') as typeof import('electron')
   const display = electronScreen.getPrimaryDisplay()
   const { width: screenW, height: screenH } = display.workAreaSize
-  const editW = 500, editH = 380
+  const editW = 700, editH = 800
 
   liveEditWindow = new BrowserWindow({
     width: editW,
@@ -546,7 +546,7 @@ ipcMain.handle('live-edit:open', () => {
   .mode-btn.developer.active{background:#3b82f6}
   .content{flex:1;display:flex;flex-direction:column;padding:12px 16px;gap:10px;overflow-y:auto}
   .input-area{display:flex;gap:8px}
-  textarea{flex:1;background:#1a1a2e;border:1px solid #2d2d44;border-radius:10px;padding:10px 14px;color:#e2e8f0;font-size:13px;resize:none;outline:none;font-family:inherit;min-height:50px}
+  textarea{flex:1;background:#1a1a2e;border:1px solid #2d2d44;border-radius:10px;padding:10px 14px;color:#e2e8f0;font-size:13px;resize:none;outline:none;font-family:inherit;min-height:100px}
   textarea:focus{border-color:#7c3aed}
   textarea::placeholder{color:#4a4a6a}
   button.submit{background:#7c3aed;color:white;border:none;border-radius:10px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:background 0.15s}
@@ -572,7 +572,7 @@ ipcMain.handle('live-edit:open', () => {
 </div>
 <div class="content">
   <div class="input-area">
-    <textarea id="le-input" rows="2" placeholder="Describe changes to apply..."></textarea>
+    <textarea id="le-input" rows="4" placeholder="Describe changes to apply..."></textarea>
     <button class="submit" id="le-submit">Apply</button>
   </div>
   <div class="feedback" id="le-feedback"></div>
