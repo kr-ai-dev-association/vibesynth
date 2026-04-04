@@ -1127,8 +1127,48 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       setAgentLogOpen(true)
 
       try {
+        // Check if project already has built files (skip rebuild)
+        const existingAppTsx = await window.electronAPI?.project.readFile(project.id, 'src/App.tsx')
+        const existingPkg = await window.electronAPI?.project.readFile(project.id, 'package.json')
+
+        if (existingAppTsx && existingPkg) {
+          // Project already built — check if dev server is running or start it
+          addLog('Project already built — starting dev server...', 'info')
+
+          const status = await window.electronAPI?.project.getStatus()
+          if (status?.running && status.projectId === project.id) {
+            // Dev server already running for this project
+            addLog('Dev server already running — opening Live window', 'info')
+            const port = 5173
+            const url = `http://localhost:${port}`
+            setDevServerUrl(url)
+            await window.electronAPI?.openLiveWindowUrl(url, deviceType)
+            setIsRunning(true)
+            window.electronAPI?.liveEdit.open()
+            setBuildingFrontend(false)
+            return
+          }
+
+          // Start dev server without rebuild
+          addLog(t('editor.log.startingDevServer'), 'generating')
+          const port = 5173 + Math.floor(Math.random() * 100)
+          const devResult = await window.electronAPI?.project.startDev(project.id, port)
+          if (devResult?.success) {
+            const url = devResult.url || `http://localhost:${port}`
+            setDevServerUrl(url)
+            addLog(t('editor.log.devServerRunning', { url }), 'success')
+            await window.electronAPI?.openLiveWindowUrl(url, deviceType)
+            setIsRunning(true)
+            window.electronAPI?.liveEdit.open()
+            setBuildingFrontend(false)
+            return
+          }
+          // If start failed, fall through to full rebuild
+          addLog('Dev server failed — rebuilding project...', 'info')
+        }
+
         const cache = buildCacheRef.current
-        // Filter out generating/empty screens — only include completed ones with real HTML
+        // Filter out generating/empty screens
         const allScreensData = project.screens
           .filter(s => !s.generating && s.html && s.html.length > 100)
           .map(s => ({ name: s.name, html: s.html }))
