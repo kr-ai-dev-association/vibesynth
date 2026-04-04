@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useI18n } from '../../lib/i18n'
 
 interface PromptBarProps {
   placeholder: string
@@ -25,15 +26,16 @@ export function PromptBar({
   onExitEditMode,
   onClearElement,
 }: PromptBarProps) {
+  const { t } = useI18n()
   const [prompt, setPrompt] = useState('')
   const [model, setModel] = useState('3.0 Flash')
   const [showModelMenu, setShowModelMenu] = useState(false)
 
   const models = [
-    { name: '3.0 Flash', desc: 'Fast generation. Great for iteration.' },
-    { name: '3.0 Quality', desc: 'Maximum quality and reasoning.' },
-    { name: 'Redesign', desc: 'Redesign existing apps. Attach a screenshot.' },
-    { name: 'Ideate', desc: 'Bring a problem to solve and see solutions.' },
+    { name: t('promptBar.modelFlash'), desc: t('promptBar.modelFlashDesc') },
+    { name: t('promptBar.modelQuality'), desc: t('promptBar.modelQualityDesc') },
+    { name: t('promptBar.modelRedesign'), desc: t('promptBar.modelRedesignDesc') },
+    { name: t('promptBar.modelIdeate'), desc: t('promptBar.modelIdeateDesc') },
   ]
 
   const handleSubmit = () => {
@@ -60,7 +62,7 @@ export function PromptBar({
           {editMode && (
             <span className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
               <EditPenIcon className="w-3 h-3" />
-              Edit Mode
+              {t('promptBar.editMode')}
               <button onClick={onExitEditMode} className="ml-0.5 hover:text-blue-900 dark:hover:text-blue-100">
                 <XIcon className="w-3 h-3" />
               </button>
@@ -99,7 +101,7 @@ export function PromptBar({
       <div className="flex items-center justify-between px-3 pb-2.5">
         <div className="flex items-center gap-1">
           {/* Add file */}
-          <button className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700" title="Choose File">
+          <button className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700" title={t('promptBar.chooseFile')}>
             <PlusIcon className="w-4 h-4" />
           </button>
 
@@ -114,7 +116,7 @@ export function PromptBar({
               }`}
             >
               <PhoneIcon className="w-3.5 h-3.5" />
-              App
+              {t('promptBar.app')}
             </button>
             <button
               onClick={() => onDeviceTypeChange('tablet')}
@@ -125,7 +127,7 @@ export function PromptBar({
               }`}
             >
               <TabletIcon className="w-3.5 h-3.5" />
-              Tablet
+              {t('promptBar.tablet')}
             </button>
             <button
               onClick={() => onDeviceTypeChange('web')}
@@ -136,7 +138,7 @@ export function PromptBar({
               }`}
             >
               <MonitorIcon className="w-3.5 h-3.5" />
-              Web
+              {t('promptBar.web')}
             </button>
           </div>
         </div>
@@ -176,7 +178,7 @@ export function PromptBar({
           </div>
 
           {/* Mic button */}
-          <button className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700" title="Voice input">
+          <button className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700" title={t('promptBar.voiceInput')}>
             <MicIcon className="w-4 h-4" />
           </button>
 
@@ -185,7 +187,7 @@ export function PromptBar({
             onClick={handleSubmit}
             disabled={!prompt.trim()}
             className="p-1.5 rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 disabled:opacity-30 hover:opacity-90"
-            title="Generate"
+            title={t('common.generate')}
           >
             <ArrowUpIcon className="w-4 h-4" />
           </button>

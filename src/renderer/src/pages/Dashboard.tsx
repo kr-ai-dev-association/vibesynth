@@ -3,13 +3,9 @@ import type { Project, DesignSystem } from '../App'
 import { PromptBar } from '../components/common/PromptBar'
 import { AppearanceToggle } from '../components/common/AppearanceToggle'
 import { PINTEREST_DESIGNS } from '../lib/pinterest-designs'
-import { EXAMPLE_PROJECTS, EXAMPLE_CATEGORIES, type ExampleProject } from '../lib/example-projects'
-
-const PROMPT_SUGGESTIONS = [
-  'A recipe discovery app for making cocktails at home with step-by-step guides',
-  'A browse tab for a mobile app for romantic travel destinations',
-  'Mobile home screen for a fitness tracking app with dark theme',
-]
+import { getExampleProjects, getExampleCategories, getSuggestions, type ExampleProject } from '../lib/example-projects'
+import { useI18n } from '../lib/i18n'
+import { MarkdownRenderer } from '../components/common/MarkdownRenderer'
 
 interface DashboardProps {
   onOpenProject: (project: Project) => void
@@ -18,6 +14,7 @@ interface DashboardProps {
 }
 
 export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: DashboardProps) {
+  const { t, locale, setLocale } = useI18n()
   const [recentProjects] = useState<Project[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [deviceType, setDeviceType] = useState<'app' | 'web' | 'tablet'>('app')
@@ -27,6 +24,10 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
   const [prdModal, setPrdModal] = useState<ExampleProject | null>(null)
   const [prdDesignId, setPrdDesignId] = useState<string | null>(null)
   const moreMenuRef = useRef<HTMLDivElement>(null)
+
+  const exampleProjects = useMemo(() => getExampleProjects(locale), [locale])
+  const exampleCategories = useMemo(() => getExampleCategories(locale), [locale])
+  const suggestions = useMemo(() => getSuggestions(locale), [locale])
 
   const selectedDesignSystem = selectedDesignId
     ? PINTEREST_DESIGNS.find(d => d.id === selectedDesignId)?.designSystem
@@ -43,11 +44,11 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
   }, [])
 
   const filteredExamples = useMemo(() =>
-    EXAMPLE_PROJECTS.filter((ex) =>
+    exampleProjects.filter((ex) =>
       ex.project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       ex.categoryLabel.toLowerCase().includes(searchQuery.toLowerCase())
     ),
-    [searchQuery]
+    [searchQuery, exampleProjects]
   )
 
   const handleOpenExample = (ex: ExampleProject) => {
@@ -70,30 +71,37 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
       {/* Header */}
       <header className="h-13 flex items-center justify-between px-4 border-b border-neutral-200 dark:border-neutral-700 shrink-0 draggable">
         <div className="flex items-center gap-2 no-drag">
-          <span className="text-xl font-bold tracking-tight">VibeSynth</span>
+          <span className="text-xl font-bold tracking-tight">{t('common.appName')}</span>
           <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md border border-neutral-300 dark:border-neutral-600 text-neutral-500">
-            BETA
+            {t('common.beta')}
           </span>
         </div>
         <div className="flex items-center gap-1 no-drag">
+          <button
+            onClick={() => setLocale(locale === 'en' ? 'ko' : 'en')}
+            className="px-2 py-1 text-[11px] font-semibold rounded-lg border border-neutral-200 dark:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
+            title={locale === 'en' ? '한국어로 전환' : 'Switch to English'}
+          >
+            {locale === 'en' ? 'KO' : 'EN'}
+          </button>
           <AppearanceToggle />
-          <button onClick={onOpenSettings} className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800" title="Settings">
+          <button onClick={onOpenSettings} className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800" title={t('common.settings')}>
             <SettingsIcon />
           </button>
           <div ref={moreMenuRef} className="relative">
             <button
               onClick={() => setShowMoreMenu(!showMoreMenu)}
               className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              title="More"
+              title={t('common.more')}
             >
               <MoreVertIcon />
             </button>
             {showMoreMenu && (
               <div className="absolute top-full right-0 mt-1 w-48 bg-white dark:bg-neutral-800 rounded-xl shadow-lg border border-neutral-200 dark:border-neutral-700 py-1 z-50">
-                <MoreMenuItem label="Help & feedback" onClick={() => setShowMoreMenu(false)} />
-                <MoreMenuItem label="Keyboard shortcuts" onClick={() => setShowMoreMenu(false)} />
+                <MoreMenuItem label={t('dashboard.helpFeedback')} onClick={() => setShowMoreMenu(false)} />
+                <MoreMenuItem label={t('dashboard.keyboardShortcuts')} onClick={() => setShowMoreMenu(false)} />
                 <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-1" />
-                <MoreMenuItem label="About VibeSynth" onClick={() => setShowMoreMenu(false)} />
+                <MoreMenuItem label={t('dashboard.aboutApp')} onClick={() => setShowMoreMenu(false)} />
               </div>
             )}
           </div>
@@ -114,7 +122,7 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
                 }`}
               >
                 <GridIcon className="w-3.5 h-3.5" />
-                My projects
+                {t('dashboard.myProjects')}
               </button>
               <button
                 onClick={() => setSidebarTab('shared')}
@@ -125,7 +133,7 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
                 }`}
               >
                 <PeopleIcon className="w-3.5 h-3.5" />
-                Shared with me
+                {t('dashboard.sharedWithMe')}
               </button>
             </div>
 
@@ -133,7 +141,7 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
               <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400 w-4 h-4" />
               <input
                 type="text"
-                placeholder="Search projects"
+                placeholder={t('dashboard.searchPlaceholder')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 outline-none focus:border-neutral-400"
@@ -145,7 +153,7 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
             <>
               {recentProjects.length > 0 && (
                 <div className="px-3 mb-2">
-                  <p className="text-[11px] font-medium text-neutral-400 mb-1.5 px-1">Recent</p>
+                  <p className="text-[11px] font-medium text-neutral-400 mb-1.5 px-1">{t('dashboard.recent')}</p>
                   {recentProjects.map((project) => (
                     <SidebarProjectItem key={project.id} project={project} onClick={() => onOpenProject(project)} />
                   ))}
@@ -155,9 +163,9 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
               {/* LifeFlow Examples by category */}
               <div className="px-3 pb-3">
                 <p className="text-[11px] font-medium text-neutral-400 mb-1.5 px-1">
-                  LifeFlow Examples
+                  {t('dashboard.lifeflowExamples')}
                 </p>
-                {EXAMPLE_CATEGORIES.map((cat) => {
+                {exampleCategories.map((cat) => {
                   const ex = filteredExamples.find(e => e.category === cat.id)
                   if (!ex) return null
                   return (
@@ -188,18 +196,18 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center px-6 text-center">
-              <p className="text-sm text-neutral-400">No shared projects yet</p>
+              <p className="text-sm text-neutral-400">{t('dashboard.noShared')}</p>
             </div>
           )}
         </aside>
 
         {/* Main Content */}
         <main className="flex-1 flex flex-col items-center justify-center px-8">
-          <h1 className="text-5xl font-light mb-8 tracking-tight">Welcome to VibeSynth.</h1>
+          <h1 className="text-5xl font-light mb-8 tracking-tight">{t('dashboard.welcome')}</h1>
 
           {/* Example Cards — LifeFlow showcase */}
           <div className="grid grid-cols-3 gap-3 mb-8 max-w-3xl w-full">
-            {EXAMPLE_PROJECTS.map((ex) => (
+            {exampleProjects.map((ex) => (
               <button
                 key={ex.project.id}
                 onClick={() => handleOpenExample(ex)}
@@ -221,7 +229,7 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
 
           {/* Suggestion Chips */}
           <div className="flex gap-2 mb-4 flex-wrap justify-center max-w-2xl">
-            {PROMPT_SUGGESTIONS.map((suggestion, i) => (
+            {suggestions.map((suggestion, i) => (
               <button
                 key={i}
                 onClick={() => onCreateProject(suggestion, deviceType, selectedDesignSystem)}
@@ -243,10 +251,10 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
             <PromptBar
               placeholder={
                 deviceType === 'app'
-                  ? 'What native mobile app shall we design?'
+                  ? t('dashboard.promptApp')
                   : deviceType === 'tablet'
-                  ? 'What tablet experience shall we design?'
-                  : 'What desktop web experience shall we design?'
+                  ? t('dashboard.promptTablet')
+                  : t('dashboard.promptWeb')
               }
               deviceType={deviceType}
               onDeviceTypeChange={setDeviceType}
@@ -285,6 +293,7 @@ function PrdModal({
   onGenerate: () => void
   onClose: () => void
 }) {
+  const { t } = useI18n()
   const selectedDS = selectedDesignId
     ? PINTEREST_DESIGNS.find(d => d.id === selectedDesignId)
     : null
@@ -327,7 +336,7 @@ function PrdModal({
           <div className="flex items-center justify-between gap-4">
             {/* DS Selector */}
             <div className="flex-1">
-              <p className="text-xs text-neutral-400 mb-2">Design Style</p>
+              <p className="text-xs text-neutral-400 mb-2">{t('dashboard.designStyle')}</p>
               <div className="flex gap-2 overflow-x-auto pb-1">
                 {PINTEREST_DESIGNS.slice(0, 8).map((d) => (
                   <button
@@ -362,7 +371,7 @@ function PrdModal({
                   <div className="flex-1" style={{ backgroundColor: selectedDS.designSystem.colors.secondary.base }} />
                 </div>
               )}
-              Generate
+              {t('common.generate')}
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M12 5l7 7-7 7" /></svg>
             </button>
           </div>
@@ -370,122 +379,6 @@ function PrdModal({
       </div>
     </div>
   )
-}
-
-// ─── Simple Markdown Renderer ─────────────────────────────────
-
-function MarkdownRenderer({ content }: { content: string }) {
-  const lines = content.split('\n')
-  const elements: JSX.Element[] = []
-  let tableRows: string[][] = []
-  let inTable = false
-  let key = 0
-
-  const flushTable = () => {
-    if (tableRows.length < 2) { tableRows = []; return }
-    const headers = tableRows[0]
-    const rows = tableRows.slice(2) // skip separator
-    elements.push(
-      <div key={key++} className="overflow-x-auto my-3">
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr>
-              {headers.map((h, i) => (
-                <th key={i} className="text-left px-3 py-2 border-b-2 border-neutral-200 dark:border-neutral-600 font-semibold text-neutral-700 dark:text-neutral-200 text-xs">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, ri) => (
-              <tr key={ri} className="border-b border-neutral-100 dark:border-neutral-700/50">
-                {row.map((cell, ci) => (
-                  <td key={ci} className="px-3 py-1.5 text-xs text-neutral-600 dark:text-neutral-300">{cell}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )
-    tableRows = []
-  }
-
-  const inlineFormat = (text: string) => {
-    const parts: (string | JSX.Element)[] = []
-    let remaining = text
-    let idx = 0
-    while (remaining.length > 0) {
-      const boldMatch = remaining.match(/\*\*(.+?)\*\*/)
-      if (boldMatch && boldMatch.index !== undefined) {
-        if (boldMatch.index > 0) parts.push(remaining.slice(0, boldMatch.index))
-        parts.push(<strong key={`b${idx++}`} className="font-semibold text-neutral-800 dark:text-neutral-100">{boldMatch[1]}</strong>)
-        remaining = remaining.slice(boldMatch.index + boldMatch[0].length)
-      } else {
-        parts.push(remaining)
-        break
-      }
-    }
-    return parts
-  }
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-
-    // Table row
-    if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
-      if (!inTable) inTable = true
-      const cells = line.split('|').slice(1, -1).map(c => c.trim())
-      tableRows.push(cells)
-      continue
-    } else if (inTable) {
-      inTable = false
-      flushTable()
-    }
-
-    // Empty line
-    if (!line.trim()) {
-      continue
-    }
-
-    // Headings
-    if (line.startsWith('# ')) {
-      elements.push(<h1 key={key++} className="text-2xl font-bold mt-1 mb-3 text-neutral-900 dark:text-white">{line.slice(2)}</h1>)
-    } else if (line.startsWith('## ')) {
-      elements.push(<h2 key={key++} className="text-lg font-bold mt-5 mb-2 text-neutral-800 dark:text-neutral-100 border-b border-neutral-200 dark:border-neutral-700 pb-1">{line.slice(3)}</h2>)
-    } else if (line.startsWith('### ')) {
-      elements.push(<h3 key={key++} className="text-sm font-bold mt-4 mb-1.5 text-neutral-700 dark:text-neutral-200">{line.slice(4)}</h3>)
-    }
-    // List items
-    else if (line.match(/^\s*[-*]\s/)) {
-      const indent = line.search(/\S/)
-      const text = line.replace(/^\s*[-*]\s/, '')
-      elements.push(
-        <div key={key++} className="flex gap-2 text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed" style={{ paddingLeft: Math.max(0, indent * 4) + 'px' }}>
-          <span className="text-neutral-300 dark:text-neutral-500 mt-0.5">•</span>
-          <span>{inlineFormat(text)}</span>
-        </div>
-      )
-    }
-    // Numbered list
-    else if (line.match(/^\d+\.\s/)) {
-      const num = line.match(/^(\d+)\.\s/)![1]
-      const text = line.replace(/^\d+\.\s/, '')
-      elements.push(
-        <div key={key++} className="flex gap-2 text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed">
-          <span className="text-neutral-400 dark:text-neutral-500 font-medium w-4 shrink-0 text-right">{num}.</span>
-          <span>{inlineFormat(text)}</span>
-        </div>
-      )
-    }
-    // Regular paragraph
-    else {
-      elements.push(<p key={key++} className="text-xs text-neutral-600 dark:text-neutral-300 leading-relaxed mb-1">{inlineFormat(line)}</p>)
-    }
-  }
-
-  if (inTable) flushTable()
-
-  return <div className="space-y-0.5">{elements}</div>
 }
 
 // ─── Subcomponents ────────────────────────────────────────────
@@ -516,6 +409,7 @@ function SidebarProjectItem({ project, onClick }: { project: Project; onClick: (
 }
 
 function DesignSystemPicker({ selectedId, onSelect }: { selectedId: string | null; onSelect: (id: string | null) => void }) {
+  const { t } = useI18n()
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -527,9 +421,9 @@ function DesignSystemPicker({ selectedId, onSelect }: { selectedId: string | nul
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
         {selectedId ? (
-          <span>Style: <strong className="text-neutral-600 dark:text-neutral-200">{PINTEREST_DESIGNS.find(d => d.id === selectedId)?.name}</strong></span>
+          <span>{t('dashboard.stylePrefix')}<strong className="text-neutral-600 dark:text-neutral-200">{PINTEREST_DESIGNS.find(d => d.id === selectedId)?.name}</strong></span>
         ) : (
-          <span>Choose a design style (optional)</span>
+          <span>{t('dashboard.chooseDesignStyle')}</span>
         )}
         <span className="text-[10px]">{expanded ? '▲' : '▼'}</span>
       </button>
@@ -541,13 +435,13 @@ function DesignSystemPicker({ selectedId, onSelect }: { selectedId: string | nul
             className={`rounded-xl border-2 transition-all p-1.5 ${
               !selectedId ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-neutral-200 dark:border-neutral-700 hover:border-neutral-400'
             }`}
-            title="Auto (AI decides)"
+            title={t('dashboard.autoAI')}
           >
             <div className="flex h-3 rounded overflow-hidden bg-neutral-200 dark:bg-neutral-600">
               <div className="flex-1 bg-neutral-300 dark:bg-neutral-500" />
               <div className="flex-1 bg-neutral-200 dark:bg-neutral-600" />
             </div>
-            <div className="text-[8px] text-neutral-400 mt-1 truncate text-center">Auto</div>
+            <div className="text-[8px] text-neutral-400 mt-1 truncate text-center">{t('dashboard.auto')}</div>
           </button>
 
           {PINTEREST_DESIGNS.map((d) => (

@@ -1,4 +1,5 @@
 import type { AgentLogEntry } from '../../pages/Editor'
+import { useI18n } from '../../lib/i18n'
 
 interface AgentLogProps {
   isOpen: boolean
@@ -7,6 +8,7 @@ interface AgentLogProps {
 }
 
 export function AgentLog({ isOpen, onToggle, entries = [] }: AgentLogProps) {
+  const { t } = useI18n()
   return (
     <div className="border-t border-neutral-200 dark:border-neutral-700">
       <button
@@ -14,7 +16,7 @@ export function AgentLog({ isOpen, onToggle, entries = [] }: AgentLogProps) {
         className="w-full flex items-center gap-2 px-4 py-2 text-sm hover:bg-neutral-50 dark:hover:bg-neutral-700/50"
       >
         <SparkleIcon className="w-4 h-4" />
-        <span className="font-medium">Agent log</span>
+        <span className="font-medium">{t('agentLog.title')}</span>
         {entries.length > 0 && (
           <span className="text-xs text-neutral-400">({entries.length})</span>
         )}
@@ -25,7 +27,7 @@ export function AgentLog({ isOpen, onToggle, entries = [] }: AgentLogProps) {
         <div className="px-4 pb-3 max-h-40 overflow-y-auto">
           {entries.length === 0 ? (
             <div className="text-sm text-neutral-500">
-              No activity yet. Generate a design to see agent logs here.
+              {t('agentLog.empty')}
             </div>
           ) : (
             <div className="space-y-1.5">

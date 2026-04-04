@@ -8,6 +8,7 @@ import { RightPanel } from '../components/editor/RightPanel'
 import { generateDesign, generateMultiScreen, editDesign, generateDesignSystem, generateHeatmap, generateFrontendApp, generateIncrementalFrontend, editFrontendFile, fixBuildErrors, hashString, analyzeDesignFromImage } from '../lib/gemini'
 import { DEFAULT_DESIGN_GUIDE } from '../lib/default-design-guide'
 import { designGuideDB } from '../lib/design-guide-db'
+import { useI18n } from '../lib/i18n'
 
 export interface AgentLogEntry {
   id: string
@@ -46,6 +47,7 @@ const PLACEHOLDER_DESIGN_SYSTEM: DesignSystem = {
 }
 
 export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: EditorProps) {
+  const { t, locale, setLocale } = useI18n()
   const [zoom, setZoom] = useState(100)
   const [isRunning, setIsRunning] = useState(false)
   const [showHamburger, setShowHamburger] = useState(false)
@@ -149,7 +151,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     setIsGenerating(true)
     setAgentLogOpen(true)
 
-    const logId = addLog(`Generating design: "${prompt}"...`, 'generating')
+    const logId = addLog(t('editor.log.generatingDesign', { prompt }), 'generating')
     let imgLogId: string | null = null
 
     // Pre-create placeholder screen with generating=true
@@ -166,16 +168,16 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       const existingRefHtml = project.screens.length > 0 ? project.screens[0].html : undefined
       const results = await generateDesign(prompt, deviceType, activeGuide, {
         onImageGenStart: () => {
-          imgLogId = addLog('Generating images with Nano Banana...', 'generating')
+          imgLogId = addLog(t('editor.log.generatingImages'), 'generating')
         },
         onImageGenComplete: (count) => {
-          if (imgLogId) updateLog(imgLogId, `Generated ${count} image${count !== 1 ? 's' : ''} for design`, 'success')
+          if (imgLogId) updateLog(imgLogId, t('editor.log.imagesGenerated', { count }), 'success')
         },
         onDesignGenStart: () => {
-          updateLog(logId, `Generating design layout: "${prompt}"...`, 'generating')
+          updateLog(logId, t('editor.log.generatingLayout', { prompt }), 'generating')
         },
         onDesignGenComplete: () => {
-          updateLog(logId, 'Design layout generated, assembling...', 'generating')
+          updateLog(logId, t('editor.log.layoutDone'), 'generating')
         },
       }, existingRefHtml, project.designSystem)
 
@@ -183,13 +185,13 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       const finishedScreen: Screen = { id: placeholderId, name: r.screenName, html: r.html }
       const updatedScreens = [...project.screens, finishedScreen]
 
-      updateLog(logId, `Generated screen: ${r.screenName}`, 'success')
+      updateLog(logId, t('editor.log.screenGenerated', { name: r.screenName }), 'success')
 
       if (!project.designSystem) {
-        const dsLogId = addLog('Extracting design system & guide...', 'generating')
+        const dsLogId = addLog(t('editor.log.extractingDS'), 'generating')
         try {
           const ds = await generateDesignSystem(r.html, activeGuide)
-          updateLog(dsLogId, `Design system "${ds.name}" with guide extracted`, 'success')
+          updateLog(dsLogId, t('editor.log.dsExtracted', { name: ds.name }), 'success')
           if (ds.guide) {
             designGuideDB.saveFromGeneration(project.name, prompt, ds.guide)
           }
@@ -200,7 +202,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             updatedAt: new Date().toLocaleDateString(),
           })
         } catch {
-          updateLog(dsLogId, 'Could not extract design system', 'error')
+          updateLog(dsLogId, t('editor.log.dsExtractFail'), 'error')
           onProjectUpdate({
             ...project,
             screens: updatedScreens,
@@ -216,7 +218,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
-      updateLog(logId, `Generation failed: ${message}`, 'error')
+      updateLog(logId, t('editor.log.genFailed', { error: message }), 'error')
       // Remove placeholder on failure
       onProjectUpdate({
         ...project,
@@ -233,7 +235,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     setIsGenerating(true)
     setAgentLogOpen(true)
 
-    const logId = addLog(`Generating ${screenNames.length} screens: ${screenNames.join(', ')}...`, 'generating')
+    const logId = addLog(t('editor.log.generatingScreens', { count: screenNames.length, names: screenNames.join(', ') }), 'generating')
     let imgLogId: string | null = null
 
     // Pre-create placeholder screens with generating=true so they appear on canvas immediately
@@ -257,19 +259,19 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     try {
       await generateMultiScreen(appDescription, screenNames, deviceType, activeGuide, {
         onImageGenStart: () => {
-          imgLogId = addLog('Generating images with Nano Banana...', 'generating')
+          imgLogId = addLog(t('editor.log.generatingImages'), 'generating')
         },
         onImageGenComplete: (count) => {
-          if (imgLogId) updateLog(imgLogId, `Generated ${count} image${count !== 1 ? 's' : ''} for design`, 'success')
+          if (imgLogId) updateLog(imgLogId, t('editor.log.imagesGenerated', { count }), 'success')
         },
         onDesignGenStart: () => {
-          updateLog(logId, `Generating ${screenNames.length} screens...`, 'generating')
+          updateLog(logId, t('editor.log.generatingScreens', { count: screenNames.length, names: screenNames.join(', ') }), 'generating')
         },
         onDesignGenComplete: () => {
-          updateLog(logId, `All ${screenNames.length} screens generated`, 'success')
+          updateLog(logId, t('editor.log.allScreensDone', { count: screenNames.length }), 'success')
         },
         onScreenComplete: (i, total, name, html) => {
-          addLog(`Screen ${i}/${total} done: ${name}`, 'success')
+          addLog(t('editor.log.screenDone', { index: i, total, name }), 'success')
           if (i === 1) firstScreenHtml = html
 
           latestScreens = latestScreens.map(s =>
@@ -287,10 +289,10 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
 
       // Extract design system from first screen
       if (!project.designSystem && firstScreenHtml) {
-        const dsLogId = addLog('Extracting design system & guide...', 'generating')
+        const dsLogId = addLog(t('editor.log.extractingDS'), 'generating')
         try {
           const ds = await generateDesignSystem(firstScreenHtml, activeGuide)
-          updateLog(dsLogId, `Design system "${ds.name}" with guide extracted`, 'success')
+          updateLog(dsLogId, t('editor.log.dsExtracted', { name: ds.name }), 'success')
           if (ds.guide) {
             designGuideDB.saveFromGeneration(project.name, appDescription, ds.guide)
           }
@@ -301,12 +303,12 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             updatedAt: new Date().toLocaleDateString(),
           })
         } catch {
-          updateLog(dsLogId, 'Could not extract design system', 'error')
+          updateLog(dsLogId, t('editor.log.dsExtractFail'), 'error')
         }
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
-      updateLog(logId, `Multi-screen generation failed: ${message}`, 'error')
+      updateLog(logId, t('editor.log.multiScreenFailed', { error: message }), 'error')
       // Remove any remaining placeholder screens on failure
       latestScreens = latestScreens.filter(s => !s.generating)
       onProjectUpdate({
@@ -333,7 +335,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
 
     if (isGlobalEdit && project.screens.length > 1) {
       // ─── Batch edit: apply to all screens (Stitch parity) ───
-      const logId = addLog(`Batch editing all ${project.screens.length} screens: "${prompt}"...`, 'generating')
+      const logId = addLog(t('editor.log.batchEditing', { count: project.screens.length, prompt }), 'generating')
 
       try {
         const editPromises = project.screens.map(async (s) => {
@@ -342,13 +344,12 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         })
 
         const updatedScreens = await Promise.all(editPromises)
-        updateLog(logId, `Batch updated ${updatedScreens.length} screens`, 'success')
+        updateLog(logId, t('editor.log.batchUpdated', { count: updatedScreens.length }), 'success')
 
-        // Also re-extract design system to reflect changes
-        const dsLogId = addLog('Updating design system...', 'generating')
+        const dsLogId = addLog(t('editor.log.updatingDS'), 'generating')
         try {
           const ds = await generateDesignSystem(updatedScreens[0].html, activeGuide)
-          updateLog(dsLogId, `Design system updated to "${ds.name}"`, 'success')
+          updateLog(dsLogId, t('editor.log.dsUpdated', { name: ds.name }), 'success')
           if (ds.guide) {
             designGuideDB.saveFromGeneration(project.name, prompt, ds.guide)
           }
@@ -359,7 +360,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             updatedAt: new Date().toLocaleDateString(),
           })
         } catch {
-          updateLog(dsLogId, 'Design system update skipped', 'info')
+          updateLog(dsLogId, t('editor.log.dsUpdateSkipped'), 'info')
           onProjectUpdate({
             ...project,
             screens: updatedScreens,
@@ -368,17 +369,17 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error'
-        updateLog(logId, `Batch edit failed: ${message}`, 'error')
+        updateLog(logId, t('editor.log.batchFailed', { error: message }), 'error')
       } finally {
         setIsGenerating(false)
       }
     } else {
       // ─── Single screen edit ───
-      const logId = addLog(`Editing "${screen.name}": "${prompt}"...`, 'generating')
+      const logId = addLog(t('editor.log.editing', { screen: screen.name, prompt }), 'generating')
 
       try {
         const newHtml = await editDesign(screen.html, prompt)
-        updateLog(logId, `Updated screen: ${screen.name}`, 'success')
+        updateLog(logId, t('editor.log.updatedScreen', { name: screen.name }), 'success')
 
         const updatedScreens = project.screens.map((s) =>
           s.id === screen.id ? { ...s, html: newHtml } : s
@@ -390,7 +391,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         })
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error'
-        updateLog(logId, `Edit failed: ${message}`, 'error')
+        updateLog(logId, t('editor.log.editFailed', { error: message }), 'error')
       } finally {
         setIsGenerating(false)
       }
@@ -419,12 +420,12 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
 
     setIsGenerating(true)
     setAgentLogOpen(true)
-    const logId = addLog(`Editing element <${selectedElement.tagName}> in "${screen.name}": "${prompt}"...`, 'generating')
+    const logId = addLog(t('editor.log.editingElement', { tag: selectedElement.tagName, screen: screen.name, prompt }), 'generating')
 
     try {
       const { editDesignElement } = await import('../lib/gemini')
       const newHtml = await editDesignElement(screen.html, selectedElement.cssPath, selectedElement.outerHtml, prompt)
-      updateLog(logId, `Updated element in ${screen.name}`, 'success')
+      updateLog(logId, t('editor.log.updatedElement', { name: screen.name }), 'success')
 
       const updatedScreens = project.screens.map((s) =>
         s.id === screen.id ? { ...s, html: newHtml } : s
@@ -433,7 +434,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       setSelectedElement(null)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
-      updateLog(logId, `Element edit failed: ${message}`, 'error')
+      updateLog(logId, t('editor.log.elementEditFailed', { error: message }), 'error')
     } finally {
       setIsGenerating(false)
     }
@@ -443,12 +444,12 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     if (heatmapMode) {
       setHeatmapMode(false)
       setHeatmapActionMenu(null)
-      addLog('Exited heatmap mode', 'info')
+      addLog(t('editor.log.exitedHeatmap'), 'info')
       return
     }
 
     if (!selectedScreen) {
-      addLog('Select a screen first to generate heatmap', 'info')
+      addLog(t('editor.log.selectScreenFirst'), 'info')
       return
     }
 
@@ -457,17 +458,17 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
 
     if (heatmapData.has(screen.id)) {
       setHeatmapMode(true)
-      addLog(`Showing cached heatmap for "${screen.name}"`, 'info')
+      addLog(t('editor.log.cachedHeatmap', { name: screen.name }), 'info')
       return
     }
 
     setHeatmapLoading(true)
     setAgentLogOpen(true)
-    const logId = addLog(`Generating predictive heatmap for "${screen.name}"...`, 'generating')
+    const logId = addLog(t('editor.log.generatingHeatmap', { name: screen.name }), 'generating')
 
     try {
       const zones = await generateHeatmap(screen.html)
-      updateLog(logId, `Heatmap generated: ${zones.length} attention zones identified`, 'success')
+      updateLog(logId, t('editor.log.heatmapDone', { count: zones.length }), 'success')
 
       const resolvedZones: HeatmapZone[] = zones.map((z) => ({
         ...z,
@@ -478,7 +479,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       setHeatmapMode(true)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
-      updateLog(logId, `Heatmap generation failed: ${message}`, 'error')
+      updateLog(logId, t('editor.log.heatmapFailed', { error: message }), 'error')
     } finally {
       setHeatmapLoading(false)
     }
@@ -492,7 +493,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     setIsGenerating(true)
     setAgentLogOpen(true)
 
-    const logId = addLog(`Applying "${action}" to <${zone.tagName}> "${zone.label}" in "${screenName}"...`, 'generating')
+    const logId = addLog(t('editor.log.applyingAction', { action, tag: zone.tagName, text: zone.label, screen: screenName }), 'generating')
 
     try {
       // For CSS-only actions (hover, click, focus, micro-animation), inject CSS directly
@@ -544,7 +545,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           'improve-hierarchy': `Improve visual hierarchy: adjust font weight, size, color contrast, spacing. Keep content.`,
         }
         const prompt = actionPrompts[action]
-        if (!prompt) { updateLog(logId, `Unknown action: ${action}`, 'error'); return }
+        if (!prompt) { updateLog(logId, t('editor.log.unknownAction', { action }), 'error'); return }
 
         const { editDesignElement } = await import('../lib/gemini')
         const doc = new DOMParser().parseFromString(screen.html, 'text/html')
@@ -566,7 +567,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
-      updateLog(logId, `Action "${action}" failed: ${message}`, 'error')
+      updateLog(logId, t('editor.log.actionFailed', { action, error: message }), 'error')
     } finally {
       setIsGenerating(false)
     }
@@ -598,19 +599,19 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
 
     setIsGenerating(true)
     setAgentLogOpen(true)
-    const logId = addLog(`Regenerating "${screen.name}"...`, 'generating')
+    const logId = addLog(t('editor.log.regenerating', { name: screen.name }), 'generating')
 
     try {
       const results = await generateDesign(screen.name, deviceType)
       if (results[0]) {
-        updateLog(logId, `Regenerated: ${screen.name}`, 'success')
+        updateLog(logId, t('editor.log.regenerated', { name: screen.name }), 'success')
         const updatedScreens = project.screens.map((s) =>
           s.id === screen.id ? { ...s, html: results[0].html } : s
         )
         onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
       }
     } catch (err) {
-      updateLog(logId, `Regenerate failed: ${err instanceof Error ? err.message : 'Unknown error'}`, 'error')
+      updateLog(logId, t('editor.log.regenerateFailed', { error: err instanceof Error ? err.message : 'Unknown error' }), 'error')
     } finally {
       setIsGenerating(false)
     }
@@ -620,16 +621,16 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     if (!selectedScreen) return
     const screen = project.screens.find((s) => s.name === selectedScreen)
     if (!screen) return
-    const dup: Screen = { id: crypto.randomUUID(), name: `${screen.name} (copy)`, html: screen.html }
+    const dup: Screen = { id: crypto.randomUUID(), name: `${screen.name}${t('editor.log.copySuffix')}`, html: screen.html }
     onProjectUpdate({ ...project, screens: [...project.screens, dup], updatedAt: new Date().toLocaleDateString() })
-    addLog(`Duplicated "${screen.name}"`, 'success')
+    addLog(t('editor.log.duplicated', { name: screen.name }), 'success')
   }
 
   const handleDeleteScreen = () => {
     if (!selectedScreen) return
     const updated = project.screens.filter((s) => s.name !== selectedScreen)
     onProjectUpdate({ ...project, screens: updated, updatedAt: new Date().toLocaleDateString() })
-    addLog(`Deleted "${selectedScreen}"`, 'info')
+    addLog(t('editor.log.deleted', { name: selectedScreen }), 'info')
     setSelectedScreen(null)
   }
 
@@ -654,12 +655,12 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         const screen = project.screens.find((s) => s.name === selectedScreen)
         if (screen) {
           navigator.clipboard.writeText(screen.html)
-          addLog(`Copied code for "${screen.name}"`, 'success')
+          addLog(t('editor.log.copiedCode', { name: screen.name }), 'success')
         }
         break
       }
       case 'copy-png':
-        addLog('Copy as PNG — coming soon', 'info')
+        addLog(t('editor.log.copyPngSoon'), 'info')
         break
       case 'run-popup':
         if (!isRunning) handleRun()
@@ -676,25 +677,25 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       }
       case 'device-mobile':
         window.electronAPI?.setLiveWindowSize(420, 900)
-        addLog('Switched to Mobile frame (390×884)', 'info')
+        addLog(t('editor.log.switchedMobile'), 'info')
         break
       case 'device-tablet':
         window.electronAPI?.setLiveWindowSize(800, 1060)
-        addLog('Switched to Tablet frame (768×1024)', 'info')
+        addLog(t('editor.log.switchedTablet'), 'info')
         break
       case 'device-desktop':
         window.electronAPI?.setLiveWindowSize(1320, 1060)
-        addLog('Switched to Desktop frame (1280×1024)', 'info')
+        addLog(t('editor.log.switchedDesktop'), 'info')
         break
       case 'always-on-top':
         window.electronAPI?.setLiveWindowAlwaysOnTop(true)
-        addLog('Live window: always on top', 'info')
+        addLog(t('editor.log.alwaysOnTop'), 'info')
         break
       case 'variations':
-        addLog('Variations — coming soon', 'info')
+        addLog(t('common.comingSoon', { action: 'Variations' }), 'info')
         break
       case 'desktop-web':
-        addLog('Desktop web version — coming soon', 'info')
+        addLog(t('common.comingSoon', { action: 'Desktop web version' }), 'info')
         break
       case 'heatmap':
         handleToggleHeatmap()
@@ -702,16 +703,16 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       case 'edit':
         setEditMode(!editMode)
         setSelectedElement(null)
-        addLog(editMode ? 'Exited edit mode' : 'Entered edit mode — click an element in the screen to select it', 'info')
+        addLog(editMode ? t('editor.log.exitedEditMode') : t('editor.log.enteredEditMode'), 'info')
         break
       case 'annotate':
-        addLog('Annotate — coming soon', 'info')
+        addLog(t('common.comingSoon', { action: 'Annotate' }), 'info')
         break
       case 'design-system':
-        addLog('Design system editor — coming soon', 'info')
+        addLog(t('common.comingSoon', { action: 'Design system editor' }), 'info')
         break
       case 'download':
-        addLog('Download — coming soon', 'info')
+        addLog(t('common.comingSoon', { action: 'Download' }), 'info')
         break
       case 'copy':
       case 'copy-as':
@@ -720,7 +721,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       case 'favourite':
       case 'open-editor':
       case 'devtools':
-        addLog(`${action} — coming soon`, 'info')
+        addLog(t('common.comingSoon', { action }), 'info')
         break
       default:
         break
@@ -829,7 +830,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   useEffect(() => {
     const cleanup = window.electronAPI?.onLiveEditRequest(async (prompt: string) => {
       if (!devServerUrl || !project.id) return
-      addLog(`Live edit request: "${prompt}"`, 'generating')
+      addLog(t('editor.log.liveEditRequest', { prompt }), 'generating')
 
       try {
         const targetFile = 'src/App.tsx'
@@ -848,10 +849,10 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         })
 
         await window.electronAPI?.project.writeFile(project.id, targetFile, updated)
-        addLog('Live edit applied — Vite HMR will refresh automatically', 'success')
+        addLog(t('editor.log.liveEditApplied'), 'success')
         window.electronAPI?.sendLiveEditResult({ success: true, message: 'Changes applied' })
       } catch (err: any) {
-        addLog(`Live edit failed: ${err.message}`, 'error')
+        addLog(t('editor.log.liveEditFailed', { error: err.message }), 'error')
         window.electronAPI?.sendLiveEditResult({ success: false, message: err.message })
       }
     })
@@ -894,11 +895,11 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         if (isIncremental) {
           // ─── Incremental build: only generate new/changed screens ───
           const logId = addLog(
-            `Incremental build: ${newOrChanged.length} new/changed, ${unchanged.length} cached`,
+            t('editor.log.incrementalBuild', { info: `${newOrChanged.length} new/changed, ${unchanged.length} cached` }),
             'generating',
           )
-          addLog(`Cached: ${unchanged.join(', ')}`, 'info')
-          addLog(`Building: ${newOrChanged.map(s => s.name).join(', ')}`, 'info')
+          addLog(t('editor.log.cached', { name: unchanged.join(', ') }), 'info')
+          addLog(t('editor.log.buildingScreen', { name: newOrChanged.map(s => s.name).join(', ') }), 'info')
 
           // Collect existing generated files from cache
           const existingFiles: Record<string, string> = {}
@@ -917,16 +918,16 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             existingFiles,
             deviceType,
           )
-          updateLog(logId, `Generated ${Object.keys(files).length} files (incremental), writing to disk...`, 'generating')
+          updateLog(logId, t('editor.log.incrementalFiles', { count: Object.keys(files).length }), 'generating')
 
           // Merge: keep cached files, overwrite with new
           const mergedFiles = { ...existingFiles, ...files }
           files = mergedFiles
         } else {
           // ─── Full build: all screens are new ───
-          const logId = addLog('Generating React frontend from screens...', 'generating')
+          const logId = addLog(t('editor.log.generatingFrontend'), 'generating')
           files = await generateFrontendApp(allScreensData, deviceType)
-          updateLog(logId, `Generated ${Object.keys(files).length} files, writing to disk...`, 'generating')
+          updateLog(logId, t('editor.log.generatedFiles', { count: Object.keys(files).length }), 'generating')
         }
 
         await window.electronAPI?.project.scaffold(project.id, files)
@@ -945,10 +946,10 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
 
         // Skip npm install if dev server is already running (incremental)
         if (!devServerUrl) {
-          addLog('Installing dependencies (npm install)...', 'generating')
+          addLog(t('editor.log.installingDeps'), 'generating')
           const installResult = await window.electronAPI?.project.install(project.id)
           if (!installResult?.success) {
-            addLog(`npm install failed: ${installResult?.error}`, 'error')
+            addLog(t('editor.log.npmFailed', { error: installResult?.error || '' }), 'error')
             setBuildingFrontend(false)
             return
           }
@@ -958,24 +959,24 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           let devStarted = false
 
           for (let attempt = 0; attempt <= MAX_FIX_ATTEMPTS; attempt++) {
-            addLog(attempt === 0 ? 'Starting Vite dev server...' : `Retry ${attempt}/${MAX_FIX_ATTEMPTS}: restarting dev server...`, 'generating')
+            addLog(attempt === 0 ? t('editor.log.startingDevServer') : t('editor.log.retryDevServer', { attempt, max: MAX_FIX_ATTEMPTS }), 'generating')
             const port = 5173 + Math.floor(Math.random() * 100)
             const devResult = await window.electronAPI?.project.startDev(project.id, port)
 
             if (devResult?.success) {
               const url = devResult.url || `http://localhost:${port}`
               setDevServerUrl(url)
-              addLog(`Dev server running at ${url}`, 'success')
+              addLog(t('editor.log.devServerRunning', { url }), 'success')
               await window.electronAPI?.openLiveWindowUrl(url)
               devStarted = true
               break
             }
 
             lastError = devResult?.error || 'Unknown error'
-            addLog(`Build error: ${lastError.slice(0, 200)}`, 'error')
+            addLog(t('editor.log.buildError', { error: lastError.slice(0, 200) }), 'error')
 
             if (attempt < MAX_FIX_ATTEMPTS) {
-              addLog('Auto-fixing build errors with AI...', 'generating')
+              addLog(t('editor.log.autoFixing'), 'generating')
               try {
                 // Read problematic files from project
                 const filesToFix: Record<string, string> = {}
@@ -987,7 +988,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
 
                 const fixedFiles = await fixBuildErrors(lastError, filesToFix)
                 const fixedCount = Object.keys(fixedFiles).length
-                addLog(`AI fixed ${fixedCount} file(s): ${Object.keys(fixedFiles).join(', ')}`, 'info')
+                addLog(t('editor.log.aiFixed', { count: fixedCount, files: Object.keys(fixedFiles).join(', ') }), 'info')
 
                 // Write fixed files
                 for (const [path, content] of Object.entries(fixedFiles)) {
@@ -998,23 +999,23 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                 // Stop previous failed dev server before retry
                 await window.electronAPI?.project.stopDev()
               } catch (fixErr: any) {
-                addLog(`Auto-fix failed: ${fixErr.message}`, 'error')
+                addLog(t('editor.log.autoFixFailed', { error: fixErr.message }), 'error')
               }
             }
           }
 
           if (!devStarted) {
-            addLog(`Dev server failed after ${MAX_FIX_ATTEMPTS} fix attempts: ${lastError}`, 'error')
+            addLog(t('editor.log.devServerFailed', { count: MAX_FIX_ATTEMPTS, error: lastError }), 'error')
             setBuildingFrontend(false)
             return
           }
         } else {
           // Dev server already running — just write files, HMR picks up changes
-          addLog('Files updated — Vite HMR will refresh automatically', 'success')
+          addLog(t('editor.log.filesUpdated'), 'success')
         }
         setIsRunning(true)
       } catch (err: any) {
-        addLog(`Frontend generation failed: ${err.message}`, 'error')
+        addLog(t('editor.log.frontendFailed', { error: err.message }), 'error')
       } finally {
         setBuildingFrontend(false)
       }
@@ -1063,11 +1064,11 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             </button>
             {showHamburger && (
               <div className="absolute top-full left-0 mt-1 w-52 bg-white dark:bg-neutral-800 rounded-xl shadow-lg border border-neutral-200 dark:border-neutral-700 py-1 z-50">
-                <MenuItem icon="←" label="Go to all projects" onClick={() => { setShowHamburger(false); onBack() }} />
-                <MenuItem icon="📁" label="Open project folder" onClick={() => setShowHamburger(false)} />
-                <MenuItem icon="📝" label="Open in external editor" onClick={() => setShowHamburger(false)} />
+                <MenuItem icon="←" label={t('editor.menu.goToProjects')} onClick={() => { setShowHamburger(false); onBack() }} />
+                <MenuItem icon="📁" label={t('editor.menu.openFolder')} onClick={() => setShowHamburger(false)} />
+                <MenuItem icon="📝" label={t('editor.menu.openExtEditor')} onClick={() => setShowHamburger(false)} />
                 <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-1" />
-                <MenuItem icon="🎨" label="Appearance" onClick={() => {
+                <MenuItem icon="🎨" label={t('editor.menu.appearance')} onClick={() => {
                   setShowHamburger(false)
                   const root = document.documentElement
                   if (root.classList.contains('dark')) {
@@ -1078,9 +1079,9 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                     localStorage.setItem('vibesynth-theme', 'dark')
                   }
                 }} />
-                <MenuItem icon="⚙" label="Settings" onClick={() => { setShowHamburger(false); onOpenSettings?.() }} />
+                <MenuItem icon="⚙" label={t('common.settings')} onClick={() => { setShowHamburger(false); onOpenSettings?.() }} />
                 <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-1" />
-                <MenuItem icon="⌘" label="Command menu" shortcut="⌘K" onClick={() => setShowHamburger(false)} />
+                <MenuItem icon="⌘" label={t('editor.menu.commandMenu')} shortcut="⌘K" onClick={() => setShowHamburger(false)} />
               </div>
             )}
           </div>
@@ -1090,25 +1091,25 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           {isGenerating && (
             <span className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
               <LoadingSpinner />
-              Generating...
+              {t('editor.generating')}
             </span>
           )}
           {editMode && !isGenerating && (
             <span className="flex items-center gap-1.5 text-xs text-blue-600 dark:text-blue-400">
               <PenSmallIcon />
-              Edit Mode
+              {t('editor.editMode')}
             </span>
           )}
           {heatmapMode && !isGenerating && (
             <span className="flex items-center gap-1.5 text-xs text-orange-600 dark:text-orange-400">
               <HeatmapSmallIcon />
-              Heatmap
+              {t('editor.heatmap')}
             </span>
           )}
           {heatmapLoading && (
             <span className="flex items-center gap-1.5 text-xs text-orange-600 dark:text-orange-400">
               <LoadingSpinner />
-              Analyzing...
+              {t('editor.analyzing')}
             </span>
           )}
         </div>
@@ -1126,12 +1127,20 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                   : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 hover:bg-emerald-200'
             }`}
           >
-            {buildingFrontend ? '⏳ Building...' : isRunning ? '■ Stop' : '▶ Run'}
+            {buildingFrontend ? t('editor.building') : isRunning ? t('editor.stop') : t('editor.run')}
+          </button>
+
+          <button
+            onClick={() => setLocale(locale === 'en' ? 'ko' : 'en')}
+            className="px-2 py-1 text-[11px] font-semibold rounded-lg border border-neutral-200 dark:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
+            title={locale === 'en' ? '한국어로 전환' : 'Switch to English'}
+          >
+            {locale === 'en' ? 'KO' : 'EN'}
           </button>
 
           <AppearanceToggle />
 
-          <button onClick={onOpenSettings} className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700" title="Settings">
+          <button onClick={onOpenSettings} className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700" title={t('common.settings')}>
             <SettingsIcon className="w-5 h-5" />
           </button>
         </div>
@@ -1155,12 +1164,12 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           style={{ width: leftSidebarWidth }}
         >
           <div className={`flex flex-col gap-1 ${leftSidebarWidth > 80 ? 'items-start px-2' : 'items-center'}`}>
-            <ToolButton icon={<CursorIcon />} title="Cursor" active label={leftSidebarWidth > 80 ? 'Cursor' : undefined} />
-            <ToolButton icon={<SelectIcon />} title="Select" label={leftSidebarWidth > 80 ? 'Select' : undefined} />
-            <ToolButton icon={<PenIcon />} title="Pen" label={leftSidebarWidth > 80 ? 'Pen' : undefined} />
+            <ToolButton icon={<CursorIcon />} title={t('editor.tool.cursor')} active label={leftSidebarWidth > 80 ? t('editor.tool.cursor') : undefined} />
+            <ToolButton icon={<SelectIcon />} title={t('editor.tool.select')} label={leftSidebarWidth > 80 ? t('editor.tool.select') : undefined} />
+            <ToolButton icon={<PenIcon />} title={t('editor.tool.pen')} label={leftSidebarWidth > 80 ? t('editor.tool.pen') : undefined} />
             <div className="h-px w-6 bg-neutral-200 dark:bg-neutral-700 my-1 self-center" />
-            <ToolButton icon={<MicIcon />} title="Voice input" label={leftSidebarWidth > 80 ? 'Voice' : undefined} />
-            <ToolButton icon={<ImageIcon />} title="Image" label={leftSidebarWidth > 80 ? 'Image' : undefined} />
+            <ToolButton icon={<MicIcon />} title={t('editor.tool.voice')} label={leftSidebarWidth > 80 ? t('editor.tool.voiceShort') : undefined} />
+            <ToolButton icon={<ImageIcon />} title={t('editor.tool.image')} label={leftSidebarWidth > 80 ? t('editor.tool.image') : undefined} />
           </div>
           {/* Resize handle */}
           <div
@@ -1212,7 +1221,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                       }}
                       onElementSelect={(info) => {
                         setSelectedElement(info)
-                        addLog(`Selected <${info.tagName}>: "${info.textPreview.slice(0, 40)}..."`, 'info')
+                        addLog(t('editor.log.selectedElement', { tag: info.tagName, text: info.textPreview.slice(0, 40) }), 'info')
                       }}
                       onHeatmapZoneClick={(zone, x, y) => {
                         setHeatmapActionMenu({ zone, screenName: screen.name, x, y })
@@ -1227,11 +1236,11 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                       {isGenerating ? (
                         <div className="flex flex-col items-center gap-3">
                           <LoadingSpinner size="lg" />
-                          <span className="text-sm text-neutral-500">Generating your design...</span>
+                          <span className="text-sm text-neutral-500">{t('editor.generatingDesign')}</span>
                         </div>
                       ) : (
                         <span className="text-sm text-neutral-400">
-                          Enter a prompt to generate a screen
+                          {t('editor.enterPrompt')}
                         </span>
                       )}
                     </div>
@@ -1293,7 +1302,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                   return html !== s.html ? { ...s, html } : s
                 })
                 const changed = updatedScreens.filter((s, i) => s !== project.screens[i]).length
-                addLog(`Design system updated: ${replacements.length} change(s) applied to ${changed} screen(s)`, 'success')
+                addLog(t('editor.log.dsChangesApplied', { count: replacements.length, screens: changed }), 'success')
               }
             }
 
@@ -1312,7 +1321,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
               designSystem.guide || { overview: '', colorRules: '', typographyRules: '', elevationRules: '', componentRules: '', dosAndDonts: '' },
               designSystem,
             )
-            addLog(`Design system "${designSystem.name}" saved`, 'success')
+            addLog(t('editor.log.dsSaved', { name: designSystem.name }), 'success')
           }}
           onLoadDesignSystem={(id) => {
             const entry = designGuideDB.getById(id)
@@ -1346,31 +1355,30 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             }
 
             onProjectUpdate({ ...project, screens: updatedScreens, designSystem: newDs, updatedAt: new Date().toLocaleDateString() })
-            addLog(`Loaded design system "${newDs.name}" — ${updatedScreens.filter((s, i) => s !== project.screens[i]).length} screen(s) updated`, 'success')
+            addLog(t('editor.log.dsLoaded', { name: newDs.name, count: updatedScreens.filter((s, i) => s !== project.screens[i]).length }), 'success')
           }}
           savedDesignSystems={designGuideDB.getAllWithDesignSystem().map(e => ({ id: e.id, name: e.name, savedAt: e.createdAt }))}
           onStealDesign={(query) => {
             if (!window.electronAPI?.pinterest) {
-              addLog('Pinterest API not available (requires Electron)', 'error')
+              addLog(t('editor.log.pinterestNotAvailable'), 'error')
               return
             }
-            addLog(`Opening Pinterest in browser: "${query}"...`, 'info')
+            addLog(t('editor.log.openingPinterest', { query }), 'info')
             window.electronAPI.pinterest.open(query)
           }}
           onStealUrl={async (imageUrl) => {
             if (!window.electronAPI?.pinterest) {
-              addLog('Pinterest API not available (requires Electron)', 'error')
+              addLog(t('editor.log.pinterestNotAvailable'), 'error')
               return
             }
 
-            // Register listener BEFORE calling stealUrl to avoid race condition
             const cleanup = window.electronAPI.pinterest.onImageCaptured(async (base64, mimeType) => {
               cleanup()
               if (!base64 || !mimeType) {
-                addLog('Failed to process image', 'error')
+                addLog(t('editor.log.processingImageFailed'), 'error')
                 return
               }
-              addLog('Analyzing design from image...', 'info')
+              addLog(t('editor.log.analyzingImage'), 'info')
               try {
                 const newDs = await analyzeDesignFromImage(base64, mimeType)
                 const oldDs = project.designSystem
@@ -1416,25 +1424,25 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                   updatedAt: new Date().toLocaleDateString(),
                 })
                 const changed = updatedScreens.filter((s, i) => s !== project.screens[i]).length
-                addLog(`Stolen design "${newDs.name}" applied — ${changed} screen(s) updated and saved`, 'success')
+                addLog(t('editor.log.stolenDesign', { name: newDs.name, count: changed }), 'success')
               } catch (err: any) {
-                addLog(`Failed to analyze design: ${err.message}`, 'error')
+                addLog(t('editor.log.analyzeDesignFailed', { error: err.message }), 'error')
               }
             })
 
-            addLog(`Downloading image: ${imageUrl.substring(0, 60)}...`, 'info')
+            addLog(t('editor.log.downloadingImage', { url: imageUrl.substring(0, 60) }), 'info')
             const result = await window.electronAPI.pinterest.stealUrl(imageUrl)
             if (!result.success) {
               cleanup()
-              addLog(`Failed to download image: ${result.error}`, 'error')
+              addLog(t('editor.log.downloadFailed', { error: result.error || '' }), 'error')
             }
           }}
           onConnectPinterest={() => {
             if (!window.electronAPI?.pinterest) {
-              addLog('Pinterest API not available (requires Electron)', 'error')
+              addLog(t('editor.log.pinterestNotAvailable'), 'error')
               return
             }
-            addLog('Opening Pinterest login in browser...', 'info')
+            addLog(t('editor.log.openingPinterestLogin'), 'info')
             window.electronAPI.pinterest.connect()
           }}
         />
@@ -1446,10 +1454,10 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           <PromptBar
             placeholder={
               editMode && selectedElement
-                ? `Describe changes for <${selectedElement.tagName}>: "${selectedElement.textPreview.slice(0, 30)}"...`
+                ? t('editor.editElementPlaceholder', { tag: selectedElement.tagName })
                 : selectedScreen
-                ? `Describe changes for "${selectedScreen}"...`
-                : 'What would you like to change or create?'
+                ? t('editor.editScreenPlaceholder', { screen: selectedScreen })
+                : t('editor.defaultPlaceholder')
             }
             deviceType={deviceType}
             onDeviceTypeChange={(dt) => { setDeviceType(dt); autoZoomDone.current = false }}

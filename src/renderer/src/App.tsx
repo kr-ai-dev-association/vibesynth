@@ -3,6 +3,7 @@ import { Dashboard } from './pages/Dashboard'
 import { Editor } from './pages/Editor'
 import { Settings } from './pages/Settings'
 import { designGuideDB } from './lib/design-guide-db'
+import { I18nProvider } from './lib/i18n'
 
 export type AppView = 'dashboard' | 'editor' | 'settings'
 
@@ -87,6 +88,14 @@ export interface DesignSystem {
 }
 
 export default function App() {
+  return (
+    <I18nProvider>
+      <AppInner />
+    </I18nProvider>
+  )
+}
+
+function AppInner() {
   const [view, setView] = useState<AppView>('dashboard')
   const [currentProject, setCurrentProject] = useState<Project | null>(null)
 

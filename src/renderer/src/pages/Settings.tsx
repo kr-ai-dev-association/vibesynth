@@ -1,8 +1,12 @@
+import { useI18n, type Locale } from '../lib/i18n'
+
 interface SettingsProps {
   onBack: () => void
 }
 
 export function Settings({ onBack }: SettingsProps) {
+  const { t, locale, setLocale } = useI18n()
+
   return (
     <div className="h-screen bg-neutral-50 dark:bg-neutral-900 flex flex-col">
       {/* Header */}
@@ -14,7 +18,7 @@ export function Settings({ onBack }: SettingsProps) {
           >
             <ArrowLeftIcon />
           </button>
-          <h1 className="text-lg font-semibold">Settings</h1>
+          <h1 className="text-lg font-semibold">{t('settings.title')}</h1>
         </div>
       </header>
 
@@ -22,20 +26,26 @@ export function Settings({ onBack }: SettingsProps) {
         <div className="max-w-2xl mx-auto py-8 px-6 space-y-8">
 
           {/* General */}
-          <Section title="General">
-            <SettingRow label="Default project path" description="Where new projects are created">
+          <Section title={t('settings.general')}>
+            <SettingRow label={t('settings.language')} description={t('settings.languageDesc')}>
+              <div className="flex rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden">
+                <LangButton value="en" label={t('settings.langEnglish')} current={locale} onSelect={setLocale} />
+                <LangButton value="ko" label={t('settings.langKorean')} current={locale} onSelect={setLocale} />
+              </div>
+            </SettingRow>
+            <SettingRow label={t('settings.projectPath')} description={t('settings.projectPathDesc')}>
               <input
                 type="text"
                 defaultValue="~/VibeSynth/projects"
                 className="w-64 px-3 py-1.5 text-sm rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 outline-none focus:border-neutral-400"
               />
             </SettingRow>
-            <SettingRow label="Default framework" description="Framework for generated apps">
+            <SettingRow label={t('settings.framework')} description={t('settings.frameworkDesc')}>
               <select className="px-3 py-1.5 text-sm rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 outline-none">
                 <option>React + Vite</option>
               </select>
             </SettingRow>
-            <SettingRow label="Default dev server port" description="Port for the local dev server">
+            <SettingRow label={t('settings.devPort')} description={t('settings.devPortDesc')}>
               <input
                 type="number"
                 defaultValue={5173}
@@ -45,8 +55,8 @@ export function Settings({ onBack }: SettingsProps) {
           </Section>
 
           {/* AI */}
-          <Section title="AI">
-            <SettingRow label="API Key" description="Gemini API key for design generation">
+          <Section title={t('settings.ai')}>
+            <SettingRow label={t('settings.apiKey')} description={t('settings.apiKeyDesc')}>
               <div className="flex gap-2">
                 <input
                   type="password"
@@ -54,23 +64,23 @@ export function Settings({ onBack }: SettingsProps) {
                   className="w-64 px-3 py-1.5 text-sm rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 outline-none focus:border-neutral-400"
                 />
                 <button className="px-3 py-1.5 text-sm rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-700">
-                  Show
+                  {t('settings.show')}
                 </button>
               </div>
             </SettingRow>
-            <SettingRow label="Default model" description="AI model to use by default">
+            <SettingRow label={t('settings.defaultModel')} description={t('settings.defaultModelDesc')}>
               <select className="px-3 py-1.5 text-sm rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 outline-none">
-                <option>Fast</option>
-                <option>Quality</option>
-                <option>Redesign</option>
-                <option>Ideate</option>
+                <option>{t('settings.modelFast')}</option>
+                <option>{t('settings.modelQuality')}</option>
+                <option>{t('settings.modelRedesign')}</option>
+                <option>{t('settings.modelIdeate')}</option>
               </select>
             </SettingRow>
           </Section>
 
           {/* Dev Server */}
-          <Section title="Dev Server">
-            <SettingRow label="Package manager" description="npm, yarn, pnpm, or bun">
+          <Section title={t('settings.devServer')}>
+            <SettingRow label={t('settings.packageManager')} description={t('settings.packageManagerDesc')}>
               <select className="px-3 py-1.5 text-sm rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 outline-none">
                 <option>npm</option>
                 <option>yarn</option>
@@ -78,14 +88,14 @@ export function Settings({ onBack }: SettingsProps) {
                 <option>bun</option>
               </select>
             </SettingRow>
-            <SettingRow label="Auto-start on project open" description="Automatically start dev server when opening a project">
+            <SettingRow label={t('settings.autoStart')} description={t('settings.autoStartDesc')}>
               <ToggleSwitch defaultChecked />
             </SettingRow>
           </Section>
 
           {/* Editor */}
-          <Section title="Editor">
-            <SettingRow label="External editor" description="Editor to open project files">
+          <Section title={t('settings.editor')}>
+            <SettingRow label={t('settings.externalEditor')} description={t('settings.externalEditorDesc')}>
               <select className="px-3 py-1.5 text-sm rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 outline-none">
                 <option>VS Code</option>
                 <option>Cursor</option>
@@ -96,12 +106,28 @@ export function Settings({ onBack }: SettingsProps) {
 
           <div className="flex justify-end pt-4 border-t border-neutral-200 dark:border-neutral-700">
             <button className="px-4 py-2 text-sm font-medium rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 hover:opacity-90">
-              Save changes
+              {t('settings.saveChanges')}
             </button>
           </div>
         </div>
       </div>
     </div>
+  )
+}
+
+function LangButton({ value, label, current, onSelect }: { value: Locale; label: string; current: Locale; onSelect: (l: Locale) => void }) {
+  const active = current === value
+  return (
+    <button
+      onClick={() => onSelect(value)}
+      className={`px-4 py-1.5 text-sm font-medium transition-colors ${
+        active
+          ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
+          : 'text-neutral-500 hover:bg-neutral-50 dark:hover:bg-neutral-700'
+      }`}
+    >
+      {label}
+    </button>
   )
 }
 

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useI18n } from '../../lib/i18n'
 
 interface ScreenContextToolbarProps {
   screenName: string
@@ -6,6 +7,7 @@ interface ScreenContextToolbarProps {
 }
 
 export function ScreenContextToolbar({ screenName, onAction }: ScreenContextToolbarProps) {
+  const { t } = useI18n()
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   const toolbarRef = useRef<HTMLDivElement>(null)
 
@@ -26,62 +28,62 @@ export function ScreenContextToolbar({ screenName, onAction }: ScreenContextTool
   return (
     <div ref={toolbarRef} className="flex items-center gap-0.5 bg-white dark:bg-neutral-800 rounded-xl shadow-lg border border-neutral-200 dark:border-neutral-700 px-1 py-0.5">
       <DropdownButton
-        label="Generate"
+        label={t('toolbar.generate')}
         icon={<SparkleIcon />}
         isOpen={openMenu === 'generate'}
         onClick={() => toggleMenu('generate')}
         items={[
-          { label: 'Variations', shortcut: '⇧V', action: 'variations' },
-          { label: 'Regenerate', shortcut: '⇧R', action: 'regenerate' },
-          { label: 'Desktop web version', action: 'desktop-web' },
-          { label: 'Predictive heat map', action: 'heatmap' },
+          { label: t('toolbar.variations'), shortcut: '⇧V', action: 'variations' },
+          { label: t('toolbar.regenerate'), shortcut: '⇧R', action: 'regenerate' },
+          { label: t('toolbar.desktopWebVersion'), action: 'desktop-web' },
+          { label: t('toolbar.predictiveHeatmap'), action: 'heatmap' },
         ]}
         onAction={(action) => { onAction(action); setOpenMenu(null) }}
       />
       <DropdownButton
-        label="Modify"
+        label={t('toolbar.modify')}
         icon={<PenIcon />}
         isOpen={openMenu === 'modify'}
         onClick={() => toggleMenu('modify')}
         items={[
-          { label: 'Edit', shortcut: 'E', action: 'edit' },
-          { label: 'Annotate', action: 'annotate' },
-          { label: 'Design system', action: 'design-system' },
+          { label: t('toolbar.edit'), shortcut: 'E', action: 'edit' },
+          { label: t('toolbar.annotate'), action: 'annotate' },
+          { label: t('toolbar.designSystem'), action: 'design-system' },
         ]}
         onAction={(action) => { onAction(action); setOpenMenu(null) }}
       />
       <DropdownButton
-        label="Run"
+        label={t('toolbar.run')}
         icon={<PlayIcon />}
         isOpen={openMenu === 'run'}
         onClick={() => toggleMenu('run')}
         items={[
-          { label: 'Run in Popup', action: 'run-popup' },
-          { label: 'Open in Browser', action: 'open-browser' },
+          { label: t('toolbar.runInPopup'), action: 'run-popup' },
+          { label: t('toolbar.openInBrowser'), action: 'open-browser' },
           { separator: true },
-          { label: 'Mobile', info: '390×884', action: 'device-mobile' },
-          { label: 'Tablet', info: '768×1024', action: 'device-tablet' },
-          { label: 'Desktop', info: '1280×1024', action: 'device-desktop' },
+          { label: t('toolbar.mobile'), info: '390×884', action: 'device-mobile' },
+          { label: t('toolbar.tablet'), info: '768×1024', action: 'device-tablet' },
+          { label: t('toolbar.desktop'), info: '1280×1024', action: 'device-desktop' },
           { separator: true },
-          { label: 'Always on Top', action: 'always-on-top' },
-          { label: 'Open DevTools', action: 'devtools' },
+          { label: t('toolbar.alwaysOnTop'), action: 'always-on-top' },
+          { label: t('toolbar.openDevTools'), action: 'devtools' },
         ]}
         onAction={(action) => { onAction(action); setOpenMenu(null) }}
       />
       <DropdownButton
-        label="More"
+        label={t('toolbar.more')}
         icon={<MoreIcon />}
         isOpen={openMenu === 'more'}
         onClick={() => toggleMenu('more')}
         badge
         items={[
-          { label: 'View code', shortcut: '⇧C', action: 'view-code' },
-          { label: 'Open in Editor', shortcut: '⌘E', action: 'open-editor' },
+          { label: t('toolbar.viewCode'), shortcut: '⇧C', action: 'view-code' },
+          { label: t('toolbar.openInEditor'), shortcut: '⌘E', action: 'open-editor' },
           { separator: true },
-          { label: 'Copy as Code', action: 'copy-code' },
-          { label: 'Copy as PNG', shortcut: '⌘⇧C', action: 'copy-png' },
+          { label: t('toolbar.copyAsCode'), action: 'copy-code' },
+          { label: t('toolbar.copyAsPng'), shortcut: '⌘⇧C', action: 'copy-png' },
           { separator: true },
-          { label: 'Download', shortcut: '⇧D', action: 'download' },
+          { label: t('toolbar.download'), shortcut: '⇧D', action: 'download' },
         ]}
         onAction={(action) => { onAction(action); setOpenMenu(null) }}
       />
@@ -160,6 +162,7 @@ interface ContextMenuProps {
 }
 
 export function ScreenContextMenu({ x, y, onAction, onClose }: ContextMenuProps) {
+  const { t } = useI18n()
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -180,51 +183,51 @@ export function ScreenContextMenu({ x, y, onAction, onClose }: ContextMenuProps)
   const sections: { header?: string; items: MenuItem[] }[] = [
     {
       items: [
-        { label: 'Copy', shortcut: '⌘C', action: 'copy' },
-        { label: 'Copy as...', shortcut: '▶', action: 'copy-as' },
-        { label: 'Cut', shortcut: '⌘X', action: 'cut' },
-        { label: 'Duplicate', shortcut: '⌘D', action: 'duplicate' },
-        { label: 'Focus', shortcut: 'F', action: 'focus' },
-        { label: 'Favourite', shortcut: '⇧F', action: 'favourite' },
+        { label: t('common.copy'), shortcut: '⌘C', action: 'copy' },
+        { label: t('toolbar.copyAs'), shortcut: '▶', action: 'copy-as' },
+        { label: t('toolbar.cut'), shortcut: '⌘X', action: 'cut' },
+        { label: t('toolbar.duplicate'), shortcut: '⌘D', action: 'duplicate' },
+        { label: t('toolbar.focus'), shortcut: 'F', action: 'focus' },
+        { label: t('toolbar.favourite'), shortcut: '⇧F', action: 'favourite' },
       ],
     },
     {
       items: [
-        { label: 'Delete', shortcut: '⌫', action: 'delete' },
+        { label: t('common.delete'), shortcut: '⌫', action: 'delete' },
       ],
     },
     {
-      header: 'GENERATE',
+      header: t('toolbar.sectionGenerate'),
       items: [
-        { label: 'Variations', shortcut: '⇧V', action: 'variations' },
-        { label: 'Regenerate', shortcut: '⇧R', action: 'regenerate' },
-        { label: 'Desktop web version', action: 'desktop-web' },
-        { label: 'Predictive heat map', action: 'heatmap' },
+        { label: t('toolbar.variations'), shortcut: '⇧V', action: 'variations' },
+        { label: t('toolbar.regenerate'), shortcut: '⇧R', action: 'regenerate' },
+        { label: t('toolbar.desktopWebVersion'), action: 'desktop-web' },
+        { label: t('toolbar.predictiveHeatmap'), action: 'heatmap' },
       ],
     },
     {
-      header: 'EDIT',
+      header: t('toolbar.sectionEdit'),
       items: [
-        { label: 'Edit', shortcut: 'E', action: 'edit' },
-        { label: 'Annotate', action: 'annotate' },
-        { label: 'Design system', action: 'design-system' },
+        { label: t('toolbar.edit'), shortcut: 'E', action: 'edit' },
+        { label: t('toolbar.annotate'), action: 'annotate' },
+        { label: t('toolbar.designSystem'), action: 'design-system' },
       ],
     },
     {
-      header: 'RUN',
+      header: t('toolbar.sectionRun'),
       items: [
-        { label: 'Run in Popup', shortcut: '⇧P', action: 'run-popup' },
-        { label: 'Open in Browser', action: 'open-browser' },
-        { label: 'Mobile', info: '390×884', action: 'device-mobile' },
-        { label: 'Tablet', info: '768×1024', action: 'device-tablet' },
-        { label: 'Desktop', info: '1280×1024', action: 'device-desktop' },
+        { label: t('toolbar.runInPopup'), shortcut: '⇧P', action: 'run-popup' },
+        { label: t('toolbar.openInBrowser'), action: 'open-browser' },
+        { label: t('toolbar.mobile'), info: '390×884', action: 'device-mobile' },
+        { label: t('toolbar.tablet'), info: '768×1024', action: 'device-tablet' },
+        { label: t('toolbar.desktop'), info: '1280×1024', action: 'device-desktop' },
       ],
     },
     {
       items: [
-        { label: 'View code', shortcut: '⇧C', action: 'view-code' },
-        { label: 'Open in Editor', shortcut: '⌘E', action: 'open-editor' },
-        { label: 'Download', shortcut: '⇧D', action: 'download' },
+        { label: t('toolbar.viewCode'), shortcut: '⇧C', action: 'view-code' },
+        { label: t('toolbar.openInEditor'), shortcut: '⌘E', action: 'open-editor' },
+        { label: t('toolbar.download'), shortcut: '⇧D', action: 'download' },
       ],
     },
   ]

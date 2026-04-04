@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
+import { useI18n } from '../../lib/i18n'
 
 type Theme = 'light' | 'system' | 'dark'
 
 export function AppearanceToggle() {
+  const { t } = useI18n()
   const [theme, setTheme] = useState<Theme>(() => {
     return (localStorage.getItem('vibesynth-theme') as Theme) || 'system'
   })
@@ -49,9 +51,9 @@ export function AppearanceToggle() {
   }, [theme])
 
   const options: { value: Theme; label: string; icon: React.ReactNode }[] = [
-    { value: 'light', label: 'Light', icon: <SunIcon /> },
-    { value: 'system', label: 'System', icon: <MonitorIcon /> },
-    { value: 'dark', label: 'Dark', icon: <MoonIcon /> },
+    { value: 'light', label: t('appearance.light'), icon: <SunIcon /> },
+    { value: 'system', label: t('appearance.system'), icon: <MonitorIcon /> },
+    { value: 'dark', label: t('appearance.dark'), icon: <MoonIcon /> },
   ]
 
   return (
@@ -59,7 +61,7 @@ export function AppearanceToggle() {
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800"
-        title="Appearance"
+        title={t('appearance.title')}
       >
         {theme === 'dark' ? <MoonIcon /> : theme === 'light' ? <SunIcon /> : <MonitorIcon />}
       </button>

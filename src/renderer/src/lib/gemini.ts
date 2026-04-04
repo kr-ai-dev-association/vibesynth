@@ -1012,3 +1012,77 @@ Return ONLY the JSON, no other text.`,
 
   return JSON.parse(json.trim())
 }
+
+const LIVE_EDIT_PREVIEW_CHARS = 6000
+
+/** Plain-language explanation for designers after a successful live edit. */
+export async function paraphraseLiveEditForDesigner(
+  userPrompt: string,
+  filePath: string,
+  beforePreview: string,
+  afterPreview: string,
+  locale: 'en' | 'ko',
+): Promise<string> {
+  if (!API_KEY) {
+    return locale === 'ko'
+      ? '요청하신 내용을 라이브 앱에 반영했습니다. 화면을 확인해 보세요.'
+      : 'Your request was applied to the live app. Check the preview.'
+  }
+
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+  const lang =
+    locale === 'ko'
+      ? '한국어로, 비개발자·디자이너가 이해하기 쉽게 2~4문장으로 작성하세요.'
+      : 'Write in clear, plain English for designers and non-engineers (2–4 short sentences).'
+
+  const result = await model.generateContent([
+    `You explain UI/code changes to designers after an AI edit. ${lang}
+
+The user asked (live preview): "${userPrompt}"
+The modified file (for context only, do not quote paths prominently): ${filePath}
+
+Before (excerpt):
+${beforePreview.slice(0, LIVE_EDIT_PREVIEW_CHARS)}
+
+After (excerpt):
+${afterPreview.slice(0, LIVE_EDIT_PREVIEW_CHARS)}
+
+Rules:
+- Do NOT paste code blocks or long technical dumps.
+- Focus on what users will SEE or EXPERIENCE in the running app.
+- Do NOT repeat only the raw user prompt; interpret what was done.
+- Output ONLY the friendly explanation, no headings.`,
+  ])
+
+  const text = result.response.text().trim()
+  return (
+    text ||
+    (locale === 'ko' ? '화면에 반영할 변경을 적용했습니다.' : 'Changes were applied to the live app.')
+  )
+}
+
+/** Friendly message when live edit fails (Designer mode). */
+export async function paraphraseLiveEditFailure(
+  userPrompt: string,
+  errorMessage: string,
+  locale: 'en' | 'ko',
+): Promise<string> {
+  if (!API_KEY) return errorMessage
+
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+  const lang =
+    locale === 'ko'
+      ? '한국어로, 짧고 친절하게 2문장 이내.'
+      : 'In friendly plain English, at most 2 short sentences.'
+
+  const result = await model.generateContent([
+    `A live preview edit failed. ${lang}
+User wanted: "${userPrompt}"
+Technical error: ${errorMessage}
+
+Explain briefly in human terms (no stack traces, no "Error:" prefix). Output ONLY the explanation.`,
+  ])
+
+  const text = result.response.text().trim()
+  return text || errorMessage
+}

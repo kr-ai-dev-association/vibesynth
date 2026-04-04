@@ -26,6 +26,39 @@ function ensureDir(dirPath: string) {
   }
 }
 
+function expandUserPath(p: string): string {
+  const trimmed = (p || '').trim()
+  if (!trimmed) return ''
+  if (trimmed.startsWith('~/')) return path.join(os.homedir(), trimmed.slice(2))
+  if (trimmed === '~') return os.homedir()
+  return path.resolve(trimmed)
+}
+
+const EXPORT_SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.vite'])
+
+function listRelativePathsSync(dir: string, base = ''): string[] {
+  const out: string[] = []
+  if (!fs.existsSync(dir)) return out
+  for (const name of fs.readdirSync(dir)) {
+    if (EXPORT_SKIP_DIRS.has(name)) continue
+    const rel = base ? `${base}/${name}` : name
+    const full = path.join(dir, name)
+    const st = fs.statSync(full)
+    if (st.isDirectory()) out.push(...listRelativePathsSync(full, rel))
+    else out.push(rel.replace(/\\/g, '/'))
+  }
+  return out
+}
+
+function copyProjectTree(src: string, dest: string) {
+  for (const rel of listRelativePathsSync(src)) {
+    const from = path.join(src, ...rel.split('/'))
+    const to = path.join(dest, ...rel.split('/'))
+    ensureDir(path.dirname(to))
+    fs.copyFileSync(from, to)
+  }
+}
+
 function killDevServer() {
   if (devServerProcess) {
     devServerProcess.kill('SIGTERM')

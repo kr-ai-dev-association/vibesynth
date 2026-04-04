@@ -321,14 +321,9 @@ Stitch에는 없는 VibeSynth의 핵심 차별점.
 │       └── Generate 버튼
 ```
 
-#### 예제 프로젝트 (5개, 프롬프트 기반 AI 생성)
-| ID | 이름 | 디바이스 | 썸네일 |
-|----|------|----------|--------|
-| ex1 | Indoor Plant Care Dashboard | App | 🌿 그린 그라디언트 |
-| ex2 | SaaS Startup Landing Page | Web | 🚀 인디고 그라디언트 |
-| ex3 | Ceramic & Pottery Marketplace | Web | 🏺 테라코타 그라디언트 |
-| ex4 | Digital Magazine Reader | Tablet | 📖 그린 그라디언트 |
-| ex5 | Homemade Pizza Cooking Elite Class | App | 🍕 레드 그라디언트 |
+#### 예제 프로젝트 (LifeFlow 시리즈 6종 — §8.9 참고)
+
+구 예제(식물 대시보드, SaaS 랜딩 등 5종)는 **LifeFlow 통합 테마 예제**로 대체되었다. 카테고리: Landing Page, Homepage, Dashboard, iPhone App, Android App, iPad App. 각 예제는 PRD(마크다운) 확인 → 추천 디자인 시스템 선택 → 생성 플로우를 따른다.
 
 ### 5.2 Editor (메인 윈도우 - 전체 화면 캔버스)
 ```
@@ -421,13 +416,17 @@ vibesynth/
 │   ├── components/
 │   │   ├── common/
 │   │   │   ├── PromptBar.tsx        # App/Tablet/Web 토글 포함 프롬프트 바
-│   │   │   └── AppearanceToggle.tsx # Light/System/Dark 토글
+│   │   │   ├── AppearanceToggle.tsx # Light/System/Dark 토글
+│   │   │   └── MarkdownRenderer.tsx # PRD / Live 개발자 요약 등 MD 렌더
 │   │   └── editor/
 │   │       ├── RightPanel.tsx       # Design/Components/Layers 3탭 (추천 DS, 컴포넌트 토큰)
 │   │       ├── AgentLog.tsx         # AI 작업 로그
 │   │       └── ScreenContextToolbar.tsx
 │   ├── lib/
-│   │   ├── gemini.ts              # Gemini API (생성/편집/DS추출/히트맵/프론트빌드/증분빌드)
+│   │   ├── gemini.ts              # Gemini API + Live 편집 의역(paraphrase*) 헬퍼
+│   │   ├── live-diff.ts           # Live 수정용 줄 단위 diff 요약(Developer 모드용)
+│   │   ├── i18n/                  # en/ko 번역, I18nProvider(index.tsx), 예제 PRD 로케일
+│   │   ├── example-projects.ts    # LifeFlow 예제 + getExampleProjects(locale)
 │   │   ├── image-gen.ts           # AI 이미지 생성
 │   │   ├── design-guide-db.ts     # 디자인 가이드 localStorage 저장/로드
 │   │   ├── pinterest-designs.ts   # 13개 추천 디자인 시스템 데이터
@@ -435,7 +434,9 @@ vibesynth/
 │   └── types/
 │       └── electron.d.ts          # ElectronAPI 타입 정의 (pinterest API 포함)
 ├── tests/e2e/
-│   ├── full-workflow.spec.ts        # 전체 워크플로우 (생성→히트맵→빌드→수정→증분)
+│   ├── lifeflow-examples.spec.ts   # LifeFlow 예제 PRD·디자인 피커·생성
+│   ├── live-frontend.spec.ts       # Run → Live 창 → 플로팅 프롬프트 수정
+│   ├── full-workflow.spec.ts       # 전체 워크플로우 (생성→히트맵→빌드→수정→증분)
 │   ├── steal-design.spec.ts        # Pinterest 디자인 훔치기 테스트
 │   ├── steal-dashboard.spec.ts     # 대시보드 디자인 훔치기 테스트
 │   ├── recommended-designs.spec.ts # 추천 디자인 시스템 로드 테스트
@@ -622,6 +623,9 @@ fixBuildErrors(errorOutput, projectFiles)
 | **좀비 프로세스 정리** | 앱 시작 시 기존 Electron 프로세스 자동 종료 |
 | **전체 화면 시작** | Electron 앱 항상 fullscreen으로 시작 |
 | **E2E 테스트 스위트** | Playwright 다수 테스트 (워크플로우, 디자인 훔치기, 추천 DS 등) |
+| **LifeFlow 예제 + PRD 모달** | 6카테고리 통합 테마, MD 뷰어, 추천 DS 후 생성 |
+| **영/한 i18n** | Context 기반 `t()` , 설정·헤더 언어 전환, 예제 PRD 로케일 |
+| **공용 MarkdownRenderer** | 테이블·목록·코드 펜스 지원 (대시보드 PRD 등) |
 
 ---
 
@@ -813,6 +817,64 @@ interface DesignGuideEntry {
 - **큐레이션:** `PINTEREST_DESIGNS` 데이터가 curated 엔트리로 자동 통합
 - **삭제:** 앱 시작 시 `deleteAllSaved()`로 이전 AI 생성 데이터 초기화 (curated는 보존)
 
+### 8.9 LifeFlow Example Projects (통합 테마 예제)
+
+**주제:** 생활 패턴 기록·AI 코칭 앱 **LifeFlow**와, 이를 둘러싼 회사 홈페이지·랜딩·운영 대시보드를 **하나의 세계관**으로 묶은 6개 예제.
+
+| 카테고리 | 예제 ID (개략) | 디바이스/형태 |
+|----------|----------------|---------------|
+| Landing Page | ex-landing | Web — 서비스 소개 랜딩 |
+| Homepage | ex-homepage | Web — 회사 공식 사이트 |
+| Dashboard | ex-dashboard | Web — 회원/구독 어드민 |
+| iPhone App | ex-iphone | App |
+| Android App | ex-android | App |
+| iPad App | ex-ipad | Tablet |
+
+#### 사용자 플로우
+1. 대시보드 **LifeFlow Examples**에서 카드 선택  
+2. **PRD 모달:** 마크다운 뷰어로 제품 요구사항(영문/한글 UI에 맞춰 `getExampleProjects(locale)`로 로드)  
+3. **추천 디자인 시스템** 선택(선택) 후 **Generate**  
+4. AI용 `project.prompt`는 영어 유지(모델 품질), UI·PRD만 로케일 반영
+
+#### 데이터
+- `src/renderer/src/lib/i18n/en-examples.ts`, `ko-examples.ts` — 이름·카테고리 라벨·PRD 본문·제안 칩  
+- `src/renderer/src/lib/example-projects.ts` — `getExampleCategories`, `getSuggestions`, `getExampleProjects`
+
+### 8.10 Internationalization (i18n, EN / KO)
+
+**방식:** 외부 i18n 라이브러리 없이 **React Context + `en.ts` / `ko.ts`** 타입 안전 키(`TranslationKey`).
+
+#### 범위
+- **번역:** 앱 크롬(대시보드, 에디터, 설정, 우측 패널, 프롬프트 바, Appearance, Agent Log, 스크린 컨텍스트 툴바 등), Agent Log에 표시되는 메시지 키  
+- **로케일 예제 콘텐츠:** LifeFlow PRD·예제명·카테고리 라벨·제안 칩  
+- **비번역:** Gemini 시스템/생성 프롬프트, Pinterest 추천 디자인 **이름**(브랜딩), 콘솔 로그
+
+#### 지속성·UI
+- `localStorage` 키 `vibesynth-lang` (`en` | `ko`), 초기값은 저장값 또는 `navigator.language`  
+- **설정:** General → Language (English / 한국어)  
+- **헤더:** 대시보드·에디터에 **KO / EN** 토글 버튼(빠른 전환)
+
+#### 구현 파일
+- `src/renderer/src/lib/i18n/index.tsx` — `I18nProvider`, `useI18n`, `t(key, vars?)` (JSX 사용으로 **`.tsx` 확장자**)  
+- `src/renderer/src/lib/i18n/en.ts`, `ko.ts`  
+- `App.tsx` — 루트를 `I18nProvider`로 래핑
+
+### 8.11 Live Preview Edit & Designer / Developer Mode (**구현 중**)
+
+라이브 Vite 앱 창(`preload-live.ts` 플로팅 바)에서 입력한 수정 요청은 IPC `live-edit-request` → 메인 에디터에서 `editFrontendFile`로 `src/App.tsx` 등을 갱신한다.
+
+#### 완료·준비된 코드 (UI 미연동 또는 부분 연동)
+- **`paraphraseLiveEditForDesigner` / `paraphraseLiveEditFailure`** (`gemini.ts`) — 성공/실패 시 LLM 출력을 디자이너 친화 문장으로 의역  
+- **`buildLiveEditDeveloperMarkdown`** (`live-diff.ts`) — 수정 파일·줄 수·줄 단위 발췌·다음 단계 안내를 마크다운으로 생성  
+- **`MarkdownRenderer`** — 코드 펜스(```) 지원, PRD·개발자 요약 공용  
+- **`electron/main.ts`** — `expandUserPath`, `listRelativePathsSync`, `copyProjectTree` 등 **Live Export용 헬퍼**가 이미 존재하나, **`project:list-relative-paths` / `project:export-to-folder` / `shell:open-vscode` IPC 핸들러는 아직 등록되지 않음** (다음 작업)
+
+#### 목표 동작 (명세)
+| 모드 | 설명 |
+|------|------|
+| **Designer** | Live 수정 후 Agent Log·라이브 창 상태에 **원시 LLM 텍스트 대신** 의역된 설명 표시 |
+| **Developer** | 수정된 파일·diff 요약을 **MD 뷰어**로 표시, **Live Export**(프로젝트 전체를 지정 워크스페이스 폴더로 복사), **VS Code 열기**(`code` CLI 등) |
+
 ---
 
 ## 9. Screenshots Reference (Stitch 분석용)
@@ -838,6 +900,8 @@ Playwright 기반 자동화 테스트:
 
 | 테스트 파일 | 범위 |
 |-------------|------|
+| `lifeflow-examples.spec.ts` | LifeFlow 예제: 사이드바·PRD 모달·디자인 스타일·Generate 플로우 |
+| `live-frontend.spec.ts` | 멀티 스크린 → Run → 프론트 생성 → Live 창 + 플로팅 바 수정 |
 | `full-workflow.spec.ts` | 전체 워크플로우: 3화면 생성 → 히트맵 → 빌드 → 런타임 수정 → 추가 화면 → 증분 빌드 |
 | `steal-design.spec.ts` | Pinterest 디자인 훔치기 (SaaS 프로젝트 + 이미지 URL 분석) |
 | `steal-dashboard.spec.ts` | 대시보드 디자인 훔치기 (컴포넌트 토큰 검증 포함) |
@@ -850,3 +914,36 @@ Playwright 기반 자동화 테스트:
 | `parity-dashboard.spec.ts` | VibeSynth vs Stitch UX 패리티 (양쪽 프로젝트 동시 테스트) |
 | `visual-check.spec.ts` | 주요 화면 스크린샷 캡처 (대시보드, 에디터, 다크모드, 패널) |
 | `stitch-explore.spec.ts` | Stitch 수동 탐색 (로그인 필요, page.pause 활용) |
+
+---
+
+## 11. 다음 작업 (Explicit Backlog)
+
+아래는 **현재 코드베이스 기준**으로 PRD와 구현의 갭을 메우기 위한 **명시적 다음 작업**이다. 우선순위는 제품 목표에 따라 조정 가능하다.
+
+### 11.1 Live: Designer / Developer 모드 완성
+1. **에디터 상태:** `localStorage`(예: `vibesynth-live-feedback-mode`)로 `designer` | `developer` 저장, 헤더 또는 Live 관련 구역에 세그먼트 토글 UI 추가.  
+2. **Live edit 핸들러 (`Editor.tsx` `onLiveEditRequest`):**  
+   - 성공 시: Designer 모드면 `paraphraseLiveEditForDesigner` 호출 후 Agent Log·`sendLiveEditResult`에 **사용자용 문구** 전달.  
+   - Developer 모드면 `buildLiveEditDeveloperMarkdown`으로 MD 생성 후 모달(또는 사이드 패널)에 `MarkdownRenderer`로 표시.  
+3. **`live-edit-result` 페이로드 확장:** `userFacingMessage` 등 선택 필드 추가 → `electron/main.ts` / `preload-live.ts`에서 라이브 창 상태 텍스트에 반영(긴 텍스트는 말줄임 처리).  
+4. **실패 시:** Designer 모드에서 `paraphraseLiveEditFailure` 호출.
+
+### 11.2 Live Export + VS Code 연동
+1. **`electron/main.ts`:** `project:list-relative-paths`, `project:export-to-folder`, `shell:open-vscode` IPC 등록(이미 존재하는 `copyProjectTree` 활용).  
+2. **`preload.ts` / `electron.d.ts`:** renderer API 노출.  
+3. **설정:** Live Export 대상 루트 경로·VS Code CLI 명령(기본 `code`) — `localStorage` 또는 `DBUserSettings` 확장 후 Settings UI 연동.  
+4. **Developer 모드 UI:** “Export”, “Open in VS Code” 버튼 → IPC 호출 후 토스트/로그 피드백.
+
+### 11.3 예제 Live 스모크 & 자동 수정 루프 (선택·고비용)
+- **목표:** LifeFlow 6예제(또는 대표 1~2개)에 대해 Run → Live 수정 → 빌드/런타임 오류 시 `fixBuildErrors` 등으로 **자동 복구 루프**를 돌릴 때까지 E2E 또는 스크립트 반복.  
+- **전제:** `VITE_GEMINI_API_KEY`, 충분한 타임아웃, CI 비용 허용.  
+- **산출:** `tests/e2e/lifeflow-live-smoke.spec.ts`(또는 유사) + 실패 시 스크린샷·로그 수집.
+
+### 11.4 문서·품질
+- 본 PRD의 §8.11·§11를 구현 완료 시 **“구현 중” 표기 제거** 및 스크린샷/짧은 GIF(선택) 보강.  
+- `editFrontendFile`이 단일 파일(`src/App.tsx`)만 수정하는 한계가 있으면, 다중 파일 Live 편집 필요 여부를 PRD에 별도 항목으로 검토.
+
+### 11.5 기타 정리
+- **좌측 사이드바 리사이즈** 등 이전에 완료된 UX는 §4.3에 한 줄 보강 가능.  
+- **i18n:** 신규 문자열 추가 시 `en.ts` / `ko.ts` 키 동시 추가 원칙 유지.

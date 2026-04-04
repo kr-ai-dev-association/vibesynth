@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import type { DesignSystem, DesignGuide } from '../../App'
 import { PINTEREST_DESIGNS } from '../../lib/pinterest-designs'
+import { useI18n } from '../../lib/i18n'
 
 type PanelTab = 'design' | 'components' | 'layers'
 
@@ -23,6 +24,7 @@ interface RightPanelProps {
 }
 
 export function RightPanel({ designSystem, screenNames, selectedScreen, onSelectScreen, onDesignSystemUpdate, onSaveDesignSystem, onLoadDesignSystem, savedDesignSystems, onStealDesign, onStealUrl, onConnectPinterest }: RightPanelProps) {
+  const { t } = useI18n()
   const [isOpen, setIsOpen] = useState(true)
   const [tab, setTab] = useState<PanelTab>('design')
   const [copiedValue, setCopiedValue] = useState<string | null>(null)
@@ -39,7 +41,7 @@ export function RightPanel({ designSystem, screenNames, selectedScreen, onSelect
         <button
           onClick={() => setIsOpen(true)}
           className="w-9 h-9 rounded-xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 shadow-md flex items-center justify-center hover:bg-neutral-50 dark:hover:bg-neutral-700"
-          title="Open panel"
+          title={t('panel.open')}
         >
           <PanelIcon />
         </button>
@@ -53,19 +55,19 @@ export function RightPanel({ designSystem, screenNames, selectedScreen, onSelect
       <div className="flex items-center border-b border-neutral-200 dark:border-neutral-700 shrink-0">
         <div className="flex flex-1">
           <TabButton active={tab === 'design'} onClick={() => setTab('design')}>
-            <PaletteIcon className="w-3.5 h-3.5" /> Design
+            <PaletteIcon className="w-3.5 h-3.5" /> {t('panel.design')}
           </TabButton>
           <TabButton active={tab === 'components'} onClick={() => setTab('components')}>
-            <ComponentIcon className="w-3.5 h-3.5" /> Components
+            <ComponentIcon className="w-3.5 h-3.5" /> {t('panel.components')}
           </TabButton>
           <TabButton active={tab === 'layers'} onClick={() => setTab('layers')}>
-            <LayersIcon className="w-3.5 h-3.5" /> Layers
+            <LayersIcon className="w-3.5 h-3.5" /> {t('panel.layers')}
           </TabButton>
         </div>
         <button
           onClick={() => setIsOpen(false)}
           className="p-2 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-400"
-          title="Close panel"
+          title={t('panel.close')}
         >
           <XIcon />
         </button>
@@ -102,17 +104,18 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
   )
 }
 
-const GUIDE_SECTIONS: { key: keyof DesignGuide; label: string; icon: string }[] = [
-  { key: 'overview', label: 'Overview', icon: '💡' },
-  { key: 'colorRules', label: 'Color Rules', icon: '🎨' },
-  { key: 'typographyRules', label: 'Typography', icon: '🔤' },
-  { key: 'elevationRules', label: 'Elevation', icon: '📐' },
-  { key: 'componentRules', label: 'Components', icon: '🧩' },
-  { key: 'dosAndDonts', label: "Do's & Don'ts", icon: '✅' },
+const GUIDE_SECTIONS: { key: keyof DesignGuide; labelKey: 'panel.guideOverview' | 'panel.guideColorRules' | 'panel.guideTypography' | 'panel.guideElevation' | 'panel.guideComponents' | 'panel.guideDosAndDonts'; icon: string }[] = [
+  { key: 'overview', labelKey: 'panel.guideOverview', icon: '💡' },
+  { key: 'colorRules', labelKey: 'panel.guideColorRules', icon: '🎨' },
+  { key: 'typographyRules', labelKey: 'panel.guideTypography', icon: '🔤' },
+  { key: 'elevationRules', labelKey: 'panel.guideElevation', icon: '📐' },
+  { key: 'componentRules', labelKey: 'panel.guideComponents', icon: '🧩' },
+  { key: 'dosAndDonts', labelKey: 'panel.guideDosAndDonts', icon: '✅' },
 ]
 
 // === Recommended Designs ===
 function RecommendedDesigns({ onLoad }: { onLoad: (id: string) => void }) {
+  const { t } = useI18n()
   const [expanded, setExpanded] = useState(false)
   const designs = useMemo(() => PINTEREST_DESIGNS, [])
 
@@ -122,7 +125,7 @@ function RecommendedDesigns({ onLoad }: { onLoad: (id: string) => void }) {
         onClick={() => setExpanded(!expanded)}
         className="flex items-center gap-1 w-full"
       >
-        <SectionLabel>Recommended Designs</SectionLabel>
+        <SectionLabel>{t('panel.recommendedDesigns')}</SectionLabel>
         <span className="text-[9px] text-neutral-400 ml-auto">{expanded ? '▲' : '▼'} {designs.length}</span>
       </button>
       {expanded && (
@@ -157,6 +160,7 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
   designSystem: DesignSystem; onCopy: (v: string) => void; copiedValue: string | null; onDesignSystemUpdate?: (ds: DesignSystem) => void
   onSave?: () => void; onLoad?: (id: string) => void; savedSystems?: SavedEntry[]; onSteal?: (query: string) => void; onStealUrl?: (url: string) => void; onConnect?: () => void
 }) {
+  const { t } = useI18n()
   const [editingGuideKey, setEditingGuideKey] = useState<keyof DesignGuide | null>(null)
   const [editValue, setEditValue] = useState('')
   const [showGuide, setShowGuide] = useState(true)
@@ -233,10 +237,10 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
       <div className="p-3 space-y-4">
         <div className="flex items-center gap-2">
           <PaletteIcon className="w-4 h-4 text-neutral-400 animate-pulse" />
-          <span className="text-sm font-semibold text-neutral-400 animate-pulse">Generating design system...</span>
+          <span className="text-sm font-semibold text-neutral-400 animate-pulse">{t('panel.generatingDS')}</span>
         </div>
         <div className="space-y-3">
-          {['Primary', 'Secondary', 'Tertiary', 'Neutral'].map((label) => (
+          {[t('panel.primary'), t('panel.secondary'), t('panel.tertiary'), t('panel.neutral')].map((label) => (
             <div key={label}>
               <span className="text-[11px] font-medium text-neutral-400">{label}</span>
               <div className="flex gap-px rounded-lg overflow-hidden mt-1">
@@ -248,17 +252,17 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
           ))}
         </div>
         <p className="text-[11px] text-neutral-400 text-center py-2">
-          AI is analyzing the design to extract colors, typography, and theme...
+          {t('panel.dsAnalyzing')}
         </p>
       </div>
     )
   }
 
   const colorRoles = [
-    { label: 'Primary', ...designSystem.colors.primary },
-    { label: 'Secondary', ...designSystem.colors.secondary },
-    { label: 'Tertiary', ...designSystem.colors.tertiary },
-    { label: 'Neutral', ...designSystem.colors.neutral },
+    { label: t('panel.primary'), roleKey: 'Primary', ...designSystem.colors.primary },
+    { label: t('panel.secondary'), roleKey: 'Secondary', ...designSystem.colors.secondary },
+    { label: t('panel.tertiary'), roleKey: 'Tertiary', ...designSystem.colors.tertiary },
+    { label: t('panel.neutral'), roleKey: 'Neutral', ...designSystem.colors.neutral },
   ]
 
   return (
@@ -281,7 +285,7 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
             data-testid="theme-name"
             onClick={() => { setEditingName(true); setNameValue(designSystem.name); }}
             className="text-sm font-semibold hover:text-blue-500 transition-colors text-left"
-            title="Click to edit theme name"
+            title={t('panel.editThemeName')}
           >
             {designSystem.name}
           </button>
@@ -297,7 +301,7 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
               onClick={onSave}
               className="flex-1 text-[10px] font-medium px-2 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
             >
-              Save Design System
+              {t('panel.saveDS')}
             </button>
           )}
           {onLoad && savedSystems && savedSystems.length > 0 && (
@@ -307,7 +311,7 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
               className="flex-1 text-[10px] font-medium px-2 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-600 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
               defaultValue=""
             >
-              <option value="" disabled>Load Saved...</option>
+              <option value="" disabled>{t('panel.loadSaved')}</option>
               {savedSystems.filter(s => !s.id.startsWith('pin-')).map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
@@ -324,7 +328,7 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
       {/* Pinterest Design Steal */}
       {(onSteal || onConnect || onStealUrl) && (
         <div className="relative space-y-1.5">
-          <SectionLabel>Steal Design</SectionLabel>
+          <SectionLabel>{t('panel.stealDesign')}</SectionLabel>
 
           {/* Step 1: Browse Pinterest in system browser */}
           {onSteal && (
@@ -335,16 +339,16 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
                 className="w-full text-[10px] font-semibold px-2 py-2 rounded-lg text-white transition-all hover:opacity-90 active:scale-[0.98]"
                 style={{ background: 'linear-gradient(135deg, #E60023 0%, #BD081C 50%, #C92228 100%)' }}
               >
-                Browse Pinterest
+                {t('panel.browsePinterest')}
               </button>
               {showStealMenu && (
                 <div className="rounded-lg border border-neutral-200 dark:border-neutral-600 bg-white dark:bg-neutral-800 overflow-hidden shadow-lg">
                   {[
-                    { label: 'Web Homepage Design', query: 'homepage web design ui' },
-                    { label: 'Dashboard Design', query: 'dashboard design ui ux' },
-                    { label: 'iPhone App Design', query: 'iphone app design ui' },
-                    { label: 'Android App Design', query: 'android app design ui' },
-                    { label: 'iPad App Design', query: 'ipad app design ui' },
+                    { label: t('panel.webHomepage'), query: 'homepage web design ui' },
+                    { label: t('panel.dashboardDesign'), query: 'dashboard design ui ux' },
+                    { label: t('panel.iphoneDesign'), query: 'iphone app design ui' },
+                    { label: t('panel.androidDesign'), query: 'android app design ui' },
+                    { label: t('panel.ipadDesign'), query: 'ipad app design ui' },
                   ].map(({ label, query }) => (
                     <button
                       key={query}
@@ -363,12 +367,12 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
           {/* Step 2: Paste image URL */}
           {onStealUrl && (
             <div className="space-y-1">
-              <p className="text-[9px] text-neutral-400">Right-click image → Copy Image Address → Paste below</p>
+              <p className="text-[9px] text-neutral-400">{t('panel.stealInstruction')}</p>
               <div className="flex gap-1">
                 <input
                   data-testid="steal-url-input"
                   type="text"
-                  placeholder="Paste image URL..."
+                  placeholder={t('panel.pasteImageUrl')}
                   value={stealUrlValue}
                   onChange={(e) => setStealUrlValue(e.target.value)}
                   onKeyDown={(e) => {
@@ -396,7 +400,7 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
                   className="text-[10px] font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-40 transition-all hover:opacity-90"
                   style={{ background: '#7c3aed' }}
                 >
-                  {stealUrlLoading ? '...' : 'Steal'}
+                  {stealUrlLoading ? '...' : t('panel.steal')}
                 </button>
               </div>
             </div>
@@ -406,7 +410,7 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
 
       {/* Colors */}
       <div>
-        <SectionLabel>Color Palette</SectionLabel>
+        <SectionLabel>{t('panel.colorPalette')}</SectionLabel>
         <div className="space-y-3 mt-2">
           {colorRoles.map((role) => (
             <div key={role.label}>
@@ -416,12 +420,12 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
                   onClick={() => onCopy(role.base)}
                   className="text-[11px] text-neutral-400 hover:text-neutral-600 font-mono"
                 >
-                  {copiedValue === role.base ? '✓ Copied' : role.base}
+                  {copiedValue === role.base ? t('common.copied') : role.base}
                 </button>
               </div>
               <div className="flex gap-px rounded-lg overflow-hidden">
                 {role.tones.map((tone, i) => {
-                  const isEditing = editingColor?.role === role.label && editingColor.index === i
+                  const isEditing = editingColor?.role === role.roleKey && editingColor.index === i
                   return isEditing ? (
                     <div key={i} className="flex-1 relative z-30">
                       <input
@@ -440,7 +444,7 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
                       key={i}
                       onClick={(e) => {
                         if (e.shiftKey) { onCopy(tone); return }
-                        if (onDesignSystemUpdate) { setEditingColor({ role: role.label, index: i }); setColorValue(tone); }
+                        if (onDesignSystemUpdate) { setEditingColor({ role: role.roleKey, index: i }); setColorValue(tone); }
                         else { onCopy(tone) }
                       }}
                       className="flex-1 h-6 hover:ring-2 hover:ring-blue-400 hover:z-10 relative group transition-all"
@@ -461,7 +465,7 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
 
       {/* Typography */}
       <div>
-        <SectionLabel>Typography</SectionLabel>
+        <SectionLabel>{t('panel.typography')}</SectionLabel>
         <div className="mt-2 space-y-2">
           {Object.entries(designSystem.typography).map(([level, typo]) => {
             const family = typo.family
@@ -482,7 +486,7 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
                   <button
                     className="text-left flex-1"
                     onClick={() => { if (onDesignSystemUpdate) { setEditingFont(level); setFontValue(family); } }}
-                    title="Click to edit font family"
+                    title={t('panel.editFontFamily')}
                   >
                     <span className="text-[11px] font-medium text-neutral-500 capitalize">{level}</span>
                     <span className="text-[11px] text-neutral-400 ml-1.5 group-hover:text-blue-500 transition-colors">{family}</span>
@@ -509,20 +513,20 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
           onClick={() => setShowGuide(!showGuide)}
           className="flex items-center justify-between w-full group"
         >
-          <SectionLabel>Design Guide</SectionLabel>
+          <SectionLabel>{t('panel.designGuide')}</SectionLabel>
           <ChevronIcon className={`w-3 h-3 text-neutral-400 transition-transform ${showGuide ? 'rotate-180' : ''}`} />
         </button>
 
         {showGuide && (
           <div className="mt-2 space-y-2">
             {designSystem.guide ? (
-              GUIDE_SECTIONS.map(({ key, label, icon }) => (
+              GUIDE_SECTIONS.map(({ key, labelKey, icon }) => (
                 <div key={key} className="rounded-lg bg-neutral-50 dark:bg-neutral-700/50 overflow-hidden">
                   {editingGuideKey === key ? (
                     <div className="p-2">
                       <div className="flex items-center gap-1.5 mb-1.5">
                         <span className="text-[10px]">{icon}</span>
-                        <span className="text-[11px] font-medium text-neutral-600 dark:text-neutral-300">{label}</span>
+                        <span className="text-[11px] font-medium text-neutral-600 dark:text-neutral-300">{t(labelKey)}</span>
                       </div>
                       <textarea
                         value={editValue}
@@ -535,13 +539,13 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
                           onClick={() => setEditingGuideKey(null)}
                           className="px-2.5 py-1 text-[10px] font-medium rounded-md border border-neutral-300 dark:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-700"
                         >
-                          Cancel
+                          {t('common.cancel')}
                         </button>
                         <button
                           onClick={saveEdit}
                           className="px-2.5 py-1 text-[10px] font-medium rounded-md bg-blue-500 text-white hover:bg-blue-600"
                         >
-                          Save
+                          {t('common.save')}
                         </button>
                       </div>
                     </div>
@@ -553,12 +557,12 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
                       <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center gap-1.5">
                           <span className="text-[10px]">{icon}</span>
-                          <span className="text-[11px] font-medium text-neutral-600 dark:text-neutral-300">{label}</span>
+                          <span className="text-[11px] font-medium text-neutral-600 dark:text-neutral-300">{t(labelKey)}</span>
                         </div>
                         <EditSmallIcon className="w-3 h-3 text-neutral-300 opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
                       <p className="text-[10px] leading-relaxed text-neutral-500 dark:text-neutral-400 line-clamp-3">
-                        {designSystem.guide?.[key] || 'Click to add...'}
+                        {designSystem.guide?.[key] || t('panel.clickToAdd')}
                       </p>
                     </button>
                   )}
@@ -566,7 +570,7 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
               ))
             ) : (
               <p className="text-[11px] text-neutral-400 text-center py-3">
-                Design guide will be generated with your first screen.
+                {t('panel.guideWillBeGenerated')}
               </p>
             )}
           </div>
@@ -579,6 +583,7 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
 // Code snippets for each component type
 // === Components Tab ===
 function ComponentsTab({ designSystem }: { designSystem: DesignSystem }) {
+  const { t } = useI18n()
   const { colors, typography, components: ct } = designSystem
   const [copiedSnippet, setCopiedSnippet] = useState<string | null>(null)
 
@@ -609,7 +614,7 @@ function ComponentsTab({ designSystem }: { designSystem: DesignSystem }) {
       data-testid={`copy-${id}`}
       onClick={() => copyCode(code, id)}
       className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-neutral-400 hover:text-blue-500 shrink-0"
-      title="Copy snippet"
+      title={t('panel.copySnippet')}
     >{copiedSnippet === id ? '✓' : '{ }'}</button>
   )
 
@@ -617,26 +622,26 @@ function ComponentsTab({ designSystem }: { designSystem: DesignSystem }) {
     <div className="p-3 space-y-5">
       {/* Typography */}
       <div>
-        <SectionLabel>Typography</SectionLabel>
+        <SectionLabel>{t('components.typography')}</SectionLabel>
         <div className="mt-2 space-y-2.5">
           {(['headline', 'body', 'label'] as const).map((level) => {
-            const t = typography[level]
+            const typoLevel = typography[level]
             return (
               <div key={level} className="group flex items-baseline gap-2" data-testid={`typo-${level}`}>
                 <div className="flex-1 min-w-0">
                   <span
                     className="block truncate"
                     style={{
-                      fontFamily: t.family,
-                      fontSize: level === 'headline' ? (t.size || '24px') : level === 'body' ? (t.size || '14px') : (t.size || '11px'),
-                      fontWeight: t.weight || (level === 'headline' ? '700' : '400'),
-                      lineHeight: t.lineHeight || '1.4',
+                      fontFamily: typoLevel.family,
+                      fontSize: level === 'headline' ? (typoLevel.size || '24px') : level === 'body' ? (typoLevel.size || '14px') : (typoLevel.size || '11px'),
+                      fontWeight: typoLevel.weight || (level === 'headline' ? '700' : '400'),
+                      lineHeight: typoLevel.lineHeight || '1.4',
                     }}
                   >
-                    {t.family}
+                    {typoLevel.family}
                   </span>
                   <span className="text-[9px] text-neutral-400 capitalize">
-                    {level} &middot; {t.size || (level === 'headline' ? '32px' : level === 'body' ? '16px' : '12px')} &middot; {t.weight || (level === 'headline' ? '700' : '400')}
+                    {level} &middot; {typoLevel.size || (level === 'headline' ? '32px' : level === 'body' ? '16px' : '12px')} &middot; {typoLevel.weight || (level === 'headline' ? '700' : '400')}
                   </span>
                 </div>
               </div>
@@ -647,13 +652,13 @@ function ComponentsTab({ designSystem }: { designSystem: DesignSystem }) {
 
       {/* Buttons */}
       <div>
-        <SectionLabel>Buttons</SectionLabel>
+        <SectionLabel>{t('components.buttons')}</SectionLabel>
         <div className="mt-2 space-y-2">
           {[
-            { id: 'btn-primary', label: 'Primary', bg: colors.primary.base, fg: '#fff' },
-            { id: 'btn-secondary', label: 'Secondary', bg: colors.secondary.base, fg: '#fff' },
-            { id: 'btn-tertiary', label: 'Tertiary', bg: colors.tertiary.base, fg: '#fff' },
-            { id: 'btn-outlined', label: 'Outlined', bg: 'transparent', fg: colors.primary.base, border: `1px solid ${colors.primary.base}` },
+            { id: 'btn-primary', label: t('components.primary'), bg: colors.primary.base, fg: '#fff' },
+            { id: 'btn-secondary', label: t('components.secondary'), bg: colors.secondary.base, fg: '#fff' },
+            { id: 'btn-tertiary', label: t('components.tertiary'), bg: colors.tertiary.base, fg: '#fff' },
+            { id: 'btn-outlined', label: t('components.outlined'), bg: 'transparent', fg: colors.primary.base, border: `1px solid ${colors.primary.base}` },
           ].map(({ id, label, bg, fg, border }) => (
             <div key={id} className="group flex items-center gap-2" data-testid={`component-${id}`}>
               <button
@@ -679,12 +684,12 @@ function ComponentsTab({ designSystem }: { designSystem: DesignSystem }) {
 
       {/* Text Input */}
       <div>
-        <SectionLabel>Text Input</SectionLabel>
+        <SectionLabel>{t('components.textInput')}</SectionLabel>
         <div className="mt-2 space-y-2">
           <div className="group relative" data-testid="component-input">
             <input
               type="text"
-              placeholder="Enter text..."
+              placeholder={t('components.enterText')}
               readOnly
               className="w-full text-xs outline-none"
               style={{
@@ -701,10 +706,10 @@ function ComponentsTab({ designSystem }: { designSystem: DesignSystem }) {
             <label
               className="block text-neutral-500 dark:text-neutral-400 mb-1"
               style={{ fontSize: typography.label.size || '12px', fontFamily: typography.label.family, fontWeight: typography.label.weight || '500' }}
-            >Label</label>
+            >{t('components.label')}</label>
             <input
               type="text"
-              placeholder="With label..."
+              placeholder={t('components.withLabel')}
               readOnly
               className="w-full text-xs outline-none"
               style={{
@@ -721,18 +726,18 @@ function ComponentsTab({ designSystem }: { designSystem: DesignSystem }) {
 
       {/* Card */}
       <div>
-        <SectionLabel>Card</SectionLabel>
+        <SectionLabel>{t('components.card')}</SectionLabel>
         <div className="mt-2 group" data-testid="component-card">
           <div
             className="bg-white dark:bg-neutral-800"
             style={{ borderRadius: cardR, boxShadow: cardS, padding: cardP }}
           >
-            <div className="font-semibold text-xs mb-1" style={{ fontFamily: typography.headline.family }}>Card Title</div>
-            <div className="text-[10px] text-neutral-500" style={{ fontFamily: typography.body.family }}>Card description with body text style applied from design system.</div>
+            <div className="font-semibold text-xs mb-1" style={{ fontFamily: typography.headline.family }}>{t('components.cardTitle')}</div>
+            <div className="text-[10px] text-neutral-500" style={{ fontFamily: typography.body.family }}>{t('components.cardDesc')}</div>
             <button
               className="mt-2 text-[10px] text-white"
               style={{ backgroundColor: colors.primary.base, padding: '4px 12px', borderRadius: btnR, fontFamily: typography.label.family, border: 'none' }}
-            >Action</button>
+            >{t('components.action')}</button>
           </div>
           <CopyBtn id="card" code={`<div style="border-radius:${cardR};box-shadow:${cardS};padding:${cardP};background:#fff"><h3>Card Title</h3><p>Description</p></div>`} />
         </div>
@@ -740,14 +745,14 @@ function ComponentsTab({ designSystem }: { designSystem: DesignSystem }) {
 
       {/* Search Bar */}
       <div>
-        <SectionLabel>Search Bar</SectionLabel>
+        <SectionLabel>{t('components.searchBar')}</SectionLabel>
         <div className="mt-2 group relative" data-testid="component-search-bar">
           <div
             className="flex items-center gap-2.5 text-neutral-400 text-xs"
             style={{ padding: inpP, borderRadius: inpR, backgroundColor: chipBg, fontFamily: typography.body.family }}
           >
             <SearchSmallIcon />
-            <span>Search</span>
+            <span>{t('components.searchPlaceholder')}</span>
           </div>
           <CopyBtn id="search-bar" code={`<div style="display:flex;align-items:center;gap:8px;padding:${inpP};border-radius:${inpR};background:${chipBg}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>Search</div>`} />
         </div>
@@ -755,17 +760,17 @@ function ComponentsTab({ designSystem }: { designSystem: DesignSystem }) {
 
       {/* Bottom Navigation */}
       <div>
-        <SectionLabel>Bottom Navigation</SectionLabel>
+        <SectionLabel>{t('components.bottomNav')}</SectionLabel>
         <div className="mt-2 flex justify-around rounded-xl py-2.5 px-4" style={{ backgroundColor: chipBg }}>
-          <NavItem icon="home" label="Home" active color={colors.primary.base} />
-          <NavItem icon="search" label="Search" />
-          <NavItem icon="person" label="Profile" />
+          <NavItem icon="home" label={t('components.home')} active color={colors.primary.base} />
+          <NavItem icon="search" label={t('common.search')} />
+          <NavItem icon="person" label={t('components.profile')} />
         </div>
       </div>
 
       {/* FAB */}
       <div>
-        <SectionLabel>FAB</SectionLabel>
+        <SectionLabel>{t('components.fab')}</SectionLabel>
         <div className="mt-2 flex items-center gap-3 group" data-testid="component-fab">
           <button
             className="text-white flex items-center justify-center shadow-lg transition-transform hover:scale-110"
@@ -773,20 +778,20 @@ function ComponentsTab({ designSystem }: { designSystem: DesignSystem }) {
           >
             <EditIcon />
           </button>
-          <span className="text-[11px] text-neutral-400">Floating Action Button</span>
+          <span className="text-[11px] text-neutral-400">{t('components.fabCaption')}</span>
           <CopyBtn id="fab" code={`<button style="width:${fabSz};height:${fabSz};border-radius:${fabR};background:${colors.primary.base};color:#fff;border:none;box-shadow:0 4px 12px rgba(0,0,0,0.15)">+</button>`} />
         </div>
       </div>
 
       {/* Chips */}
       <div>
-        <SectionLabel>Chips</SectionLabel>
+        <SectionLabel>{t('components.chips')}</SectionLabel>
         <div className="mt-2 flex gap-2 flex-wrap" data-testid="component-chips">
           {[
-            { label: 'Primary', bg: colors.primary.tones[9] || chipBg, fg: colors.primary.base },
-            { label: 'Secondary', bg: colors.secondary.tones[9] || chipBg, fg: colors.secondary.base },
-            { label: 'Default', bg: chipBg, fg: undefined },
-            { label: 'Outlined', bg: 'transparent', fg: undefined, border: `1px solid ${colors.neutral.tones[7] || '#ccc'}` },
+            { label: t('components.primary'), bg: colors.primary.tones[9] || chipBg, fg: colors.primary.base },
+            { label: t('components.secondary'), bg: colors.secondary.tones[9] || chipBg, fg: colors.secondary.base },
+            { label: t('components.default'), bg: chipBg, fg: undefined },
+            { label: t('components.outlined'), bg: 'transparent', fg: undefined, border: `1px solid ${colors.neutral.tones[7] || '#ccc'}` },
           ].map(({ label, bg, fg, border }) => (
             <span
               key={label}
@@ -806,7 +811,7 @@ function ComponentsTab({ designSystem }: { designSystem: DesignSystem }) {
 
       {/* Icon Set */}
       <div>
-        <SectionLabel>Icon Set</SectionLabel>
+        <SectionLabel>{t('components.iconSet')}</SectionLabel>
         <div className="mt-2 grid grid-cols-6 gap-2">
           {['home','search','person','edit','star','chat','attach_file','settings','add','delete','bookmark','share'].map((name) => (
             <div key={name} className="w-8 h-8 flex items-center justify-center rounded-lg text-neutral-500 dark:text-neutral-400 text-[10px] hover:ring-1 hover:ring-blue-400 transition-all cursor-pointer" style={{ backgroundColor: chipBg }} title={name}>
@@ -841,11 +846,12 @@ function getIconPath(name: string): string {
 function LayersTab({ screenNames, selectedScreen, onSelectScreen }: {
   screenNames: string[]; selectedScreen: string | null; onSelectScreen: (name: string) => void
 }) {
+  const { t } = useI18n()
   return (
     <div className="p-3 space-y-1">
-      <SectionLabel>Screens ({screenNames.length})</SectionLabel>
+      <SectionLabel>{t('panel.screensCount', { count: String(screenNames.length) })}</SectionLabel>
       {screenNames.length === 0 ? (
-        <p className="text-xs text-neutral-400 mt-2">No screens yet. Generate one using the prompt bar.</p>
+        <p className="text-xs text-neutral-400 mt-2">{t('panel.noScreens')}</p>
       ) : (
         <div className="mt-2 space-y-0.5">
           {screenNames.map((name, i) => (
