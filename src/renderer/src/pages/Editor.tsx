@@ -1870,7 +1870,8 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             onColorSchemeChange={setColorScheme}
             onSubmit={handlePromptSubmit}
             selectedScreen={selectedScreen || undefined}
-            onRemoveScreen={() => { setSelectedScreen(null); setEditMode(false); setSelectedElement(null) }}
+            selectedScreens={selectedScreens.size > 0 ? Array.from(selectedScreens) : undefined}
+            onRemoveScreen={() => { setSelectedScreen(null); setEditMode(false); setSelectedElement(null); clearMultiSelection() }}
             editMode={editMode}
             selectedElement={selectedElement ? { tagName: selectedElement.tagName, textPreview: selectedElement.textPreview } : undefined}
             onExitEditMode={() => { setEditMode(false); setSelectedElement(null) }}

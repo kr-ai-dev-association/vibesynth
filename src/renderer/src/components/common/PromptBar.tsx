@@ -11,6 +11,7 @@ interface PromptBarProps {
   onColorSchemeChange?: (scheme: ColorSchemeMode) => void
   onSubmit: (prompt: string) => void
   selectedScreen?: string
+  selectedScreens?: string[]
   onRemoveScreen?: () => void
   editMode?: boolean
   selectedElement?: { tagName: string; textPreview: string }
@@ -26,6 +27,7 @@ export function PromptBar({
   onColorSchemeChange,
   onSubmit,
   selectedScreen,
+  selectedScreens,
   onRemoveScreen,
   editMode,
   selectedElement,
@@ -61,10 +63,18 @@ export function PromptBar({
 
   return (
     <div className="rounded-2xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 shadow-sm">
-      {/* Selected screen tag + edit mode + element info */}
-      {(selectedScreen || editMode) && (
+      {/* Selected screen tags + edit mode + element info */}
+      {(selectedScreen || (selectedScreens && selectedScreens.length > 0) || editMode) && (
         <div className="px-4 pt-3 flex flex-wrap items-center gap-2">
-          {selectedScreen && (
+          {/* Multi-selected screens */}
+          {selectedScreens && selectedScreens.length > 1 ? (
+            selectedScreens.map((name) => (
+              <span key={name} className="inline-flex items-center gap-1.5 px-2.5 py-1 text-sm rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300">
+                <span className="w-3 h-3 rounded-full bg-violet-400" />
+                {name}
+              </span>
+            ))
+          ) : selectedScreen ? (
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-sm rounded-full bg-neutral-100 dark:bg-neutral-700">
               <span className="w-4 h-4 rounded-full bg-amber-400" />
               {selectedScreen}
@@ -72,7 +82,7 @@ export function PromptBar({
                 <XIcon className="w-3.5 h-3.5" />
               </button>
             </span>
-          )}
+          ) : null}
           {editMode && (
             <span className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
               <EditPenIcon className="w-3 h-3" />
