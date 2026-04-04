@@ -19,6 +19,12 @@ interface ElectronProjectAPI {
   startDev: (projectId: string, port: number) => Promise<{ success: boolean; url?: string; error?: string }>
   stopDev: () => Promise<boolean>
   getStatus: () => Promise<{ running: boolean; projectId: string | null }>
+  listRelativePaths: (projectId: string) => Promise<string[]>
+  exportToFolder: (projectId: string, destPath: string) => Promise<{ success: boolean; path?: string; error?: string }>
+}
+
+interface ElectronShellAPI {
+  openVscode: (folderPath: string) => Promise<{ success: boolean; error?: string }>
 }
 
 interface ElectronPinterestAPI {
@@ -40,9 +46,10 @@ interface ElectronAPI {
   openExternal: (url: string) => Promise<void>
   onLiveWindowClosed: (callback: () => void) => () => void
   onLiveEditRequest: (callback: (prompt: string, currentUrl: string) => void) => () => void
-  sendLiveEditResult: (result: { success: boolean; message: string }) => Promise<void>
+  sendLiveEditResult: (result: { success: boolean; message: string; devMarkdown?: string }) => Promise<void>
   pinterest: ElectronPinterestAPI
   project: ElectronProjectAPI
+  shell: ElectronShellAPI
   db: ElectronDBAPI
 }
 

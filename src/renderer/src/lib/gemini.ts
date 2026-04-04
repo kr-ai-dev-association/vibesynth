@@ -165,7 +165,7 @@ export async function generateDesign(
   existingScreenHtml?: string,
   presetDesignSystem?: DesignSystem,
 ): Promise<GenerateDesignResult[]> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
 
   const activeGuide = guide || designGuideDB.findBestMatch(prompt)?.guide
 
@@ -317,7 +317,7 @@ export async function generateMultiScreen(
   },
   presetDesignSystem?: DesignSystem,
 ): Promise<GenerateDesignResult[]> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
   const activeGuide = guide || designGuideDB.findBestMatch(appDescription)?.guide
 
   // Generate shared images once
@@ -405,7 +405,7 @@ export async function editDesign(
   currentHtml: string,
   editPrompt: string,
 ): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
 
   // Extract images from current HTML to re-inject after edit
   const imageMap = new Map<string, string>()
@@ -445,7 +445,7 @@ export async function editDesignElement(
   elementOuterHtml: string,
   editPrompt: string,
 ): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
 
   const imageMap = new Map<string, string>()
   let placeholder = 0
@@ -516,7 +516,7 @@ export async function generateDesignSystem(html: string, baseGuide?: DesignGuide
   name: string
   guide: DesignGuide
 }> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
 
   const guideRef = baseGuide
     ? `\n\nUse the following as a reference design guide to adapt for this specific design:\n${formatGuideForPrompt(baseGuide)}`
@@ -585,7 +585,7 @@ Return ONLY the JSON, no other text.`,
 export async function generateHeatmap(
   html: string,
 ): Promise<{ cssPath: string; tagName: string; label: string; intensity: number; reason: string }[]> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
 
   const result = await model.generateContent([
     `You are a UX analytics expert. Analyze this HTML UI and predict where users will focus their attention and clicks.
@@ -618,46 +618,179 @@ Example: [{"cssPath":"body > header > nav","tagName":"nav","label":"Main Navigat
  * Generate a complete React + Vite + React Router project from multiple screen HTML designs.
  * Returns a file map (path -> content) ready to be written to disk.
  */
+/**
+ * Build a React+Vite+Tailwind frontend project from HTML screens.
+ *
+ * Architecture (improved):
+ * 1. Generate fixed scaffolding files (package.json, vite.config.ts, etc.)
+ * 2. Copy each screen's HTML into src/pages/{Name}.html for reference
+ * 3. Ask Gemini ONLY to convert HTML→TSX page components + App.tsx routing
+ * 4. Caller (Editor) then: scaffold → npm install → vite dev → browser popup
+ */
 export async function generateFrontendApp(
   screens: { name: string; html: string }[],
   deviceType: 'app' | 'web' | 'tablet' = 'web',
+  prd?: string,
+  designSystem?: { name: string; colors: any; typography: any; components?: any },
 ): Promise<Record<string, string>> {
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
-    generationConfig: { responseMimeType: 'application/json' },
-  })
-
   const routes = screens.map((s, i) => ({
     name: s.name,
     component: s.name.replace(/[^a-zA-Z0-9]/g, ''),
     route: i === 0 ? '/' : `/${slugify(s.name)}`,
   }))
 
+  // ─── Step 1: Fixed scaffolding (no Gemini needed) ───
+  const files: Record<string, string> = {}
+
+  files['package.json'] = JSON.stringify({
+    name: 'vibesynth-app',
+    private: true,
+    version: '0.1.0',
+    type: 'module',
+    scripts: {
+      dev: 'vite',
+      build: 'tsc && vite build',
+      preview: 'vite preview',
+    },
+    dependencies: {
+      react: '^18.3.1',
+      'react-dom': '^18.3.1',
+      'react-router-dom': '^7.5.0',
+    },
+    devDependencies: {
+      '@types/react': '^18.3.18',
+      '@types/react-dom': '^18.3.5',
+      '@vitejs/plugin-react': '^4.4.1',
+      autoprefixer: '^10.4.21',
+      postcss: '^8.5.3',
+      tailwindcss: '^4.1.3',
+      '@tailwindcss/vite': '^4.1.3',
+      typescript: '^5.8.3',
+      vite: '^6.3.1',
+    },
+  }, null, 2)
+
+  files['vite.config.ts'] = `import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+})`
+
+  files['tsconfig.json'] = JSON.stringify({
+    compilerOptions: {
+      target: 'ES2020',
+      useDefineForClassFields: true,
+      lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+      module: 'ESNext',
+      skipLibCheck: true,
+      moduleResolution: 'bundler',
+      allowImportingTsExtensions: true,
+      isolatedModules: true,
+      moduleDetection: 'force',
+      noEmit: true,
+      jsx: 'react-jsx',
+      strict: true,
+    },
+    include: ['src'],
+  }, null, 2)
+
+  files['index.html'] = `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VibeSynth App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>`
+
+  files['src/main.tsx'] = `import React from 'react'
+import ReactDOM from 'react-dom/client'
+import { BrowserRouter } from 'react-router-dom'
+import App from './App'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  </React.StrictMode>,
+)`
+
+  files['src/vite-env.d.ts'] = `/// <reference types="vite/client" />`
+
+  // ─── Step 2: Copy HTML screens as reference files ───
+  for (const screen of screens) {
+    const component = screen.name.replace(/[^a-zA-Z0-9]/g, '')
+    files[`src/pages/${component}.ref.html`] = screen.html
+  }
+
+  // ─── Step 3: Gemini converts HTML→TSX pages + App.tsx + index.css ───
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-3-flash-preview',
+    generationConfig: { responseMimeType: 'application/json' },
+  })
+
   const screenSummaries = screens.map((s, i) => {
     const stripped = stripHeavyContent(s.html)
-    const truncated = stripped.length > 8000 ? stripped.slice(0, 8000) + '\n<!-- truncated -->' : stripped
+    const truncated = stripped.length > 12000 ? stripped.slice(0, 12000) + '\n<!-- truncated -->' : stripped
     return `Screen ${i + 1}: "${s.name}" (route: ${routes[i].route}, component: ${routes[i].component})\n<html>\n${truncated}\n</html>`
   }).join('\n\n')
 
+  const prdContext = prd ? `\n\nPRD (Product Requirements):\n${prd.slice(0, 3000)}` : ''
+
+  // Build design system context for Gemini
+  let dsContext = ''
+  if (designSystem) {
+    const colors = designSystem.colors
+    const typo = designSystem.typography
+    dsContext = `\n\nDESIGN SYSTEM "${designSystem.name}" (MUST follow these tokens):
+Colors:
+  Primary: ${colors?.primary?.base || 'auto'}
+  Secondary: ${colors?.secondary?.base || 'auto'}
+  Tertiary: ${colors?.tertiary?.base || 'auto'}
+  Neutral: ${colors?.neutral?.base || 'auto'}
+Typography:
+  Headline: ${typo?.headline?.family || 'auto'} ${typo?.headline?.size || ''} ${typo?.headline?.weight || ''}
+  Body: ${typo?.body?.family || 'auto'} ${typo?.body?.size || ''} ${typo?.body?.weight || ''}
+  Label: ${typo?.label?.family || 'auto'} ${typo?.label?.size || ''} ${typo?.label?.weight || ''}
+${designSystem.components ? `Components: ${JSON.stringify(designSystem.components)}` : ''}`
+  }
+
   const result = await model.generateContent([
-    `Convert ${screens.length} HTML screens into a React+Vite+ReactRouter project.
+    `You are converting ${screens.length} HTML design screens into React TSX page components for a Vite + React Router + Tailwind CSS project.
+
+The project scaffolding (package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx) is ALREADY created.
+IMPORTANT: src/main.tsx ALREADY wraps the app in <BrowserRouter>. Do NOT add another Router in App.tsx.
+
+You only need to generate:
+1. src/App.tsx — React Router <Routes> wiring all pages (NO <BrowserRouter> — it's in main.tsx)
+2. src/index.css — Tailwind CSS import + shared styles + Google Font imports
+3. One src/pages/{ComponentName}.tsx per screen
 
 Routes: ${JSON.stringify(routes)}
+Device type: ${deviceType}${prdContext}${dsContext}
 
 RULES:
-- Each screen → src/pages/{ComponentName}.tsx as a React functional component
-- Convert class→className, inline style strings→React style objects
+- CRITICAL: App.tsx must NOT import or use BrowserRouter/Router. Only use <Routes> and <Route>.
+- Convert HTML to React TSX: class→className, inline style strings→React style objects or Tailwind classes
+- Keep ALL visual design: colors, fonts, spacing, shadows, gradients, border-radius
+- Use Tailwind CSS utility classes where possible, inline styles for complex values
 - Wire navigation elements to React Router <Link> or useNavigate()
-- Keep all colors, fonts, layout from original HTML. Use inline styles or CSS.
-- package.json must include: react, react-dom, react-router-dom, vite, @vitejs/plugin-react, @types/react, @types/react-dom, typescript
-- vite.config.ts: use @vitejs/plugin-react
-- src/main.tsx: createRoot + BrowserRouter
-- src/App.tsx: <Routes> with all screen routes
-- src/index.css: shared styles, resets, font imports
-- Replace data:image URLs with placeholder divs using background colors
+- Replace data:image/... base64 URLs with gradient placeholder divs
+- src/index.css MUST start with: @import "tailwindcss";
+- Include Google Fonts @import in index.css if the HTML uses custom fonts
+- Each page component: export default function ComponentName() { return (...) }
+- Do NOT generate package.json, vite.config.ts, tsconfig.json, index.html, or main.tsx
 
-Return a JSON object: { "filepath": "file content string", ... }
-Include ALL files: package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx, src/App.tsx, src/index.css, and one src/pages/X.tsx per screen.
+Return a JSON object: { "src/App.tsx": "...", "src/index.css": "...", "src/pages/ComponentName.tsx": "...", ... }
+Return ONLY the JSON, no explanation.
 
 ${screenSummaries}`,
   ])
@@ -681,7 +814,7 @@ ${screenSummaries}`,
     }
   }
 
-  const files: Record<string, string> = {}
+  // Merge Gemini output into scaffolding files
   for (const [key, value] of Object.entries(parsed)) {
     files[key] = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
   }
@@ -698,7 +831,7 @@ export async function editFrontendFile(
   editPrompt: string,
   projectContext?: { files: string[]; screens: string[] },
 ): Promise<string> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
 
   const contextInfo = projectContext
     ? `\nProject files: ${projectContext.files.join(', ')}\nScreens/routes: ${projectContext.screens.join(', ')}`
@@ -750,7 +883,7 @@ export async function generateIncrementalFrontend(
   deviceType: 'app' | 'web' | 'tablet' = 'web',
 ): Promise<Record<string, string>> {
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3-flash-preview',
     generationConfig: { responseMimeType: 'application/json' },
   })
 
@@ -848,7 +981,7 @@ export async function fixBuildErrors(
   projectFiles: Record<string, string>,
 ): Promise<Record<string, string>> {
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3-flash-preview',
     generationConfig: { responseMimeType: 'application/json' },
   })
 
@@ -947,7 +1080,7 @@ export async function analyzeDesignFromImage(base64: string, mimeType: string): 
   name: string
   guide: DesignGuide
 }> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
 
   const result = await model.generateContent([
     {
@@ -1029,7 +1162,7 @@ export async function paraphraseLiveEditForDesigner(
       : 'Your request was applied to the live app. Check the preview.'
   }
 
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
   const lang =
     locale === 'ko'
       ? '한국어로, 비개발자·디자이너가 이해하기 쉽게 2~4문장으로 작성하세요.'
@@ -1069,7 +1202,7 @@ export async function paraphraseLiveEditFailure(
 ): Promise<string> {
   if (!API_KEY) return errorMessage
 
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
   const lang =
     locale === 'ko'
       ? '한국어로, 짧고 친절하게 2문장 이내.'

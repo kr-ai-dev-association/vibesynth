@@ -9,6 +9,8 @@ import { generateDesign, generateMultiScreen, editDesign, generateDesignSystem, 
 import { DEFAULT_DESIGN_GUIDE } from '../lib/default-design-guide'
 import { designGuideDB } from '../lib/design-guide-db'
 import { useI18n } from '../lib/i18n'
+import { paraphraseLiveEditForDesigner, paraphraseLiveEditFailure } from '../lib/gemini'
+import { buildLiveEditDeveloperMarkdown } from '../lib/live-diff'
 
 export interface AgentLogEntry {
   id: string
@@ -75,6 +77,19 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   const [buildingFrontend, setBuildingFrontend] = useState(false)
   const [leftSidebarWidth, setLeftSidebarWidth] = useState(40)
   const sidebarResizing = useRef(false)
+
+  // §11.1 Designer / Developer feedback mode
+  type FeedbackMode = 'designer' | 'developer'
+  const [feedbackMode, setFeedbackMode] = useState<FeedbackMode>(() => {
+    return (localStorage.getItem('vibesynth-live-feedback-mode') as FeedbackMode) || 'designer'
+  })
+  const [devMarkdown, setDevMarkdown] = useState<string | null>(null)
+
+  const toggleFeedbackMode = () => {
+    const next = feedbackMode === 'designer' ? 'developer' : 'designer'
+    setFeedbackMode(next)
+    localStorage.setItem('vibesynth-live-feedback-mode', next)
+  }
   const canvasRef = useRef<HTMLDivElement>(null)
   const autoZoomDone = useRef(false)
   // Incremental build cache: screenId → { htmlHash, generatedFiles }
@@ -581,7 +596,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     } else {
       const multiMatch = prompt.match(/screens?\s*:\s*(.+)/i)
       if (multiMatch) {
-        const screenNames = multiMatch[1].split(/;/).map(s => s.trim()).filter(Boolean)
+        const screenNames = multiMatch[1].split(/[,;]/).map(s => s.trim()).filter(Boolean)
         const appDescription = prompt.replace(multiMatch[0], '').trim()
         if (screenNames.length > 1 && appDescription) {
           handleGenerateMultiScreen(appDescription, screenNames)
@@ -832,13 +847,16 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       if (!devServerUrl || !project.id) return
       addLog(t('editor.log.liveEditRequest', { prompt }), 'generating')
 
+      const targetFile = 'src/App.tsx'
+      let beforeContent = ''
+
       try {
-        const targetFile = 'src/App.tsx'
         const currentContent = await window.electronAPI?.project.readFile(project.id, targetFile)
         if (!currentContent) {
           window.electronAPI?.sendLiveEditResult({ success: false, message: 'Could not read file' })
           return
         }
+        beforeContent = currentContent
 
         const fileList = project.screens.map(s => `src/pages/${s.name.replace(/\s+/g, '')}.tsx`)
         fileList.push('src/App.tsx', 'src/main.tsx', 'src/index.css')
@@ -849,15 +867,34 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         })
 
         await window.electronAPI?.project.writeFile(project.id, targetFile, updated)
-        addLog(t('editor.log.liveEditApplied'), 'success')
-        window.electronAPI?.sendLiveEditResult({ success: true, message: 'Changes applied' })
+
+        // §11.1 Designer / Developer mode feedback
+        if (feedbackMode === 'designer') {
+          const friendlyMsg = await paraphraseLiveEditForDesigner(
+            prompt, targetFile, beforeContent.slice(0, 500), updated.slice(0, 500), locale,
+          )
+          addLog(friendlyMsg, 'success')
+          window.electronAPI?.sendLiveEditResult({ success: true, message: friendlyMsg })
+        } else {
+          const md = buildLiveEditDeveloperMarkdown(prompt, targetFile, beforeContent, updated, locale)
+          setDevMarkdown(md)
+          addLog(t('editor.log.liveEditApplied'), 'success')
+          // Send devMarkdown to Live Window for in-app MD viewer
+          window.electronAPI?.sendLiveEditResult({ success: true, message: 'Changes applied', devMarkdown: md })
+        }
       } catch (err: any) {
-        addLog(t('editor.log.liveEditFailed', { error: err.message }), 'error')
-        window.electronAPI?.sendLiveEditResult({ success: false, message: err.message })
+        if (feedbackMode === 'designer') {
+          const friendlyErr = await paraphraseLiveEditFailure(prompt, err.message, locale).catch(() => err.message)
+          addLog(friendlyErr, 'error')
+          window.electronAPI?.sendLiveEditResult({ success: false, message: friendlyErr })
+        } else {
+          addLog(t('editor.log.liveEditFailed', { error: err.message }), 'error')
+          window.electronAPI?.sendLiveEditResult({ success: false, message: err.message })
+        }
       }
     })
     return () => cleanup?.()
-  }, [devServerUrl, project.id, project.screens]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [devServerUrl, project.id, project.screens, feedbackMode, locale]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRun = async () => {
     if (isRunning) {
@@ -874,7 +911,16 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
 
       try {
         const cache = buildCacheRef.current
-        const allScreensData = project.screens.map(s => ({ name: s.name, html: s.html }))
+        // Filter out generating/empty screens — only include completed ones with real HTML
+        const allScreensData = project.screens
+          .filter(s => !s.generating && s.html && s.html.length > 100)
+          .map(s => ({ name: s.name, html: s.html }))
+
+        if (allScreensData.length === 0) {
+          addLog('No completed screens to build. Wait for generation to finish.', 'error')
+          setBuildingFrontend(false)
+          return
+        }
 
         // Diff: find new/changed screens vs cache
         const newOrChanged: { name: string; html: string }[] = []
@@ -926,7 +972,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         } else {
           // ─── Full build: all screens are new ───
           const logId = addLog(t('editor.log.generatingFrontend'), 'generating')
-          files = await generateFrontendApp(allScreensData, deviceType)
+          files = await generateFrontendApp(allScreensData, deviceType, project.prompt, project.designSystem || undefined)
           updateLog(logId, t('editor.log.generatedFiles', { count: Object.keys(files).length }), 'generating')
         }
 
@@ -1129,6 +1175,21 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           >
             {buildingFrontend ? t('editor.building') : isRunning ? t('editor.stop') : t('editor.run')}
           </button>
+
+          {/* §11.1 Designer / Developer mode toggle */}
+          {isRunning && (
+            <button
+              onClick={toggleFeedbackMode}
+              className={`flex items-center gap-1 px-2 py-1 text-[11px] font-semibold rounded-lg border transition-colors ${
+                feedbackMode === 'developer'
+                  ? 'border-blue-400 dark:border-blue-500 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
+                  : 'border-neutral-200 dark:border-neutral-600 text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-700'
+              }`}
+              title={feedbackMode === 'designer' ? 'Switch to Developer mode' : 'Switch to Designer mode'}
+            >
+              {feedbackMode === 'designer' ? '🎨 Designer' : '💻 Developer'}
+            </button>
+          )}
 
           <button
             onClick={() => setLocale(locale === 'en' ? 'ko' : 'en')}
@@ -1513,6 +1574,72 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           }}
         />
       )}
+
+      {/* §11.1 Developer mode markdown summary modal */}
+      {devMarkdown && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setDevMarkdown(null)}>
+          <div
+            className="w-[720px] max-h-[80vh] bg-white dark:bg-neutral-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-200 dark:border-neutral-700">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                💻 {locale === 'ko' ? '개발자 수정 요약' : 'Developer Edit Summary'}
+              </h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(devMarkdown)
+                    addLog('Copied developer summary to clipboard', 'success')
+                  }}
+                  className="px-3 py-1 text-xs font-medium rounded-lg bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600"
+                >
+                  {t('common.copy')}
+                </button>
+                <button onClick={() => setDevMarkdown(null)} className="p-1 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700">
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                </button>
+              </div>
+            </div>
+            <pre className="flex-1 overflow-auto p-5 text-xs leading-relaxed text-neutral-700 dark:text-neutral-300 font-mono whitespace-pre-wrap">
+              {devMarkdown}
+            </pre>
+            {/* §11.2 Export + VS Code buttons */}
+            <div className="flex items-center gap-2 px-5 py-3 border-t border-neutral-200 dark:border-neutral-700">
+              <button
+                onClick={async () => {
+                  const dest = `~/VibeSynth/export/${project.id}`
+                  const result = await window.electronAPI?.project.exportToFolder(project.id, dest)
+                  if (result?.success) {
+                    addLog(`Exported to ${result.path}`, 'success')
+                  } else {
+                    addLog(`Export failed: ${result?.error}`, 'error')
+                  }
+                }}
+                className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 hover:bg-emerald-200"
+              >
+                📦 {locale === 'ko' ? '프로젝트 내보내기' : 'Export Project'}
+              </button>
+              <button
+                onClick={async () => {
+                  const dest = `~/VibeSynth/export/${project.id}`
+                  // Export first if not already
+                  await window.electronAPI?.project.exportToFolder(project.id, dest)
+                  const result = await window.electronAPI?.shell.openVscode(dest)
+                  if (result?.success) {
+                    addLog('Opened in VS Code', 'success')
+                  } else {
+                    addLog(`Could not open VS Code: ${result?.error}`, 'error')
+                  }
+                }}
+                className="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-200"
+              >
+                💻 {locale === 'ko' ? 'VS Code에서 열기' : 'Open in VS Code'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1669,7 +1796,6 @@ function ScreenCard({
   // Direct DOM measurement via allow-same-origin sandbox + polling
   useEffect(() => {
     // #region agent log
-    fetch('http://127.0.0.1:7545/ingest/aabc6907-9781-43a7-acd9-e95ddf0c9ebb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ba1aba'},body:JSON.stringify({sessionId:'ba1aba',location:'Editor.tsx:heightEffect',message:'Height useEffect entered',data:{screenId:screen.id,screenName:screen.name,isFixedHeight,deviceType,hasHtml:!!screen.html,htmlLen:screen.html?.length||0},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
     // #endregion
     if (isFixedHeight) { setContentHeight(minHeight); return }
     const iframe = iframeRef.current
@@ -1679,7 +1805,6 @@ function ScreenCard({
       try {
         const doc = iframe.contentDocument || iframe.contentWindow?.document
         // #region agent log
-        fetch('http://127.0.0.1:7545/ingest/aabc6907-9781-43a7-acd9-e95ddf0c9ebb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ba1aba'},body:JSON.stringify({sessionId:'ba1aba',location:'Editor.tsx:measure',message:'measure() called',data:{screenId:screen.id,screenName:screen.name,hasDoc:!!doc,hasBody:!!(doc&&doc.body),scrollH:doc?.documentElement?.scrollHeight,bodyScrollH:doc?.body?.scrollHeight,bodyOffsetH:doc?.body?.offsetHeight,measuredAlready:measuredRef.current},timestamp:Date.now(),hypothesisId:'H1,H2'})}).catch(()=>{});
         // #endregion
         if (!doc || !doc.body) return
         // Use body measurements only; documentElement.scrollHeight reflects the
@@ -1688,7 +1813,6 @@ function ScreenCard({
         if (h > 100) {
           const measured = Math.max(h, minHeight)
           // #region agent log
-          fetch('http://127.0.0.1:7545/ingest/aabc6907-9781-43a7-acd9-e95ddf0c9ebb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ba1aba'},body:JSON.stringify({sessionId:'ba1aba',location:'Editor.tsx:measure-result',message:'Height measured',data:{screenId:screen.id,screenName:screen.name,rawH:h,measured,prevHeight:contentHeight,willUpdate:Math.abs(measured-contentHeight)>10||!measuredRef.current},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
           // #endregion
           if (Math.abs(measured - contentHeight) > 10 || !measuredRef.current) {
             setContentHeight(measured)
@@ -1698,24 +1822,36 @@ function ScreenCard({
         }
       } catch (err) {
         // #region agent log
-        fetch('http://127.0.0.1:7545/ingest/aabc6907-9781-43a7-acd9-e95ddf0c9ebb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ba1aba'},body:JSON.stringify({sessionId:'ba1aba',location:'Editor.tsx:measure-error',message:'measure() threw',data:{screenId:screen.id,error:String(err)},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
         // #endregion
       }
     }
 
-    const onLoad = () => setTimeout(measure, 200)
+    const onLoad = () => setTimeout(measure, 300)
     iframe.addEventListener('load', onLoad)
 
-    // Polling: measure every 600ms for the first 5s, then stop
-    const intervals: ReturnType<typeof setInterval>[] = []
-    const poll = setInterval(measure, 600)
-    intervals.push(poll)
-    const stop = setTimeout(() => clearInterval(poll), 5000)
+    // Polling: measure every 500ms for 15s (covers font loading + image decode)
+    const poll = setInterval(measure, 500)
+    const stop = setTimeout(() => clearInterval(poll), 15000)
+
+    // Also use ResizeObserver on iframe body when accessible
+    let resizeObs: ResizeObserver | null = null
+    const tryObserve = () => {
+      try {
+        const doc = iframe.contentDocument || iframe.contentWindow?.document
+        if (doc?.body && !resizeObs) {
+          resizeObs = new ResizeObserver(() => measure())
+          resizeObs.observe(doc.body)
+        }
+      } catch { /* cross-origin */ }
+    }
+    const obsTimer = setTimeout(tryObserve, 1000)
 
     return () => {
       iframe.removeEventListener('load', onLoad)
-      intervals.forEach(clearInterval)
+      clearInterval(poll)
       clearTimeout(stop)
+      clearTimeout(obsTimer)
+      resizeObs?.disconnect()
     }
   }, [screen.html, isFixedHeight, minHeight]) // eslint-disable-line react-hooks/exhaustive-deps
 

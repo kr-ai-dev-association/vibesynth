@@ -36,6 +36,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('project:start-dev', projectId, port),
     stopDev: () => ipcRenderer.invoke('project:stop-dev'),
     getStatus: () => ipcRenderer.invoke('project:get-status'),
+    listRelativePaths: (projectId: string) =>
+      ipcRenderer.invoke('project:list-relative-paths', projectId),
+    exportToFolder: (projectId: string, destPath: string) =>
+      ipcRenderer.invoke('project:export-to-folder', projectId, destPath) as Promise<{ success: boolean; path?: string; error?: string }>,
+  },
+
+  // Shell commands (§11.2)
+  shell: {
+    openVscode: (folderPath: string) =>
+      ipcRenderer.invoke('shell:open-vscode', folderPath) as Promise<{ success: boolean; error?: string }>,
   },
 
   // Pinterest Design Steal

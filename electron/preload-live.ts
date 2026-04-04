@@ -103,6 +103,54 @@ function injectPromptBar() {
         font-weight: 500;
         white-space: nowrap;
       }
+      /* ─── MD Viewer Panel ─── */
+      #__vs-md-panel {
+        position: fixed;
+        bottom: 80px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 999998;
+        width: 640px;
+        max-height: 400px;
+        background: rgba(15,15,20,0.95);
+        backdrop-filter: blur(16px);
+        border-radius: 16px;
+        border: 1px solid rgba(255,255,255,0.1);
+        box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+        display: none;
+        flex-direction: column;
+        overflow: hidden;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      #__vs-md-panel.visible { display: flex; }
+      #__vs-md-panel .md-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 16px;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        flex-shrink: 0;
+      }
+      #__vs-md-panel .md-header span { color: #a5b4fc; font-size: 12px; font-weight: 600; }
+      #__vs-md-panel .md-close {
+        background: none; border: none; color: rgba(255,255,255,0.4);
+        cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 4px;
+      }
+      #__vs-md-panel .md-close:hover { color: white; background: rgba(255,255,255,0.1); }
+      #__vs-md-panel .md-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+        color: #d1d5db;
+        font-size: 12px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+      }
+      #__vs-md-panel .md-body h2 { color: #e0e7ff; font-size: 15px; margin: 12px 0 6px; font-family: -apple-system, sans-serif; }
+      #__vs-md-panel .md-body h3 { color: #a5b4fc; font-size: 13px; margin: 10px 0 4px; font-family: -apple-system, sans-serif; }
+      #__vs-md-panel .md-body code { background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; font-size: 11px; }
+      #__vs-md-panel .md-body pre { background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; overflow-x: auto; margin: 6px 0; }
     </style>
     <div class="vs-bar" id="__vs-bar">
       <span class="vs-label">✦ VibeSynth</span>
@@ -113,6 +161,35 @@ function injectPromptBar() {
     </div>
   `
   document.body.appendChild(container)
+
+  // ─── MD Viewer Panel (for Developer mode output) ───
+  const mdPanel = document.createElement('div')
+  mdPanel.id = '__vs-md-panel'
+  mdPanel.innerHTML = `
+    <div class="md-header">
+      <span>💻 Developer Summary</span>
+      <button class="md-close" id="__vs-md-close">✕</button>
+    </div>
+    <div class="md-body" id="__vs-md-body"></div>
+  `
+  document.body.appendChild(mdPanel)
+
+  const mdBodyEl = document.getElementById('__vs-md-body')!
+  const mdCloseBtn = document.getElementById('__vs-md-close')!
+  mdCloseBtn.addEventListener('click', () => { mdPanel.classList.remove('visible') })
+
+  function showMdPanel(markdown: string) {
+    // Simple MD → HTML conversion (headings, code blocks, bold, lists)
+    let html = markdown
+      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+      .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+      .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/^- (.+)$/gm, '• $1')
+    mdBodyEl.innerHTML = html
+    mdPanel.classList.add('visible')
+  }
 
   const bar = document.getElementById('__vs-bar')!
   const input = document.getElementById('__vs-input') as HTMLTextAreaElement
@@ -172,13 +249,17 @@ function injectPromptBar() {
     }
   })
 
-  ipcRenderer.on('live-edit-result', (_e: any, result: { success: boolean; message: string }) => {
+  ipcRenderer.on('live-edit-result', (_e: any, result: { success: boolean; message: string; devMarkdown?: string }) => {
     submitBtn.disabled = false
     if (result.success) {
       statusEl.textContent = '✓ Applied'
       statusEl.className = 'vs-status success'
       input.value = ''
-      setTimeout(() => { statusEl.textContent = '' }, 3000)
+      // Show Developer MD panel if markdown is provided
+      if (result.devMarkdown) {
+        showMdPanel(result.devMarkdown)
+      }
+      setTimeout(() => { statusEl.textContent = '' }, 5000)
     } else {
       statusEl.textContent = `✗ ${result.message}`
       statusEl.className = 'vs-status error'

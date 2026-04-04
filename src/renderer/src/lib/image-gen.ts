@@ -54,7 +54,7 @@ class NanoBananaProvider implements ImageProvider {
       : 'Create a high-quality, professional photograph. '
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
+      model: 'gemini-3.1-flash-image-preview',
       contents: `${styleHint}${request.prompt}. Make it look premium and suitable for a production mobile/web app UI.`,
       config: {
         responseModalities: ['IMAGE'],

@@ -333,6 +333,41 @@ ipcMain.handle('open-live-window-url', (_event, url: string) => {
   createLiveAppWindow(url)
 })
 
+// ─── Live Export + VS Code (§11.2) ────────────────────────────────
+
+ipcMain.handle('project:list-relative-paths', (_event, projectId: string) => {
+  const projectDir = getProjectDir(projectId)
+  return listRelativePathsSync(projectDir)
+})
+
+ipcMain.handle('project:export-to-folder', (_event, projectId: string, destPath: string) => {
+  const projectDir = getProjectDir(projectId)
+  const dest = expandUserPath(destPath)
+  try {
+    ensureDir(dest)
+    copyProjectTree(projectDir, dest)
+    return { success: true, path: dest }
+  } catch (err: any) {
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('shell:open-vscode', (_event, folderPath: string) => {
+  const resolved = expandUserPath(folderPath)
+  try {
+    execSync(`code "${resolved}"`, { stdio: 'ignore', timeout: 5000 })
+    return { success: true }
+  } catch {
+    // Fallback: try 'cursor' CLI
+    try {
+      execSync(`cursor "${resolved}"`, { stdio: 'ignore', timeout: 5000 })
+      return { success: true }
+    } catch (err: any) {
+      return { success: false, error: 'Could not open VS Code or Cursor. Make sure "code" or "cursor" CLI is on your PATH.' }
+    }
+  }
+})
+
 // ─── Pinterest Design Steal ─────────────────────────────────────
 
 const CHROME_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
@@ -381,7 +416,7 @@ ipcMain.handle('live-edit-request', (_event, prompt: string, currentUrl: string)
   mainWindow?.webContents.send('live-edit-request', prompt, currentUrl)
 })
 
-ipcMain.handle('live-edit-result', (_event, result: { success: boolean; message: string }) => {
+ipcMain.handle('live-edit-result', (_event, result: { success: boolean; message: string; devMarkdown?: string }) => {
   if (liveAppWindow) {
     liveAppWindow.webContents.send('live-edit-result', result)
   }

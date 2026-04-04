@@ -10,7 +10,7 @@ export default defineConfig({
   retries: 0,
   outputDir: 'test-results',
   webServer: {
-    command: 'VIBESYNTH_NO_ELECTRON=1 npx vite --port 5199',
+    command: 'VIBESYNTH_NO_ELECTRON=1 ELECTRON_RUN_AS_NODE= npx vite --port 5199',
     port: 5199,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
