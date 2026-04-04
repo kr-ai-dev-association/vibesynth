@@ -1748,6 +1748,14 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             designGuideDB.delete(id)
             addLog(`Design system deleted`, 'info')
           }}
+          onSetRecommended={(id) => {
+            const entry = designGuideDB.getById(id)
+            if (entry) {
+              entry.source = 'curated'
+              designGuideDB.upsert(entry)
+              addLog(`"${entry.name}" set as recommended`, 'success')
+            }
+          }}
           getDesignSystemById={(id) => {
             const entry = designGuideDB.getById(id)
             return entry?.designSystem

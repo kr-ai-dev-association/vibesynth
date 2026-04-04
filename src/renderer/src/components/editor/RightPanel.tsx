@@ -20,13 +20,14 @@ interface RightPanelProps {
   onLoadDesignSystem?: (id: string) => void
   getDesignSystemById?: (id: string) => DesignSystem | undefined
   onDeleteDesignSystem?: (id: string) => void
+  onSetRecommended?: (id: string) => void
   savedDesignSystems?: SavedEntry[]
   onStealDesign?: (query: string) => void
   onStealUrl?: (url: string) => void
   onConnectPinterest?: () => void
 }
 
-export function RightPanel({ designSystem, screenNames, selectedScreen, onSelectScreen, onDesignSystemUpdate, onSaveDesignSystem, onLoadDesignSystem, getDesignSystemById, onDeleteDesignSystem, savedDesignSystems, onStealDesign, onStealUrl, onConnectPinterest }: RightPanelProps) {
+export function RightPanel({ designSystem, screenNames, selectedScreen, onSelectScreen, onDesignSystemUpdate, onSaveDesignSystem, onLoadDesignSystem, getDesignSystemById, onDeleteDesignSystem, onSetRecommended, savedDesignSystems, onStealDesign, onStealUrl, onConnectPinterest }: RightPanelProps) {
   const { t } = useI18n()
   const [isOpen, setIsOpen] = useState(true)
   const [tab, setTab] = useState<PanelTab>('design')
@@ -79,7 +80,7 @@ export function RightPanel({ designSystem, screenNames, selectedScreen, onSelect
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {tab === 'design' && (
-          <DesignTab designSystem={designSystem} onCopy={handleCopy} copiedValue={copiedValue} onDesignSystemUpdate={onDesignSystemUpdate} onSave={onSaveDesignSystem} onLoad={onLoadDesignSystem} getById={getDesignSystemById} onDelete={onDeleteDesignSystem} savedSystems={savedDesignSystems} onSteal={onStealDesign} onStealUrl={onStealUrl} onConnect={onConnectPinterest} />
+          <DesignTab designSystem={designSystem} onCopy={handleCopy} copiedValue={copiedValue} onDesignSystemUpdate={onDesignSystemUpdate} onSave={onSaveDesignSystem} onLoad={onLoadDesignSystem} getById={getDesignSystemById} onDelete={onDeleteDesignSystem} onSetRecommended={onSetRecommended} savedSystems={savedDesignSystems} onSteal={onStealDesign} onStealUrl={onStealUrl} onConnect={onConnectPinterest} />
         )}
         {tab === 'components' && (
           <ComponentsTab designSystem={designSystem} />
@@ -159,9 +160,9 @@ function RecommendedDesigns({ onLoad }: { onLoad: (id: string) => void }) {
 }
 
 // === Design Tab ===
-function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, onSave, onLoad, getById, onDelete, savedSystems, onSteal, onStealUrl, onConnect }: {
+function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, onSave, onLoad, getById, onDelete, onSetRecommended, savedSystems, onSteal, onStealUrl, onConnect }: {
   designSystem: DesignSystem; onCopy: (v: string) => void; copiedValue: string | null; onDesignSystemUpdate?: (ds: DesignSystem) => void
-  onSave?: () => void; onLoad?: (id: string) => void; getById?: (id: string) => DesignSystem | undefined; onDelete?: (id: string) => void; savedSystems?: SavedEntry[]; onSteal?: (query: string) => void; onStealUrl?: (url: string) => void; onConnect?: () => void
+  onSave?: () => void; onLoad?: (id: string) => void; getById?: (id: string) => DesignSystem | undefined; onDelete?: (id: string) => void; onSetRecommended?: (id: string) => void; savedSystems?: SavedEntry[]; onSteal?: (query: string) => void; onStealUrl?: (url: string) => void; onConnect?: () => void
 }) {
   const { t } = useI18n()
   const [editingGuideKey, setEditingGuideKey] = useState<keyof DesignGuide | null>(null)
@@ -409,6 +410,13 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
                 className="flex-1 text-left text-[10px] px-2 py-1 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-700 truncate"
               >
                 {s.name}
+              </button>
+              <button
+                onClick={() => onSetRecommended?.(s.id)}
+                className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-amber-100 dark:hover:bg-amber-900/30 text-neutral-400 hover:text-amber-500 transition-all"
+                title="Set as recommended"
+              >
+                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
               </button>
               <button
                 data-testid={`delete-ds-${s.id}`}
