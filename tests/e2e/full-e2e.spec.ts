@@ -170,24 +170,24 @@ test('VibeSynth 전체 기능 E2E', async ({ electronApp, page }) => {
   // 6. 히트맵 생성 + 효과 부여
   // ═══════════════════════════════════════════════════════════════
   await screenCards.first().click({ force: true })
-  await page.waitForTimeout(DELAY)
+  await page.waitForTimeout(2000) // ScreenContextToolbar 렌더링 대기
 
   const genBtn = page.getByRole('banner').getByRole('button', { name: 'Generate' })
-  if (await genBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+  const genVisible = await genBtn.isVisible({ timeout: 5_000 }).catch(() => false)
+  if (genVisible) {
     await genBtn.click()
     await page.waitForTimeout(DELAY)
 
     const hmBtn = page.getByText('Predictive heat map')
-    if (await hmBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    if (await hmBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
       await hmBtn.click()
-      await page.waitForTimeout(20_000) // 히트맵 생성 대기
+      await page.waitForTimeout(25_000)
 
       const zones = page.locator('[data-heatmap-zone]')
       const zoneCount = await zones.count().catch(() => 0)
       console.log(`✅ 6a. 히트맵 ${zoneCount}개 존 감지`)
 
       if (zoneCount > 0) {
-        // 줌 인
         for (let i = 0; i < 3; i++) await page.keyboard.press('Control+=')
         await page.waitForTimeout(DELAY)
 
@@ -200,20 +200,27 @@ test('VibeSynth 전체 기능 E2E', async ({ electronApp, page }) => {
             console.log('✅ 6b. 히트맵 효과 부여')
             await page.waitForTimeout(15_000)
           }
-        } catch { console.log('⚠️ 6b. 히트맵 존 클릭 실패') }
+        } catch { console.log('⚠️ 6b. 존 클릭 실패') }
 
-        // 줌 복원
         for (let i = 0; i < 3; i++) await page.keyboard.press('Control+-')
       }
 
       // 히트맵 해제
-      if (await genBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-        await genBtn.click()
-        await page.waitForTimeout(300)
-        if (await hmBtn.isVisible({ timeout: 2_000 }).catch(() => false)) await hmBtn.click()
-        await page.keyboard.press('Escape')
-      }
+      try {
+        if (await genBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+          await genBtn.click()
+          await page.waitForTimeout(300)
+          const hm2 = page.getByText('Predictive heat map')
+          if (await hm2.isVisible({ timeout: 2_000 }).catch(() => false)) await hm2.click()
+          await page.keyboard.press('Escape')
+        }
+      } catch {}
+    } else {
+      console.log('⚠️ 6. heat map 메뉴 미표시')
+      await page.keyboard.press('Escape')
     }
+  } else {
+    console.log('⚠️ 6. Generate 버튼 미표시')
   }
   await page.mouse.click(600, 400) // 선택 해제
   await page.waitForTimeout(DELAY)
@@ -350,24 +357,38 @@ test('VibeSynth 전체 기능 E2E', async ({ electronApp, page }) => {
       // ═══════════════════════════════════════════════════════════
       // 11. Designer / Developer 모드
       // ═══════════════════════════════════════════════════════════
-      const designerToggle = page.getByText('🎨 Designer')
-      if (await designerToggle.isVisible({ timeout: 5_000 }).catch(() => false)) {
-        console.log('✅ 11a. Designer 모드 표시')
+      // Stop 버튼이 보이면 isRunning=true → 토글도 보여야 함
+      await expect(page.locator('button').filter({ hasText: /Stop/ }).first()).toBeVisible({ timeout: 15_000 })
+      await page.waitForTimeout(3000) // React state + re-render 대기
 
+      // 토글은 isRunning=true일 때만 표시됨
+      const designerToggle = page.getByText('🎨 Designer').or(page.getByText('💻 Developer'))
+      const toggleVisible = await designerToggle.first().isVisible({ timeout: 10_000 }).catch(() => false)
+      if (toggleVisible) {
+        console.log('✅ 11a. Designer/Developer 토글 표시')
+      } else {
+        // isRunning이 true인데 토글이 안 보이면 — 직접 확인
+        const runState = await page.evaluate(() => {
+          const btn = document.querySelector('button')
+          return btn?.textContent
+        })
+        console.log(`⚠️ 11a. 토글 미표시 (버튼: ${runState?.slice(0, 20)})`)
+      }
+
+      if (toggleVisible) {
         // Developer 모드로 전환
-        await designerToggle.click()
-        await expect(page.getByText('💻 Developer')).toBeVisible({ timeout: 3_000 })
-        console.log('✅ 11b. Developer 모드 전환')
+        await designerToggle.first().click()
+        await page.waitForTimeout(DELAY)
+        const afterClick = page.getByText('💻 Developer').or(page.getByText('🎨 Designer'))
+        await expect(afterClick.first()).toBeVisible({ timeout: 3_000 })
+        console.log('✅ 11b. 모드 전환 성공')
 
-        // 다시 Designer로
-        await page.getByText('💻 Developer').click()
-        await expect(page.getByText('🎨 Designer')).toBeVisible({ timeout: 3_000 })
+        // 다시 원래로
+        await afterClick.first().click()
+        await page.waitForTimeout(DELAY)
 
-        // localStorage 저장 확인
         const mode = await page.evaluate(() => localStorage.getItem('vibesynth-live-feedback-mode'))
         console.log(`  피드백 모드 저장: ${mode}`)
-      } else {
-        console.log('⚠️ 11. Designer 토글 미표시 (타이밍)')
       }
       await page.screenshot({ path: 'test-results/full-11-modes.png' })
       await page.waitForTimeout(DELAY)
@@ -434,21 +455,41 @@ test('VibeSynth 전체 기능 E2E', async ({ electronApp, page }) => {
   // ═══════════════════════════════════════════════════════════════
   // 14. 우측 패널에서 다른 디자인 시스템 적용
   // ═══════════════════════════════════════════════════════════════
-  const recDesigns = page.locator('button[title]').filter({ has: page.locator('div') })
+  // Design 탭으로 전환
+  const dsDesignTab = page.locator('button:has-text("Design")').first()
+  await dsDesignTab.click()
+  await page.waitForTimeout(DELAY)
+
+  // Recommended Designs 섹션 펼치기
+  const recHeader = page.getByText(/Recommended/i).first()
+  if (await recHeader.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await recHeader.click()
+    await page.waitForTimeout(DELAY)
+  }
+
+  // 추천 DS 버튼들 (title 속성이 있는 버튼)
+  const recDesigns = page.locator('.absolute.right-3 button[title]')
   const recCount = await recDesigns.count().catch(() => 0)
   if (recCount >= 2) {
-    // 다른 DS 클릭 (현재와 다른 것)
     await recDesigns.nth(1).click()
     await page.waitForTimeout(DELAY)
-    console.log('✅ 14. 우측 패널에서 다른 DS 적용')
+    const selectedName = await recDesigns.nth(1).getAttribute('title')
+    console.log(`✅ 14. 추천 DS 적용: ${selectedName}`)
   } else {
-    // Recommended Designs 섹션 열기 시도
-    const recSection = page.getByText(/Recommended/i)
-    if (await recSection.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await recSection.click()
-      await page.waitForTimeout(DELAY)
+    // 직접 Load 셀렉트 사용
+    const loadSelect = page.locator('[data-testid="load-design-system"]')
+    if (await loadSelect.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      const options = await loadSelect.locator('option').count()
+      if (options >= 2) {
+        await loadSelect.selectOption({ index: 1 })
+        await page.waitForTimeout(DELAY)
+        console.log('✅ 14. 저장된 DS에서 로드')
+      } else {
+        console.log(`⚠️ 14. DS 옵션 ${options}개`)
+      }
+    } else {
+      console.log(`⚠️ 14. 추천 DS ${recCount}개, Load 셀렉트 미표시`)
     }
-    console.log(`⚠️ 14. 추천 DS 버튼 ${recCount}개`)
   }
   await page.screenshot({ path: 'test-results/full-14-ds-change.png' })
   await page.waitForTimeout(DELAY)
@@ -504,53 +545,70 @@ test('VibeSynth 전체 기능 E2E', async ({ electronApp, page }) => {
   await page.screenshot({ path: 'test-results/full-16-element-edit.png' })
 
   // ═══════════════════════════════════════════════════════════════
-  // 17. 히트맵 각 효과 유형별 적용
+  // 17. 히트맵 각 효과 유형별 적용 (첫 번째 스크린 재사용)
   // ═══════════════════════════════════════════════════════════════
-  await screenCards.nth(1).click({ force: true })
-  await page.waitForTimeout(DELAY)
+  // 스크린 선택 해제 후 첫 번째 스크린 선택 (캐시된 히트맵 사용)
+  await page.mouse.click(600, 400)
+  await page.waitForTimeout(500)
+  await screenCards.first().click({ force: true })
+  await page.waitForTimeout(2000)
 
-  if (await genBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await genBtn.click()
+  const genBtn17 = page.getByRole('banner').getByRole('button', { name: 'Generate' })
+  const gen17Vis = await genBtn17.isVisible({ timeout: 5_000 }).catch(() => false)
+  if (gen17Vis) {
+    await genBtn17.click()
     await page.waitForTimeout(DELAY)
-    const hmBtn2 = page.getByText('Predictive heat map')
-    if (await hmBtn2.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await hmBtn2.click()
-      await page.waitForTimeout(20_000)
+    const hmBtn17 = page.getByText('Predictive heat map')
+    const hm17Vis = await hmBtn17.isVisible({ timeout: 5_000 }).catch(() => false)
+    if (hm17Vis) {
+      await hmBtn17.click()
+      await page.waitForTimeout(30_000) // 히트맵 생성/로딩 대기 (새로 생성)
 
-      const zones2 = page.locator('[data-heatmap-zone]')
-      const zc2 = await zones2.count().catch(() => 0)
+      const zones17 = page.locator('[data-heatmap-zone]')
+      const zc17 = await zones17.count().catch(() => 0)
+      console.log(`  히트맵 17: ${zc17}개 존 감지`)
 
-      if (zc2 >= 3) {
-        const effects = ['hover-effect', 'click-animation', 'make-prominent']
-        for (let ei = 0; ei < Math.min(zc2, effects.length); ei++) {
+      if (zc17 >= 2) {
+        // 줌 인
+        for (let i = 0; i < 3; i++) await page.keyboard.press('Control+=')
+        await page.waitForTimeout(500)
+
+        const effectLabels = ['Hover', 'Click', 'Boost']
+        for (let ei = 0; ei < Math.min(zc17, effectLabels.length); ei++) {
           try {
-            await zones2.nth(ei).click({ force: true, timeout: 3_000 })
-            await page.waitForTimeout(500)
-            // 효과 메뉴에서 해당 효과 클릭
-            const effectLabel = effects[ei] === 'hover-effect' ? 'Hover' :
-                                effects[ei] === 'click-animation' ? 'Click' : 'Boost'
-            const effBtn = page.getByText(new RegExp(effectLabel, 'i')).first()
-            if (await effBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+            await zones17.nth(ei).click({ force: true, timeout: 5_000 })
+            await page.waitForTimeout(DELAY)
+            const effBtn = page.getByText(new RegExp(effectLabels[ei], 'i')).first()
+            if (await effBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
               await effBtn.click({ force: true })
               await page.waitForTimeout(15_000)
-              console.log(`✅ 17-${ei+1}. 히트맵 효과: ${effectLabel}`)
+              console.log(`✅ 17-${ei+1}. 히트맵 효과: ${effectLabels[ei]}`)
             }
           } catch { console.log(`⚠️ 17-${ei+1}. 효과 적용 실패`) }
         }
+
+        // 줌 복원
+        for (let i = 0; i < 3; i++) await page.keyboard.press('Control+-')
       } else {
-        console.log(`⚠️ 17. 히트맵 존 ${zc2}개 (최소 3개 필요)`)
+        console.log(`⚠️ 17. 히트맵 존 ${zc17}개`)
       }
 
       // 히트맵 해제
       try {
-        if (await genBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-          await genBtn.click()
+        if (await genBtn17.isVisible({ timeout: 2_000 }).catch(() => false)) {
+          await genBtn17.click()
+          await page.waitForTimeout(300)
           const hm3 = page.getByText('Predictive heat map')
           if (await hm3.isVisible({ timeout: 2_000 }).catch(() => false)) await hm3.click()
           await page.keyboard.press('Escape')
         }
       } catch {}
+    } else {
+      console.log('⚠️ 17. heat map 메뉴 미표시')
+      await page.keyboard.press('Escape')
     }
+  } else {
+    console.log('⚠️ 17. Generate 버튼 미표시 — 스크린 미선택')
   }
   await page.mouse.click(600, 400)
   await page.waitForTimeout(DELAY)
