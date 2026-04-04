@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, net } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { execSync, spawn, ChildProcess } from 'child_process'
@@ -7,6 +7,8 @@ import { db } from './database'
 
 let mainWindow: BrowserWindow | null = null
 let liveAppWindow: BrowserWindow | null = null
+let pinterestWindow: BrowserWindow | null = null
+let pinterestConnected = false
 let currentLiveHtml: string | null = null
 let devServerProcess: ChildProcess | null = null
 let devServerProjectId: string | null = null
@@ -46,6 +48,8 @@ function createMainWindow() {
       nodeIntegration: false,
     },
   })
+
+  mainWindow.setFullScreen(true)
 
   if (VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(VITE_DEV_SERVER_URL)
@@ -296,6 +300,50 @@ ipcMain.handle('open-live-window-url', (_event, url: string) => {
   createLiveAppWindow(url)
 })
 
+// ─── Pinterest Design Steal ─────────────────────────────────────
+
+const CHROME_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
+// 1) Connect: open system browser for Pinterest login
+ipcMain.handle('pinterest:connect', async () => {
+  await shell.openExternal('https://www.pinterest.com/login/')
+  pinterestConnected = true
+  mainWindow?.webContents.send('pinterest:connect-done')
+})
+
+// 2) Steal: open Pinterest search in system browser
+ipcMain.handle('pinterest:open', async (_event, query: string) => {
+  await shell.openExternal(`https://www.pinterest.com/search/pins/?q=${encodeURIComponent(query)}`)
+})
+
+// 3) Steal by image URL: download any image URL → base64 → send to renderer
+ipcMain.handle('pinterest:steal-url', async (_event, imageUrl: string) => {
+  try {
+    const response = await net.fetch(imageUrl, {
+      headers: { 'User-Agent': CHROME_UA },
+    })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+    const buffer = Buffer.from(await response.arrayBuffer())
+    const base64 = buffer.toString('base64')
+    const contentType = response.headers.get('content-type') || 'image/jpeg'
+    const mimeType = contentType.split(';')[0].trim()
+
+    mainWindow?.webContents.send('pinterest:image-captured', base64, mimeType)
+    return { success: true }
+  } catch (err: any) {
+    console.error('[Pinterest] Failed to download image:', err)
+    return { success: false, error: err.message }
+  }
+})
+
+ipcMain.handle('pinterest:cancel', () => {
+  if (pinterestWindow) {
+    pinterestWindow.close()
+    pinterestWindow = null
+  }
+})
+
 ipcMain.handle('live-edit-request', (_event, prompt: string, currentUrl: string) => {
   mainWindow?.webContents.send('live-edit-request', prompt, currentUrl)
 })
@@ -306,7 +354,35 @@ ipcMain.handle('live-edit-result', (_event, result: { success: boolean; message:
   }
 })
 
+function killZombieElectrons() {
+  try {
+    const myPid = process.pid
+    if (process.platform === 'win32') {
+      const out = execSync('tasklist /FI "IMAGENAME eq Electron.exe" /FO CSV /NH', { encoding: 'utf8' })
+      for (const line of out.split('\n')) {
+        const match = line.match(/"Electron\.exe","(\d+)"/)
+        if (match) {
+          const pid = parseInt(match[1], 10)
+          if (pid !== myPid) try { process.kill(pid, 'SIGTERM') } catch {}
+        }
+      }
+    } else {
+      // Only kill main Electron processes (--no-sandbox), not Helper subprocesses (--type=gpu, --type=utility)
+      const out = execSync('ps ax -o pid,command | grep "vibesynth.*Electron.*--no-sandbox" | grep -v "Helper" | grep -v grep 2>/dev/null || true', { encoding: 'utf8' })
+      for (const line of out.trim().split('\n')) {
+        const match = line.trim().match(/^(\d+)/)
+        if (!match) continue
+        const pid = parseInt(match[1], 10)
+        if (pid && pid !== myPid && pid !== process.ppid) {
+          try { process.kill(pid, 'SIGTERM') } catch {}
+        }
+      }
+    }
+  } catch {}
+}
+
 app.whenReady().then(() => {
+  killZombieElectrons()
   createMainWindow()
 
   app.on('activate', () => {

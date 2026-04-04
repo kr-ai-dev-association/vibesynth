@@ -48,6 +48,17 @@ export default defineConfig({
           },
         },
       },
+      {
+        entry: path.resolve(__dirname, 'electron/preload-pinterest.ts'),
+        onstart(args) {
+          args.reload()
+        },
+        vite: {
+          build: {
+            outDir: path.resolve(__dirname, 'dist-electron'),
+          },
+        },
+      },
     ]),
     renderer(),
   ],

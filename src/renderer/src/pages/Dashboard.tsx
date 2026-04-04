@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
-import type { Project } from '../App'
+import type { Project, DesignSystem } from '../App'
 import { PromptBar } from '../components/common/PromptBar'
 import { AppearanceToggle } from '../components/common/AppearanceToggle'
+import { PINTEREST_DESIGNS } from '../lib/pinterest-designs'
 
 interface ExampleThumbnail {
   gradient: string
@@ -67,7 +68,7 @@ const PROMPT_SUGGESTIONS = [
 
 interface DashboardProps {
   onOpenProject: (project: Project) => void
-  onCreateProject: (name: string, deviceType: 'app' | 'web' | 'tablet') => void
+  onCreateProject: (name: string, deviceType: 'app' | 'web' | 'tablet', designSystem?: DesignSystem) => void
   onOpenSettings?: () => void
 }
 
@@ -75,9 +76,14 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
   const [recentProjects] = useState<Project[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [deviceType, setDeviceType] = useState<'app' | 'web' | 'tablet'>('app')
+  const [selectedDesignId, setSelectedDesignId] = useState<string | null>(null)
   const [sidebarTab, setSidebarTab] = useState<'my' | 'shared'>('my')
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const moreMenuRef = useRef<HTMLDivElement>(null)
+
+  const selectedDesignSystem = selectedDesignId
+    ? PINTEREST_DESIGNS.find(d => d.id === selectedDesignId)?.designSystem
+    : undefined
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -187,7 +193,10 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
               <div className="px-3 pb-3">
                 <p className="text-[11px] font-medium text-neutral-400 mb-1.5 px-1">Examples</p>
                 {filteredExamples.map((project) => (
-                  <ProjectItem key={project.id} project={project} onClick={() => onOpenProject(project)} />
+                  <ProjectItem key={project.id} project={project} onClick={() => {
+                    const p = selectedDesignSystem ? { ...project, designSystem: selectedDesignSystem } : project
+                    onOpenProject(p)
+                  }} />
                 ))}
               </div>
             </>
@@ -203,17 +212,23 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
           <h1 className="text-5xl font-light mb-8 tracking-tight">Welcome to VibeSynth.</h1>
 
           {/* Suggestion Chips */}
-          <div className="flex gap-2 mb-6 flex-wrap justify-center max-w-2xl">
+          <div className="flex gap-2 mb-4 flex-wrap justify-center max-w-2xl">
             {PROMPT_SUGGESTIONS.map((suggestion, i) => (
               <button
                 key={i}
-                onClick={() => onCreateProject(suggestion, deviceType)}
+                onClick={() => onCreateProject(suggestion, deviceType, selectedDesignSystem)}
                 className="px-4 py-2 text-sm rounded-full border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 max-w-xs truncate"
               >
                 {suggestion}
               </button>
             ))}
           </div>
+
+          {/* Design System Picker */}
+          <DesignSystemPicker
+            selectedId={selectedDesignId}
+            onSelect={setSelectedDesignId}
+          />
 
           {/* Prompt Input */}
           <div className="w-full max-w-2xl">
@@ -227,11 +242,72 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
               }
               deviceType={deviceType}
               onDeviceTypeChange={setDeviceType}
-              onSubmit={(prompt) => onCreateProject(prompt, deviceType)}
+              onSubmit={(prompt) => onCreateProject(prompt, deviceType, selectedDesignSystem)}
             />
           </div>
         </main>
       </div>
+    </div>
+  )
+}
+
+function DesignSystemPicker({ selectedId, onSelect }: { selectedId: string | null; onSelect: (id: string | null) => void }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className="w-full max-w-2xl mb-4">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 text-xs text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors mx-auto"
+        data-testid="design-system-picker-toggle"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>
+        {selectedId ? (
+          <span>Style: <strong className="text-neutral-600 dark:text-neutral-200">{PINTEREST_DESIGNS.find(d => d.id === selectedId)?.name}</strong></span>
+        ) : (
+          <span>Choose a design style (optional)</span>
+        )}
+        <span className="text-[10px]">{expanded ? '▲' : '▼'}</span>
+      </button>
+
+      {expanded && (
+        <div className="mt-3 grid grid-cols-4 sm:grid-cols-5 md:grid-cols-7 gap-2 max-w-2xl" data-testid="design-system-picker-grid">
+          {/* None option */}
+          <button
+            onClick={() => { onSelect(null); setExpanded(false) }}
+            className={`rounded-xl border-2 transition-all p-1.5 ${
+              !selectedId ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-neutral-200 dark:border-neutral-700 hover:border-neutral-400'
+            }`}
+            title="Auto (AI decides)"
+          >
+            <div className="flex h-3 rounded overflow-hidden bg-neutral-200 dark:bg-neutral-600">
+              <div className="flex-1 bg-neutral-300 dark:bg-neutral-500" />
+              <div className="flex-1 bg-neutral-200 dark:bg-neutral-600" />
+            </div>
+            <div className="text-[8px] text-neutral-400 mt-1 truncate text-center">Auto</div>
+          </button>
+
+          {PINTEREST_DESIGNS.map((d) => (
+            <button
+              key={d.id}
+              data-testid={`ds-pick-${d.id}`}
+              onClick={() => { onSelect(d.id === selectedId ? null : d.id); setExpanded(false) }}
+              className={`rounded-xl border-2 transition-all p-1.5 ${
+                selectedId === d.id ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-neutral-200 dark:border-neutral-700 hover:border-neutral-400'
+              }`}
+              title={d.name}
+            >
+              <div className="flex h-3 rounded overflow-hidden">
+                <div className="flex-1" style={{ backgroundColor: d.designSystem.colors.primary.base }} />
+                <div className="flex-1" style={{ backgroundColor: d.designSystem.colors.secondary.base }} />
+                <div className="flex-1" style={{ backgroundColor: d.designSystem.colors.tertiary.base }} />
+                <div className="flex-1" style={{ backgroundColor: d.designSystem.colors.neutral.base }} />
+              </div>
+              <div className="text-[8px] text-neutral-500 dark:text-neutral-400 mt-1 truncate text-center">{d.name}</div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

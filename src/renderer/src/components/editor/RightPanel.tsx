@@ -1,9 +1,12 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import type { DesignSystem, DesignGuide } from '../../App'
+import { PINTEREST_DESIGNS } from '../../lib/pinterest-designs'
 
 type PanelTab = 'design' | 'components' | 'layers'
 
 const TONE_LABELS = ['T0','T10','T20','T30','T40','T50','T60','T70','T80','T90','T95','T100']
+
+interface SavedEntry { id: string; name: string; savedAt: string }
 
 interface RightPanelProps {
   designSystem: DesignSystem
@@ -11,9 +14,15 @@ interface RightPanelProps {
   selectedScreen: string | null
   onSelectScreen: (name: string) => void
   onDesignSystemUpdate?: (ds: DesignSystem) => void
+  onSaveDesignSystem?: () => void
+  onLoadDesignSystem?: (id: string) => void
+  savedDesignSystems?: SavedEntry[]
+  onStealDesign?: (query: string) => void
+  onStealUrl?: (url: string) => void
+  onConnectPinterest?: () => void
 }
 
-export function RightPanel({ designSystem, screenNames, selectedScreen, onSelectScreen, onDesignSystemUpdate }: RightPanelProps) {
+export function RightPanel({ designSystem, screenNames, selectedScreen, onSelectScreen, onDesignSystemUpdate, onSaveDesignSystem, onLoadDesignSystem, savedDesignSystems, onStealDesign, onStealUrl, onConnectPinterest }: RightPanelProps) {
   const [isOpen, setIsOpen] = useState(true)
   const [tab, setTab] = useState<PanelTab>('design')
   const [copiedValue, setCopiedValue] = useState<string | null>(null)
@@ -65,7 +74,7 @@ export function RightPanel({ designSystem, screenNames, selectedScreen, onSelect
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {tab === 'design' && (
-          <DesignTab designSystem={designSystem} onCopy={handleCopy} copiedValue={copiedValue} onDesignSystemUpdate={onDesignSystemUpdate} />
+          <DesignTab designSystem={designSystem} onCopy={handleCopy} copiedValue={copiedValue} onDesignSystemUpdate={onDesignSystemUpdate} onSave={onSaveDesignSystem} onLoad={onLoadDesignSystem} savedSystems={savedDesignSystems} onSteal={onStealDesign} onStealUrl={onStealUrl} onConnect={onConnectPinterest} />
         )}
         {tab === 'components' && (
           <ComponentsTab designSystem={designSystem} />
@@ -102,15 +111,102 @@ const GUIDE_SECTIONS: { key: keyof DesignGuide; label: string; icon: string }[] 
   { key: 'dosAndDonts', label: "Do's & Don'ts", icon: '✅' },
 ]
 
+// === Recommended Designs ===
+function RecommendedDesigns({ onLoad }: { onLoad: (id: string) => void }) {
+  const [expanded, setExpanded] = useState(false)
+  const designs = useMemo(() => PINTEREST_DESIGNS, [])
+
+  return (
+    <div>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1 w-full"
+      >
+        <SectionLabel>Recommended Designs</SectionLabel>
+        <span className="text-[9px] text-neutral-400 ml-auto">{expanded ? '▲' : '▼'} {designs.length}</span>
+      </button>
+      {expanded && (
+        <div className="mt-1.5 grid grid-cols-2 gap-1.5" data-testid="recommended-designs">
+          {designs.map((d) => (
+            <button
+              key={d.id}
+              data-testid={`recommended-${d.id}`}
+              onClick={() => onLoad(d.id)}
+              className="text-left rounded-lg border border-neutral-200 dark:border-neutral-700 hover:border-blue-400 dark:hover:border-blue-500 transition-all overflow-hidden group"
+            >
+              <div className="flex h-4">
+                <div className="flex-1" style={{ backgroundColor: d.designSystem.colors.primary.base }} />
+                <div className="flex-1" style={{ backgroundColor: d.designSystem.colors.secondary.base }} />
+                <div className="flex-1" style={{ backgroundColor: d.designSystem.colors.tertiary.base }} />
+                <div className="flex-1" style={{ backgroundColor: d.designSystem.colors.neutral.base }} />
+              </div>
+              <div className="px-1.5 py-1">
+                <div className="text-[9px] font-medium truncate group-hover:text-blue-500 transition-colors">{d.name}</div>
+                <div className="text-[8px] text-neutral-400 truncate">{d.designSystem.typography.headline.family}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // === Design Tab ===
-function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate }: {
+function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, onSave, onLoad, savedSystems, onSteal, onStealUrl, onConnect }: {
   designSystem: DesignSystem; onCopy: (v: string) => void; copiedValue: string | null; onDesignSystemUpdate?: (ds: DesignSystem) => void
+  onSave?: () => void; onLoad?: (id: string) => void; savedSystems?: SavedEntry[]; onSteal?: (query: string) => void; onStealUrl?: (url: string) => void; onConnect?: () => void
 }) {
   const [editingGuideKey, setEditingGuideKey] = useState<keyof DesignGuide | null>(null)
   const [editValue, setEditValue] = useState('')
   const [showGuide, setShowGuide] = useState(true)
+  const [editingName, setEditingName] = useState(false)
+  const [nameValue, setNameValue] = useState(designSystem.name)
+  const [editingColor, setEditingColor] = useState<{ role: string; index: number } | null>(null)
+  const [colorValue, setColorValue] = useState('')
+  const [editingFont, setEditingFont] = useState<string | null>(null)
+  const [fontValue, setFontValue] = useState('')
+  const [showStealMenu, setShowStealMenu] = useState(false)
+  const [stealUrlValue, setStealUrlValue] = useState('')
+  const [stealUrlLoading, setStealUrlLoading] = useState(false)
 
   const isPlaceholder = designSystem.name === 'Generating...'
+
+  const saveNameEdit = () => {
+    if (nameValue.trim() && onDesignSystemUpdate) {
+      onDesignSystemUpdate({ ...designSystem, name: nameValue.trim() })
+    }
+    setEditingName(false)
+  }
+
+  const saveColorEdit = () => {
+    if (!editingColor || !onDesignSystemUpdate || !/^#[0-9a-fA-F]{3,8}$/.test(colorValue)) {
+      setEditingColor(null)
+      return
+    }
+    const roleKey = editingColor.role.toLowerCase() as keyof typeof designSystem.colors
+    const role = designSystem.colors[roleKey]
+    if (!role) { setEditingColor(null); return }
+    const newTones = [...role.tones]
+    newTones[editingColor.index] = colorValue
+    const newBase = editingColor.index === 6 ? colorValue : role.base
+    onDesignSystemUpdate({
+      ...designSystem,
+      colors: { ...designSystem.colors, [roleKey]: { base: newBase, tones: newTones } },
+    })
+    setEditingColor(null)
+  }
+
+  const saveFontEdit = () => {
+    if (!editingFont || !fontValue.trim() || !onDesignSystemUpdate) { setEditingFont(null); return }
+    const level = editingFont as keyof typeof designSystem.typography
+    if (designSystem.typography[level]?.family === fontValue.trim()) { setEditingFont(null); return }
+    onDesignSystemUpdate({
+      ...designSystem,
+      typography: { ...designSystem.typography, [level]: { ...designSystem.typography[level], family: fontValue.trim() } },
+    })
+    setEditingFont(null)
+  }
 
   const startEdit = (key: keyof DesignGuide) => {
     setEditingGuideKey(key)
@@ -167,11 +263,146 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate }: 
 
   return (
     <div className="p-3 space-y-4">
-      {/* Theme name */}
+      {/* Theme name — click to edit */}
       <div className="flex items-center gap-2">
         <PaletteIcon className="w-4 h-4 text-neutral-500" />
-        <span className="text-sm font-semibold">{designSystem.name}</span>
+        {editingName ? (
+          <input
+            data-testid="theme-name-input"
+            autoFocus
+            value={nameValue}
+            onChange={(e) => setNameValue(e.target.value)}
+            onBlur={saveNameEdit}
+            onKeyDown={(e) => { if (e.key === 'Enter') saveNameEdit(); if (e.key === 'Escape') setEditingName(false); }}
+            className="text-sm font-semibold bg-transparent border-b border-blue-400 outline-none w-full"
+          />
+        ) : (
+          <button
+            data-testid="theme-name"
+            onClick={() => { setEditingName(true); setNameValue(designSystem.name); }}
+            className="text-sm font-semibold hover:text-blue-500 transition-colors text-left"
+            title="Click to edit theme name"
+          >
+            {designSystem.name}
+          </button>
+        )}
       </div>
+
+      {/* Save / Load buttons */}
+      {(onSave || (savedSystems && savedSystems.length > 0)) && (
+        <div className="flex items-center gap-1.5">
+          {onSave && (
+            <button
+              data-testid="save-design-system"
+              onClick={onSave}
+              className="flex-1 text-[10px] font-medium px-2 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
+            >
+              Save Design System
+            </button>
+          )}
+          {onLoad && savedSystems && savedSystems.length > 0 && (
+            <select
+              data-testid="load-design-system"
+              onChange={(e) => { if (e.target.value) onLoad(e.target.value); e.target.value = '' }}
+              className="flex-1 text-[10px] font-medium px-2 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-600 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
+              defaultValue=""
+            >
+              <option value="" disabled>Load Saved...</option>
+              {savedSystems.filter(s => !s.id.startsWith('pin-')).map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      )}
+
+      {/* Recommended Design Systems */}
+      {onLoad && (
+        <RecommendedDesigns onLoad={onLoad} />
+      )}
+
+      {/* Pinterest Design Steal */}
+      {(onSteal || onConnect || onStealUrl) && (
+        <div className="relative space-y-1.5">
+          <SectionLabel>Steal Design</SectionLabel>
+
+          {/* Step 1: Browse Pinterest in system browser */}
+          {onSteal && (
+            <>
+              <button
+                data-testid="steal-from-pinterest"
+                onClick={() => setShowStealMenu(!showStealMenu)}
+                className="w-full text-[10px] font-semibold px-2 py-2 rounded-lg text-white transition-all hover:opacity-90 active:scale-[0.98]"
+                style={{ background: 'linear-gradient(135deg, #E60023 0%, #BD081C 50%, #C92228 100%)' }}
+              >
+                Browse Pinterest
+              </button>
+              {showStealMenu && (
+                <div className="rounded-lg border border-neutral-200 dark:border-neutral-600 bg-white dark:bg-neutral-800 overflow-hidden shadow-lg">
+                  {[
+                    { label: 'Web Homepage Design', query: 'homepage web design ui' },
+                    { label: 'Dashboard Design', query: 'dashboard design ui ux' },
+                    { label: 'iPhone App Design', query: 'iphone app design ui' },
+                    { label: 'Android App Design', query: 'android app design ui' },
+                    { label: 'iPad App Design', query: 'ipad app design ui' },
+                  ].map(({ label, query }) => (
+                    <button
+                      key={query}
+                      data-testid={`steal-category-${query.split(' ')[0]}`}
+                      onClick={() => { onSteal(query); setShowStealMenu(false) }}
+                      className="w-full text-left text-[10px] px-3 py-2 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors border-b border-neutral-100 dark:border-neutral-700 last:border-b-0"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Step 2: Paste image URL */}
+          {onStealUrl && (
+            <div className="space-y-1">
+              <p className="text-[9px] text-neutral-400">Right-click image → Copy Image Address → Paste below</p>
+              <div className="flex gap-1">
+                <input
+                  data-testid="steal-url-input"
+                  type="text"
+                  placeholder="Paste image URL..."
+                  value={stealUrlValue}
+                  onChange={(e) => setStealUrlValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && stealUrlValue.trim()) {
+                      setStealUrlLoading(true)
+                      onStealUrl(stealUrlValue.trim())
+                      setStealUrlValue('')
+                      setTimeout(() => setStealUrlLoading(false), 3000)
+                    }
+                  }}
+                  className="flex-1 text-[10px] px-2 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-600 bg-white dark:bg-neutral-800 outline-none focus:border-blue-400"
+                  disabled={stealUrlLoading}
+                />
+                <button
+                  data-testid="steal-url-submit"
+                  onClick={() => {
+                    if (stealUrlValue.trim()) {
+                      setStealUrlLoading(true)
+                      onStealUrl(stealUrlValue.trim())
+                      setStealUrlValue('')
+                      setTimeout(() => setStealUrlLoading(false), 3000)
+                    }
+                  }}
+                  disabled={!stealUrlValue.trim() || stealUrlLoading}
+                  className="text-[10px] font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-40 transition-all hover:opacity-90"
+                  style={{ background: '#7c3aed' }}
+                >
+                  {stealUrlLoading ? '...' : 'Steal'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Colors */}
       <div>
@@ -189,19 +420,39 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate }: 
                 </button>
               </div>
               <div className="flex gap-px rounded-lg overflow-hidden">
-                {role.tones.map((tone, i) => (
-                  <button
-                    key={i}
-                    onClick={() => onCopy(tone)}
-                    className="flex-1 h-6 hover:ring-2 hover:ring-blue-400 hover:z-10 relative group transition-all"
-                    style={{ backgroundColor: tone }}
-                    title={`${TONE_LABELS[i]}: ${tone}`}
-                  >
-                    <span className="absolute -top-7 left-1/2 -translate-x-1/2 hidden group-hover:block text-[9px] bg-neutral-900 text-white px-1.5 py-0.5 rounded whitespace-nowrap z-30 shadow-lg">
-                      {TONE_LABELS[i]} {tone}
-                    </span>
-                  </button>
-                ))}
+                {role.tones.map((tone, i) => {
+                  const isEditing = editingColor?.role === role.label && editingColor.index === i
+                  return isEditing ? (
+                    <div key={i} className="flex-1 relative z-30">
+                      <input
+                        data-testid={`color-edit-${role.label.toLowerCase()}-${i}`}
+                        autoFocus
+                        value={colorValue}
+                        onChange={(e) => setColorValue(e.target.value)}
+                        onBlur={saveColorEdit}
+                        onKeyDown={(e) => { if (e.key === 'Enter') saveColorEdit(); if (e.key === 'Escape') setEditingColor(null); }}
+                        className="w-full h-6 text-[9px] text-center font-mono border border-blue-400 outline-none bg-white dark:bg-neutral-800"
+                        style={{ color: tone }}
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      key={i}
+                      onClick={(e) => {
+                        if (e.shiftKey) { onCopy(tone); return }
+                        if (onDesignSystemUpdate) { setEditingColor({ role: role.label, index: i }); setColorValue(tone); }
+                        else { onCopy(tone) }
+                      }}
+                      className="flex-1 h-6 hover:ring-2 hover:ring-blue-400 hover:z-10 relative group transition-all"
+                      style={{ backgroundColor: tone }}
+                      title={`${TONE_LABELS[i]}: ${tone} (click to edit, shift+click to copy)`}
+                    >
+                      <span className="absolute -top-7 left-1/2 -translate-x-1/2 hidden group-hover:block text-[9px] bg-neutral-900 text-white px-1.5 py-0.5 rounded whitespace-nowrap z-30 shadow-lg">
+                        {TONE_LABELS[i]} {tone}
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
             </div>
           ))}
@@ -212,15 +463,43 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate }: 
       <div>
         <SectionLabel>Typography</SectionLabel>
         <div className="mt-2 space-y-2">
-          {Object.entries(designSystem.typography).map(([level, { family }]) => (
-            <div key={level} className="flex items-center justify-between bg-neutral-50 dark:bg-neutral-700/50 rounded-lg px-3 py-2">
-              <div>
-                <span className="text-[11px] font-medium text-neutral-500 capitalize">{level}</span>
-                <span className="text-[11px] text-neutral-400 ml-1.5">{family}</span>
+          {Object.entries(designSystem.typography).map(([level, typo]) => {
+            const family = typo.family
+            return (
+            <div key={level} className="bg-neutral-50 dark:bg-neutral-700/50 rounded-lg px-3 py-2 group">
+              <div className="flex items-center justify-between">
+                {editingFont === level ? (
+                  <input
+                    data-testid={`font-edit-${level}`}
+                    autoFocus
+                    value={fontValue}
+                    onChange={(e) => setFontValue(e.target.value)}
+                    onBlur={saveFontEdit}
+                    onKeyDown={(e) => { if (e.key === 'Enter') saveFontEdit(); if (e.key === 'Escape') setEditingFont(null); }}
+                    className="flex-1 text-[11px] bg-transparent border-b border-blue-400 outline-none mr-2"
+                  />
+                ) : (
+                  <button
+                    className="text-left flex-1"
+                    onClick={() => { if (onDesignSystemUpdate) { setEditingFont(level); setFontValue(family); } }}
+                    title="Click to edit font family"
+                  >
+                    <span className="text-[11px] font-medium text-neutral-500 capitalize">{level}</span>
+                    <span className="text-[11px] text-neutral-400 ml-1.5 group-hover:text-blue-500 transition-colors">{family}</span>
+                  </button>
+                )}
+                <span className="text-lg font-semibold" style={{ fontFamily: editingFont === level ? fontValue : family }}>Aa</span>
               </div>
-              <span className="text-lg font-semibold" style={{ fontFamily: family }}>Aa</span>
+              {(typo.size || typo.weight || typo.lineHeight) && (
+                <div className="mt-0.5 flex gap-2 text-[9px] text-neutral-400">
+                  {typo.size && <span>{typo.size}</span>}
+                  {typo.weight && <span>w{typo.weight}</span>}
+                  {typo.lineHeight && <span>lh {typo.lineHeight}</span>}
+                </div>
+              )}
             </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 
@@ -297,88 +576,265 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate }: 
   )
 }
 
+// Code snippets for each component type
 // === Components Tab ===
 function ComponentsTab({ designSystem }: { designSystem: DesignSystem }) {
-  const { colors } = designSystem
+  const { colors, typography, components: ct } = designSystem
+  const [copiedSnippet, setCopiedSnippet] = useState<string | null>(null)
+
+  const btnR = ct?.buttonRadius || '9999px'
+  const btnP = ct?.buttonPadding || '8px 20px'
+  const btnW = ct?.buttonFontWeight || '600'
+  const inpR = ct?.inputRadius || '8px'
+  const inpB = ct?.inputBorder || `1px solid ${colors.neutral.tones[7] || '#ccc'}`
+  const inpP = ct?.inputPadding || '10px 14px'
+  const inpBg = ct?.inputBg || colors.neutral.tones[11] || '#fff'
+  const cardR = ct?.cardRadius || '12px'
+  const cardS = ct?.cardShadow || '0 2px 8px rgba(0,0,0,0.08)'
+  const cardP = ct?.cardPadding || '16px'
+  const chipR = ct?.chipRadius || '9999px'
+  const chipP = ct?.chipPadding || '4px 12px'
+  const chipBg = ct?.chipBg || colors.neutral.tones[10] || '#f0f0f0'
+  const fabSz = ct?.fabSize || '48px'
+  const fabR = ct?.fabRadius || '16px'
+
+  const copyCode = (code: string, key: string) => {
+    navigator.clipboard.writeText(code).catch(() => {})
+    setCopiedSnippet(key)
+    setTimeout(() => setCopiedSnippet(null), 1500)
+  }
+
+  const CopyBtn = ({ id, code }: { id: string; code: string }) => (
+    <button
+      data-testid={`copy-${id}`}
+      onClick={() => copyCode(code, id)}
+      className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-neutral-400 hover:text-blue-500 shrink-0"
+      title="Copy snippet"
+    >{copiedSnippet === id ? '✓' : '{ }'}</button>
+  )
 
   return (
-    <div className="p-3 space-y-4">
+    <div className="p-3 space-y-5">
+      {/* Typography */}
+      <div>
+        <SectionLabel>Typography</SectionLabel>
+        <div className="mt-2 space-y-2.5">
+          {(['headline', 'body', 'label'] as const).map((level) => {
+            const t = typography[level]
+            return (
+              <div key={level} className="group flex items-baseline gap-2" data-testid={`typo-${level}`}>
+                <div className="flex-1 min-w-0">
+                  <span
+                    className="block truncate"
+                    style={{
+                      fontFamily: t.family,
+                      fontSize: level === 'headline' ? (t.size || '24px') : level === 'body' ? (t.size || '14px') : (t.size || '11px'),
+                      fontWeight: t.weight || (level === 'headline' ? '700' : '400'),
+                      lineHeight: t.lineHeight || '1.4',
+                    }}
+                  >
+                    {t.family}
+                  </span>
+                  <span className="text-[9px] text-neutral-400 capitalize">
+                    {level} &middot; {t.size || (level === 'headline' ? '32px' : level === 'body' ? '16px' : '12px')} &middot; {t.weight || (level === 'headline' ? '700' : '400')}
+                  </span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Buttons */}
       <div>
         <SectionLabel>Buttons</SectionLabel>
         <div className="mt-2 space-y-2">
-          <div className="flex gap-2 flex-wrap">
-            <button className="px-4 py-1.5 text-xs font-medium rounded-full text-white" style={{ backgroundColor: colors.primary.base }}>Primary</button>
-            <button className="px-4 py-1.5 text-xs font-medium rounded-full text-white" style={{ backgroundColor: colors.secondary.base }}>Secondary</button>
+          {[
+            { id: 'btn-primary', label: 'Primary', bg: colors.primary.base, fg: '#fff' },
+            { id: 'btn-secondary', label: 'Secondary', bg: colors.secondary.base, fg: '#fff' },
+            { id: 'btn-tertiary', label: 'Tertiary', bg: colors.tertiary.base, fg: '#fff' },
+            { id: 'btn-outlined', label: 'Outlined', bg: 'transparent', fg: colors.primary.base, border: `1px solid ${colors.primary.base}` },
+          ].map(({ id, label, bg, fg, border }) => (
+            <div key={id} className="group flex items-center gap-2" data-testid={`component-${id}`}>
+              <button
+                className="text-xs transition-all hover:scale-105 hover:shadow-md active:scale-95 active:opacity-80"
+                style={{
+                  backgroundColor: bg,
+                  color: fg,
+                  padding: btnP,
+                  borderRadius: btnR,
+                  fontWeight: btnW,
+                  border: border || 'none',
+                  cursor: 'pointer',
+                  fontFamily: typography.label.family,
+                }}
+              >
+                {label}
+              </button>
+              <CopyBtn id={id} code={`<button style="background:${bg};color:${fg};padding:${btnP};border-radius:${btnR};font-weight:${btnW};border:${border || 'none'};font-family:${typography.label.family}">${label}</button>`} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Text Input */}
+      <div>
+        <SectionLabel>Text Input</SectionLabel>
+        <div className="mt-2 space-y-2">
+          <div className="group relative" data-testid="component-input">
+            <input
+              type="text"
+              placeholder="Enter text..."
+              readOnly
+              className="w-full text-xs outline-none"
+              style={{
+                padding: inpP,
+                borderRadius: inpR,
+                border: inpB,
+                backgroundColor: inpBg,
+                fontFamily: typography.body.family,
+              }}
+            />
+            <CopyBtn id="input" code={`<input type="text" placeholder="Enter text..." style="padding:${inpP};border-radius:${inpR};border:${inpB};background:${inpBg};font-family:${typography.body.family}" />`} />
           </div>
-          <div className="flex gap-2 flex-wrap">
-            <button className="px-4 py-1.5 text-xs font-medium rounded-full bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900">Inverted</button>
-            <button className="px-4 py-1.5 text-xs font-medium rounded-full border border-neutral-400 text-neutral-700 dark:text-neutral-300">Outlined</button>
+          <div className="group relative" data-testid="component-input-label">
+            <label
+              className="block text-neutral-500 dark:text-neutral-400 mb-1"
+              style={{ fontSize: typography.label.size || '12px', fontFamily: typography.label.family, fontWeight: typography.label.weight || '500' }}
+            >Label</label>
+            <input
+              type="text"
+              placeholder="With label..."
+              readOnly
+              className="w-full text-xs outline-none"
+              style={{
+                padding: inpP,
+                borderRadius: inpR,
+                border: inpB,
+                backgroundColor: inpBg,
+                fontFamily: typography.body.family,
+              }}
+            />
           </div>
         </div>
       </div>
 
+      {/* Card */}
+      <div>
+        <SectionLabel>Card</SectionLabel>
+        <div className="mt-2 group" data-testid="component-card">
+          <div
+            className="bg-white dark:bg-neutral-800"
+            style={{ borderRadius: cardR, boxShadow: cardS, padding: cardP }}
+          >
+            <div className="font-semibold text-xs mb-1" style={{ fontFamily: typography.headline.family }}>Card Title</div>
+            <div className="text-[10px] text-neutral-500" style={{ fontFamily: typography.body.family }}>Card description with body text style applied from design system.</div>
+            <button
+              className="mt-2 text-[10px] text-white"
+              style={{ backgroundColor: colors.primary.base, padding: '4px 12px', borderRadius: btnR, fontFamily: typography.label.family, border: 'none' }}
+            >Action</button>
+          </div>
+          <CopyBtn id="card" code={`<div style="border-radius:${cardR};box-shadow:${cardS};padding:${cardP};background:#fff"><h3>Card Title</h3><p>Description</p></div>`} />
+        </div>
+      </div>
+
+      {/* Search Bar */}
       <div>
         <SectionLabel>Search Bar</SectionLabel>
-        <div className="mt-2">
-          <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-neutral-100 dark:bg-neutral-700 text-neutral-400 text-xs">
+        <div className="mt-2 group relative" data-testid="component-search-bar">
+          <div
+            className="flex items-center gap-2.5 text-neutral-400 text-xs"
+            style={{ padding: inpP, borderRadius: inpR, backgroundColor: chipBg, fontFamily: typography.body.family }}
+          >
             <SearchSmallIcon />
             <span>Search</span>
           </div>
+          <CopyBtn id="search-bar" code={`<div style="display:flex;align-items:center;gap:8px;padding:${inpP};border-radius:${inpR};background:${chipBg}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>Search</div>`} />
         </div>
       </div>
 
+      {/* Bottom Navigation */}
       <div>
         <SectionLabel>Bottom Navigation</SectionLabel>
-        <div className="mt-2 flex justify-around bg-neutral-100 dark:bg-neutral-700 rounded-xl py-2.5 px-4">
+        <div className="mt-2 flex justify-around rounded-xl py-2.5 px-4" style={{ backgroundColor: chipBg }}>
           <NavItem icon="home" label="Home" active color={colors.primary.base} />
           <NavItem icon="search" label="Search" />
           <NavItem icon="person" label="Profile" />
         </div>
       </div>
 
+      {/* FAB */}
       <div>
         <SectionLabel>FAB</SectionLabel>
-        <div className="mt-2 flex items-center gap-3">
+        <div className="mt-2 flex items-center gap-3 group" data-testid="component-fab">
           <button
-            className="w-12 h-12 rounded-2xl text-white flex items-center justify-center shadow-lg"
-            style={{ backgroundColor: colors.primary.base }}
+            className="text-white flex items-center justify-center shadow-lg transition-transform hover:scale-110"
+            style={{ width: fabSz, height: fabSz, borderRadius: fabR, backgroundColor: colors.primary.base, border: 'none' }}
           >
             <EditIcon />
           </button>
           <span className="text-[11px] text-neutral-400">Floating Action Button</span>
+          <CopyBtn id="fab" code={`<button style="width:${fabSz};height:${fabSz};border-radius:${fabR};background:${colors.primary.base};color:#fff;border:none;box-shadow:0 4px 12px rgba(0,0,0,0.15)">+</button>`} />
         </div>
       </div>
 
+      {/* Chips */}
       <div>
         <SectionLabel>Chips</SectionLabel>
-        <div className="mt-2 flex gap-2 flex-wrap">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 text-xs rounded-full bg-neutral-100 dark:bg-neutral-700">
-            <span className="text-[10px]">✨</span> auto_fix
-          </span>
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 text-xs rounded-full bg-neutral-100 dark:bg-neutral-700">
-            <span className="text-[10px]">📦</span> category
-          </span>
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 text-xs rounded-full bg-neutral-100 dark:bg-neutral-700">
-            <span className="text-[10px]">🏷</span> sell
-          </span>
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 text-xs rounded-full bg-neutral-100 dark:bg-neutral-700">
-            <span className="text-[10px]">🗑</span> delete
-          </span>
+        <div className="mt-2 flex gap-2 flex-wrap" data-testid="component-chips">
+          {[
+            { label: 'Primary', bg: colors.primary.tones[9] || chipBg, fg: colors.primary.base },
+            { label: 'Secondary', bg: colors.secondary.tones[9] || chipBg, fg: colors.secondary.base },
+            { label: 'Default', bg: chipBg, fg: undefined },
+            { label: 'Outlined', bg: 'transparent', fg: undefined, border: `1px solid ${colors.neutral.tones[7] || '#ccc'}` },
+          ].map(({ label, bg, fg, border }) => (
+            <span
+              key={label}
+              className="inline-flex items-center text-xs cursor-pointer hover:ring-1 hover:ring-blue-400 transition-all"
+              style={{
+                padding: chipP,
+                borderRadius: chipR,
+                backgroundColor: bg,
+                color: fg,
+                border: border || 'none',
+                fontFamily: typography.label.family,
+              }}
+            >{label}</span>
+          ))}
         </div>
       </div>
 
+      {/* Icon Set */}
       <div>
         <SectionLabel>Icon Set</SectionLabel>
         <div className="mt-2 grid grid-cols-6 gap-2">
-          {['✨','📦','🏷','🗑','✏️','🔍','🏠','👤','⭐','💬','📎','⚙️'].map((icon, i) => (
-            <div key={i} className="w-8 h-8 flex items-center justify-center rounded-lg bg-neutral-100 dark:bg-neutral-700 text-sm">
-              {icon}
+          {['home','search','person','edit','star','chat','attach_file','settings','add','delete','bookmark','share'].map((name) => (
+            <div key={name} className="w-8 h-8 flex items-center justify-center rounded-lg text-neutral-500 dark:text-neutral-400 text-[10px] hover:ring-1 hover:ring-blue-400 transition-all cursor-pointer" style={{ backgroundColor: chipBg }} title={name}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d={getIconPath(name)} /></svg>
             </div>
           ))}
         </div>
       </div>
     </div>
   )
+}
+
+function getIconPath(name: string): string {
+  const paths: Record<string, string> = {
+    home: 'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z',
+    search: 'M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z',
+    person: 'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',
+    edit: 'M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z',
+    star: 'M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z',
+    chat: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z',
+    attach_file: 'M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1 1 0 0 1-2 0V6H10v9.5a2.5 2.5 0 0 0 5 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6h-1.5z',
+    settings: 'M19.14 12.94a7.07 7.07 0 0 0 .06-.94c0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.04 7.04 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z',
+    add: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z',
+    delete: 'M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z',
+    bookmark: 'M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z',
+    share: 'M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11A2.99 2.99 0 1 0 14.5 5c0 .24.04.47.09.7L7.54 9.81A2.99 2.99 0 0 0 2 12a3 3 0 0 0 5.54 1.59l7.13 4.15c-.05.21-.08.43-.08.66a2.99 2.99 0 1 0 3.41-2.32z',
+  }
+  return paths[name] || ''
 }
 
 // === Layers Tab ===

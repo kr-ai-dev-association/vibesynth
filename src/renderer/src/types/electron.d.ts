@@ -21,6 +21,15 @@ interface ElectronProjectAPI {
   getStatus: () => Promise<{ running: boolean; projectId: string | null }>
 }
 
+interface ElectronPinterestAPI {
+  connect: () => Promise<void>
+  open: (query: string) => Promise<void>
+  cancel: () => Promise<void>
+  stealUrl: (imageUrl: string) => Promise<{ success: boolean; error?: string }>
+  onImageCaptured: (callback: (base64: string | null, mimeType: string | null) => void) => () => void
+  onConnectDone: (callback: () => void) => () => void
+}
+
 interface ElectronAPI {
   openLiveWindow: (html?: string) => Promise<void>
   openLiveWindowUrl: (url: string) => Promise<void>
@@ -32,6 +41,7 @@ interface ElectronAPI {
   onLiveWindowClosed: (callback: () => void) => () => void
   onLiveEditRequest: (callback: (prompt: string, currentUrl: string) => void) => () => void
   sendLiveEditResult: (result: { success: boolean; message: string }) => Promise<void>
+  pinterest: ElectronPinterestAPI
   project: ElectronProjectAPI
   db: ElectronDBAPI
 }

@@ -5,7 +5,7 @@ import { AppearanceToggle } from '../components/common/AppearanceToggle'
 import { AgentLog } from '../components/editor/AgentLog'
 import { ScreenContextToolbar, ScreenContextMenu } from '../components/editor/ScreenContextToolbar'
 import { RightPanel } from '../components/editor/RightPanel'
-import { generateDesign, generateMultiScreen, editDesign, generateDesignSystem, generateHeatmap, generateFrontendApp, generateIncrementalFrontend, editFrontendFile, fixBuildErrors, hashString } from '../lib/gemini'
+import { generateDesign, generateMultiScreen, editDesign, generateDesignSystem, generateHeatmap, generateFrontendApp, generateIncrementalFrontend, editFrontendFile, fixBuildErrors, hashString, analyzeDesignFromImage } from '../lib/gemini'
 import { DEFAULT_DESIGN_GUIDE } from '../lib/default-design-guide'
 import { designGuideDB } from '../lib/design-guide-db'
 
@@ -32,9 +32,16 @@ const PLACEHOLDER_DESIGN_SYSTEM: DesignSystem = {
     neutral: { base: '#d4d4d4', tones: Array(12).fill('#e5e5e5') },
   },
   typography: {
-    headline: { family: '...' },
-    body: { family: '...' },
-    label: { family: '...' },
+    headline: { family: '...', size: '32px', weight: '700', lineHeight: '1.2' },
+    body: { family: '...', size: '16px', weight: '400', lineHeight: '1.5' },
+    label: { family: '...', size: '12px', weight: '500', lineHeight: '1.4' },
+  },
+  components: {
+    buttonRadius: '8px', buttonPadding: '10px 20px', buttonFontWeight: '600',
+    inputRadius: '8px', inputBorder: '1px solid #ccc', inputPadding: '10px 14px', inputBg: '#ffffff',
+    cardRadius: '12px', cardShadow: '0 2px 8px rgba(0,0,0,0.08)', cardPadding: '16px',
+    chipRadius: '9999px', chipPadding: '4px 12px', chipBg: '#f0f0f0',
+    fabSize: '48px', fabRadius: '16px',
   },
 }
 
@@ -64,6 +71,8 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   } | null>(null)
   const [devServerUrl, setDevServerUrl] = useState<string | null>(null)
   const [buildingFrontend, setBuildingFrontend] = useState(false)
+  const [leftSidebarWidth, setLeftSidebarWidth] = useState(40)
+  const sidebarResizing = useRef(false)
   const canvasRef = useRef<HTMLDivElement>(null)
   const autoZoomDone = useRef(false)
   // Incremental build cache: screenId → { htmlHash, generatedFiles }
@@ -168,7 +177,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         onDesignGenComplete: () => {
           updateLog(logId, 'Design layout generated, assembling...', 'generating')
         },
-      }, existingRefHtml)
+      }, existingRefHtml, project.designSystem)
 
       const r = results[0]
       const finishedScreen: Screen = { id: placeholderId, name: r.screenName, html: r.html }
@@ -263,7 +272,6 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           addLog(`Screen ${i}/${total} done: ${name}`, 'success')
           if (i === 1) firstScreenHtml = html
 
-          // Replace the placeholder with the real screen (generating → false)
           latestScreens = latestScreens.map(s =>
             s.id === placeholderIds[i - 1]
               ? { ...s, html, generating: false }
@@ -275,7 +283,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             updatedAt: new Date().toLocaleDateString(),
           })
         },
-      })
+      }, project.designSystem)
 
       // Extract design system from first screen
       if (!project.designSystem && firstScreenHtml) {
@@ -484,34 +492,72 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     setIsGenerating(true)
     setAgentLogOpen(true)
 
-    const actionPrompts: Record<string, string> = {
-      'hover-effect': `Add a smooth CSS hover effect to this element: scale up slightly (1.02-1.05), add a subtle shadow transition, and cursor:pointer. Use CSS transition: all 0.2s ease. Do NOT change the element's content or layout.`,
-      'click-animation': `Add a CSS click/active animation to this element: a ripple effect or a brief scale-down (0.97) on :active, with a smooth transition back. Add cursor:pointer. Do NOT change the element's content or layout.`,
-      'focus-state': `Add an accessible CSS :focus-visible state to this element: a 2px ring/outline with proper offset, using the design's accent color. Add tabindex="0" if needed. Do NOT change the element's content or layout.`,
-      'make-prominent': `Make this UI element more visually prominent and attention-grabbing. Increase its size slightly, use bolder colors, add more contrast against the background, and ensure it stands out in the visual hierarchy. Keep the same content.`,
-      'improve-hierarchy': `Improve the visual hierarchy of this element to make it more scannable and user-friendly. Adjust font weight, size, color contrast, and spacing to better guide the user's eye. Keep the same content.`,
-      'micro-animation': `Add a subtle, professional CSS micro-animation to this element. Choose one: gentle fade-in on load, a soft pulse/glow, or a slight float effect using @keyframes. Keep it tasteful and non-distracting. Do NOT change content.`,
-    }
-
-    const prompt = actionPrompts[action]
-    if (!prompt) return
-
     const logId = addLog(`Applying "${action}" to <${zone.tagName}> "${zone.label}" in "${screenName}"...`, 'generating')
 
     try {
-      const { editDesignElement } = await import('../lib/gemini')
+      // For CSS-only actions (hover, click, focus, micro-animation), inject CSS directly
+      // without a Gemini round-trip. This is instant and reliable.
+      const cssOnlyActions: Record<string, (selector: string) => string> = {
+        'hover-effect': (sel) => `${sel}{transition:all 0.2s ease;cursor:pointer;}${sel}:hover{transform:scale(1.03);box-shadow:0 4px 15px rgba(0,0,0,0.12);}`,
+        'click-animation': (sel) => `${sel}{transition:transform 0.15s ease;cursor:pointer;}${sel}:active{transform:scale(0.97);}`,
+        'focus-state': (sel) => `${sel}:focus-visible{outline:2px solid ${project.designSystem?.colors?.primary?.base || '#3b82f6'};outline-offset:2px;border-radius:4px;}`,
+        'micro-animation': (sel) => `@keyframes vs-pulse{0%,100%{opacity:1;}50%{opacity:0.85;}}${sel}{animation:vs-pulse 2s ease-in-out infinite;}`,
+      }
 
-      const doc = new DOMParser().parseFromString(screen.html, 'text/html')
-      const el = doc.querySelector(zone.cssPath)
-      const outerHtml = el?.outerHTML || `<${zone.tagName}></${zone.tagName}>`
+      const cssGenerator = cssOnlyActions[action]
+      if (cssGenerator) {
+        // Generate a unique class-based selector to avoid CSS specificity issues
+        const uid = `vs-fx-${Date.now().toString(36)}`
+        const cssRule = cssGenerator(`.${uid}`)
 
-      const newHtml = await editDesignElement(screen.html, zone.cssPath, outerHtml, prompt)
-      updateLog(logId, `Applied "${action}" to <${zone.tagName}> in ${screenName}`, 'success')
+        let newHtml = screen.html
+        // Inject CSS rule into <style> or create a new <style> block
+        const styleTag = `<style data-vs-effect>${cssRule}</style>`
+        if (newHtml.includes('</head>')) {
+          newHtml = newHtml.replace('</head>', styleTag + '</head>')
+        } else if (newHtml.includes('</style>')) {
+          newHtml = newHtml.replace(/<\/style>/, `</style>${styleTag}`)
+        } else {
+          newHtml = styleTag + newHtml
+        }
 
-      const updatedScreens = project.screens.map((s) =>
-        s.id === screen.id ? { ...s, html: newHtml } : s
-      )
-      onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
+        // Add the class to the target element
+        const doc = new DOMParser().parseFromString(newHtml, 'text/html')
+        const el = doc.querySelector(zone.cssPath)
+        if (el) {
+          el.classList.add(uid)
+          if (action === 'focus-state' && !el.hasAttribute('tabindex')) {
+            el.setAttribute('tabindex', '0')
+          }
+          newHtml = '<!DOCTYPE html>' + doc.documentElement.outerHTML
+        }
+
+        updateLog(logId, `Applied "${action}" to <${zone.tagName}> in ${screenName}`, 'success')
+        const updatedScreens = project.screens.map((s) =>
+          s.id === screen.id ? { ...s, html: newHtml } : s
+        )
+        onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
+      } else {
+        // For AI-powered actions (make-prominent, improve-hierarchy), use Gemini
+        const actionPrompts: Record<string, string> = {
+          'make-prominent': `Make this UI element more visually prominent. Increase size slightly, bolder colors, more contrast. Keep content.`,
+          'improve-hierarchy': `Improve visual hierarchy: adjust font weight, size, color contrast, spacing. Keep content.`,
+        }
+        const prompt = actionPrompts[action]
+        if (!prompt) { updateLog(logId, `Unknown action: ${action}`, 'error'); return }
+
+        const { editDesignElement } = await import('../lib/gemini')
+        const doc = new DOMParser().parseFromString(screen.html, 'text/html')
+        const el = doc.querySelector(zone.cssPath)
+        const outerHtml = (el?.outerHTML || `<${zone.tagName}></${zone.tagName}>`).replace(/data:[^"')\s]{200,}/g, '[img]')
+
+        const newHtml = await editDesignElement(screen.html, zone.cssPath, outerHtml, prompt)
+        updateLog(logId, `Applied "${action}" to <${zone.tagName}> in ${screenName}`, 'success')
+        const updatedScreens = project.screens.map((s) =>
+          s.id === screen.id ? { ...s, html: newHtml } : s
+        )
+        onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
+      }
 
       setHeatmapData((prev) => {
         const next = new Map(prev)
@@ -699,13 +745,10 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       if (e.code === 'KeyH' && selectedScreen && !e.repeat) {
         handleToggleHeatmap()
       }
-      if (e.code === 'Escape' && editMode) {
-        setEditMode(false)
-        setSelectedElement(null)
-      }
-      if (e.code === 'Escape' && heatmapMode) {
-        setHeatmapMode(false)
-        setHeatmapActionMenu(null)
+      if (e.code === 'Escape') {
+        if (heatmapMode) { setHeatmapMode(false); setHeatmapActionMenu(null) }
+        else if (editMode) { setEditMode(false); setSelectedElement(null) }
+        else if (selectedScreen) { setSelectedScreen(null) }
       }
     }
     const up = (e: KeyboardEvent) => {
@@ -726,6 +769,14 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     const isMiddle = e.button === 1
     const isLeftWithMod = e.button === 0 && (e.altKey || spaceHeld.current)
     const isLeftOnEmptyCanvas = e.button === 0 && !(e.target as HTMLElement).closest('[data-screen-card]')
+
+    if (isLeftOnEmptyCanvas && !isLeftWithMod) {
+      setSelectedScreen(null)
+      setEditMode(false)
+      setSelectedElement(null)
+      setHeatmapMode(false)
+      setHeatmapActionMenu(null)
+    }
 
     if (isMiddle || isLeftWithMod || isLeftOnEmptyCanvas) {
       e.preventDefault()
@@ -750,6 +801,30 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       setZoom((z) => Math.max(10, Math.min(400, z - e.deltaY * 0.5)))
     }
   }, [])
+
+  const handleSidebarResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    sidebarResizing.current = true
+    const startX = e.clientX
+    const startWidth = leftSidebarWidth
+
+    const onMove = (ev: MouseEvent) => {
+      if (!sidebarResizing.current) return
+      const newWidth = Math.max(40, Math.min(280, startWidth + (ev.clientX - startX)))
+      setLeftSidebarWidth(newWidth)
+    }
+    const onUp = () => {
+      sidebarResizing.current = false
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [leftSidebarWidth])
 
   useEffect(() => {
     const cleanup = window.electronAPI?.onLiveEditRequest(async (prompt: string) => {
@@ -980,6 +1055,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           {/* Hamburger */}
           <div className="relative">
             <button
+              data-testid="hamburger-menu"
               onClick={() => setShowHamburger(!showHamburger)}
               className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700"
             >
@@ -1074,18 +1150,29 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       {/* Main area */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Left toolbar */}
-        <div className="w-10 bg-white dark:bg-neutral-800 border-r border-neutral-200 dark:border-neutral-700 flex flex-col items-center py-2 gap-1 shrink-0">
-          <ToolButton icon={<CursorIcon />} title="Cursor" active />
-          <ToolButton icon={<SelectIcon />} title="Select" />
-          <ToolButton icon={<PenIcon />} title="Pen" />
-          <div className="h-px w-6 bg-neutral-200 dark:bg-neutral-700 my-1" />
-          <ToolButton icon={<MicIcon />} title="Voice input" />
-          <ToolButton icon={<ImageIcon />} title="Image" />
+        <div
+          className="bg-white dark:bg-neutral-800 border-r border-neutral-200 dark:border-neutral-700 flex flex-col py-2 gap-1 shrink-0 relative"
+          style={{ width: leftSidebarWidth }}
+        >
+          <div className={`flex flex-col gap-1 ${leftSidebarWidth > 80 ? 'items-start px-2' : 'items-center'}`}>
+            <ToolButton icon={<CursorIcon />} title="Cursor" active label={leftSidebarWidth > 80 ? 'Cursor' : undefined} />
+            <ToolButton icon={<SelectIcon />} title="Select" label={leftSidebarWidth > 80 ? 'Select' : undefined} />
+            <ToolButton icon={<PenIcon />} title="Pen" label={leftSidebarWidth > 80 ? 'Pen' : undefined} />
+            <div className="h-px w-6 bg-neutral-200 dark:bg-neutral-700 my-1 self-center" />
+            <ToolButton icon={<MicIcon />} title="Voice input" label={leftSidebarWidth > 80 ? 'Voice' : undefined} />
+            <ToolButton icon={<ImageIcon />} title="Image" label={leftSidebarWidth > 80 ? 'Image' : undefined} />
+          </div>
+          {/* Resize handle */}
+          <div
+            className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-blue-500/30 active:bg-blue-500/50 transition-colors z-10"
+            onMouseDown={handleSidebarResizeStart}
+          />
         </div>
 
         {/* Canvas */}
         <div
           ref={canvasRef}
+          data-editor-canvas
           className={`flex-1 overflow-hidden relative ${isPanning ? 'cursor-grabbing' : spaceDown ? 'cursor-grab' : 'cursor-default'}`}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
@@ -1171,11 +1258,185 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           screenNames={project.screens.map(s => s.name)}
           selectedScreen={selectedScreen}
           onSelectScreen={(name) => setSelectedScreen(selectedScreen === name ? null : name)}
-          onDesignSystemUpdate={(ds) => onProjectUpdate({
-            ...project,
-            designSystem: ds,
-            updatedAt: new Date().toLocaleDateString(),
-          })}
+          onDesignSystemUpdate={(ds) => {
+            const oldDs = project.designSystem
+            let updatedScreens = project.screens
+
+            if (oldDs) {
+              const replacements: [string, string][] = []
+
+              // Color replacements
+              for (const role of ['primary', 'secondary', 'tertiary', 'neutral'] as const) {
+                const oldRole = oldDs.colors[role]
+                const newRole = ds.colors[role]
+                if (oldRole.base !== newRole.base) replacements.push([oldRole.base, newRole.base])
+                oldRole.tones.forEach((oldT, i) => {
+                  if (oldT !== newRole.tones[i]) replacements.push([oldT, newRole.tones[i]])
+                })
+              }
+
+              // Font replacements
+              for (const level of ['headline', 'body', 'label'] as const) {
+                const oldFont = oldDs.typography[level]?.family
+                const newFont = ds.typography[level]?.family
+                if (oldFont && newFont && oldFont !== newFont) {
+                  replacements.push([oldFont, newFont])
+                }
+              }
+
+              if (replacements.length > 0) {
+                updatedScreens = project.screens.map((s) => {
+                  let html = s.html
+                  for (const [oldVal, newVal] of replacements) {
+                    html = html.split(oldVal).join(newVal)
+                  }
+                  return html !== s.html ? { ...s, html } : s
+                })
+                const changed = updatedScreens.filter((s, i) => s !== project.screens[i]).length
+                addLog(`Design system updated: ${replacements.length} change(s) applied to ${changed} screen(s)`, 'success')
+              }
+            }
+
+            onProjectUpdate({
+              ...project,
+              screens: updatedScreens,
+              designSystem: ds,
+              updatedAt: new Date().toLocaleDateString(),
+            })
+          }}
+          onSaveDesignSystem={() => {
+            if (!designSystem || designSystem.name === 'Generating...') return
+            designGuideDB.saveFromGeneration(
+              designSystem.name,
+              project.prompt || project.name,
+              designSystem.guide || { overview: '', colorRules: '', typographyRules: '', elevationRules: '', componentRules: '', dosAndDonts: '' },
+              designSystem,
+            )
+            addLog(`Design system "${designSystem.name}" saved`, 'success')
+          }}
+          onLoadDesignSystem={(id) => {
+            const entry = designGuideDB.getById(id)
+            if (!entry?.designSystem) return
+            const oldDs = project.designSystem
+            const newDs = entry.designSystem
+
+            let updatedScreens = project.screens
+            if (oldDs) {
+              const replacements: [string, string][] = []
+              for (const role of ['primary', 'secondary', 'tertiary', 'neutral'] as const) {
+                const oldRole = oldDs.colors[role]
+                const newRole = newDs.colors[role]
+                if (oldRole.base !== newRole.base) replacements.push([oldRole.base, newRole.base])
+                oldRole.tones.forEach((oldT, i) => {
+                  if (oldT !== newRole.tones[i]) replacements.push([oldT, newRole.tones[i]])
+                })
+              }
+              for (const level of ['headline', 'body', 'label'] as const) {
+                const oldFont = oldDs.typography[level]?.family
+                const newFont = newDs.typography[level]?.family
+                if (oldFont && newFont && oldFont !== newFont) replacements.push([oldFont, newFont])
+              }
+              if (replacements.length > 0) {
+                updatedScreens = project.screens.map((s) => {
+                  let html = s.html
+                  for (const [oldVal, newVal] of replacements) html = html.split(oldVal).join(newVal)
+                  return html !== s.html ? { ...s, html } : s
+                })
+              }
+            }
+
+            onProjectUpdate({ ...project, screens: updatedScreens, designSystem: newDs, updatedAt: new Date().toLocaleDateString() })
+            addLog(`Loaded design system "${newDs.name}" — ${updatedScreens.filter((s, i) => s !== project.screens[i]).length} screen(s) updated`, 'success')
+          }}
+          savedDesignSystems={designGuideDB.getAllWithDesignSystem().map(e => ({ id: e.id, name: e.name, savedAt: e.createdAt }))}
+          onStealDesign={(query) => {
+            if (!window.electronAPI?.pinterest) {
+              addLog('Pinterest API not available (requires Electron)', 'error')
+              return
+            }
+            addLog(`Opening Pinterest in browser: "${query}"...`, 'info')
+            window.electronAPI.pinterest.open(query)
+          }}
+          onStealUrl={async (imageUrl) => {
+            if (!window.electronAPI?.pinterest) {
+              addLog('Pinterest API not available (requires Electron)', 'error')
+              return
+            }
+
+            // Register listener BEFORE calling stealUrl to avoid race condition
+            const cleanup = window.electronAPI.pinterest.onImageCaptured(async (base64, mimeType) => {
+              cleanup()
+              if (!base64 || !mimeType) {
+                addLog('Failed to process image', 'error')
+                return
+              }
+              addLog('Analyzing design from image...', 'info')
+              try {
+                const newDs = await analyzeDesignFromImage(base64, mimeType)
+                const oldDs = project.designSystem
+                let updatedScreens = project.screens
+
+                if (oldDs && oldDs.name !== 'Generating...') {
+                  const replacements: [string, string][] = []
+                  for (const role of ['primary', 'secondary', 'tertiary', 'neutral'] as const) {
+                    const oldRole = oldDs.colors[role]
+                    const newRole = newDs.colors[role]
+                    if (oldRole.base !== newRole.base) replacements.push([oldRole.base, newRole.base])
+                    oldRole.tones.forEach((oldT: string, i: number) => {
+                      if (oldT !== newRole.tones[i]) replacements.push([oldT, newRole.tones[i]])
+                    })
+                  }
+                  for (const level of ['headline', 'body', 'label'] as const) {
+                    const oldFont = oldDs.typography[level]?.family
+                    const newFont = newDs.typography[level]?.family
+                    if (oldFont && newFont && oldFont !== newFont) replacements.push([oldFont, newFont])
+                  }
+                  if (replacements.length > 0) {
+                    updatedScreens = project.screens.map((s) => {
+                      let html = s.html
+                      for (const [oldVal, newVal] of replacements) {
+                        html = html.split(oldVal).join(newVal)
+                      }
+                      return html !== s.html ? { ...s, html } : s
+                    })
+                  }
+                }
+
+                designGuideDB.saveFromGeneration(
+                  newDs.name,
+                  'Pinterest design steal',
+                  newDs.guide || { overview: '', colorRules: '', typographyRules: '', elevationRules: '', componentRules: '', dosAndDonts: '' },
+                  newDs
+                )
+
+                onProjectUpdate({
+                  ...project,
+                  screens: updatedScreens,
+                  designSystem: newDs,
+                  updatedAt: new Date().toLocaleDateString(),
+                })
+                const changed = updatedScreens.filter((s, i) => s !== project.screens[i]).length
+                addLog(`Stolen design "${newDs.name}" applied — ${changed} screen(s) updated and saved`, 'success')
+              } catch (err: any) {
+                addLog(`Failed to analyze design: ${err.message}`, 'error')
+              }
+            })
+
+            addLog(`Downloading image: ${imageUrl.substring(0, 60)}...`, 'info')
+            const result = await window.electronAPI.pinterest.stealUrl(imageUrl)
+            if (!result.success) {
+              cleanup()
+              addLog(`Failed to download image: ${result.error}`, 'error')
+            }
+          }}
+          onConnectPinterest={() => {
+            if (!window.electronAPI?.pinterest) {
+              addLog('Pinterest API not available (requires Electron)', 'error')
+              return
+            }
+            addLog('Opening Pinterest login in browser...', 'info')
+            window.electronAPI.pinterest.connect()
+          }}
         />
       </div>
 
@@ -1399,6 +1660,9 @@ function ScreenCard({
 
   // Direct DOM measurement via allow-same-origin sandbox + polling
   useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7545/ingest/aabc6907-9781-43a7-acd9-e95ddf0c9ebb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ba1aba'},body:JSON.stringify({sessionId:'ba1aba',location:'Editor.tsx:heightEffect',message:'Height useEffect entered',data:{screenId:screen.id,screenName:screen.name,isFixedHeight,deviceType,hasHtml:!!screen.html,htmlLen:screen.html?.length||0},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
     if (isFixedHeight) { setContentHeight(minHeight); return }
     const iframe = iframeRef.current
     if (!iframe) return
@@ -1406,21 +1670,29 @@ function ScreenCard({
     const measure = () => {
       try {
         const doc = iframe.contentDocument || iframe.contentWindow?.document
+        // #region agent log
+        fetch('http://127.0.0.1:7545/ingest/aabc6907-9781-43a7-acd9-e95ddf0c9ebb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ba1aba'},body:JSON.stringify({sessionId:'ba1aba',location:'Editor.tsx:measure',message:'measure() called',data:{screenId:screen.id,screenName:screen.name,hasDoc:!!doc,hasBody:!!(doc&&doc.body),scrollH:doc?.documentElement?.scrollHeight,bodyScrollH:doc?.body?.scrollHeight,bodyOffsetH:doc?.body?.offsetHeight,measuredAlready:measuredRef.current},timestamp:Date.now(),hypothesisId:'H1,H2'})}).catch(()=>{});
+        // #endregion
         if (!doc || !doc.body) return
-        const h = Math.max(
-          doc.documentElement.scrollHeight,
-          doc.body.scrollHeight,
-          doc.body.offsetHeight,
-        )
+        // Use body measurements only; documentElement.scrollHeight reflects the
+        // iframe's explicit height attribute (4000px initial), not content size.
+        const h = Math.max(doc.body.scrollHeight, doc.body.offsetHeight)
         if (h > 100) {
           const measured = Math.max(h, minHeight)
+          // #region agent log
+          fetch('http://127.0.0.1:7545/ingest/aabc6907-9781-43a7-acd9-e95ddf0c9ebb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ba1aba'},body:JSON.stringify({sessionId:'ba1aba',location:'Editor.tsx:measure-result',message:'Height measured',data:{screenId:screen.id,screenName:screen.name,rawH:h,measured,prevHeight:contentHeight,willUpdate:Math.abs(measured-contentHeight)>10||!measuredRef.current},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+          // #endregion
           if (Math.abs(measured - contentHeight) > 10 || !measuredRef.current) {
             setContentHeight(measured)
             measuredRef.current = true
             onHeightMeasured?.(screen.id, measured)
           }
         }
-      } catch { /* sandbox may block */ }
+      } catch (err) {
+        // #region agent log
+        fetch('http://127.0.0.1:7545/ingest/aabc6907-9781-43a7-acd9-e95ddf0c9ebb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ba1aba'},body:JSON.stringify({sessionId:'ba1aba',location:'Editor.tsx:measure-error',message:'measure() threw',data:{screenId:screen.id,error:String(err)},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
+      }
     }
 
     const onLoad = () => setTimeout(measure, 200)
@@ -1800,15 +2072,16 @@ function MenuItem({ icon, label, shortcut, onClick }: { icon: string; label: str
   )
 }
 
-function ToolButton({ icon, title, active }: { icon: React.ReactNode; title: string; active?: boolean }) {
+function ToolButton({ icon, title, active, label }: { icon: React.ReactNode; title: string; active?: boolean; label?: string }) {
   return (
     <button
       title={title}
-      className={`p-1.5 rounded-lg ${
+      className={`p-1.5 rounded-lg flex items-center gap-2 ${
         active ? 'bg-neutral-100 dark:bg-neutral-700' : 'hover:bg-neutral-100 dark:hover:bg-neutral-700'
       }`}
     >
       {icon}
+      {label && <span className="text-[11px] text-neutral-600 dark:text-neutral-400 truncate">{label}</span>}
     </button>
   )
 }

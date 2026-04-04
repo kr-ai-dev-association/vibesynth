@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Dashboard } from './pages/Dashboard'
 import { Editor } from './pages/Editor'
 import { Settings } from './pages/Settings'
+import { designGuideDB } from './lib/design-guide-db'
 
 export type AppView = 'dashboard' | 'editor' | 'settings'
 
@@ -43,6 +44,31 @@ export interface DesignGuide {
   dosAndDonts: string
 }
 
+export interface ComponentTokens {
+  buttonRadius: string
+  buttonPadding: string
+  buttonFontWeight: string
+  inputRadius: string
+  inputBorder: string
+  inputPadding: string
+  inputBg: string
+  cardRadius: string
+  cardShadow: string
+  cardPadding: string
+  chipRadius: string
+  chipPadding: string
+  chipBg: string
+  fabSize: string
+  fabRadius: string
+}
+
+export interface TypographyLevel {
+  family: string
+  size?: string
+  weight?: string
+  lineHeight?: string
+}
+
 export interface DesignSystem {
   name: string
   colors: {
@@ -52,16 +78,21 @@ export interface DesignSystem {
     neutral: { base: string; tones: string[] }
   }
   typography: {
-    headline: { family: string }
-    body: { family: string }
-    label: { family: string }
+    headline: TypographyLevel
+    body: TypographyLevel
+    label: TypographyLevel
   }
+  components?: ComponentTokens
   guide?: DesignGuide
 }
 
 export default function App() {
   const [view, setView] = useState<AppView>('dashboard')
   const [currentProject, setCurrentProject] = useState<Project | null>(null)
+
+  useEffect(() => {
+    designGuideDB.deleteAllSaved()
+  }, [])
 
   const handleOpenProject = (project: Project) => {
     setCurrentProject(project)
@@ -95,7 +126,7 @@ export default function App() {
   return (
     <Dashboard
       onOpenProject={handleOpenProject}
-      onCreateProject={(prompt, deviceType) => {
+      onCreateProject={(prompt, deviceType, designSystem) => {
         const name = prompt.length > 50 ? prompt.slice(0, 50) + '...' : prompt
         const project: Project = {
           id: crypto.randomUUID(),
@@ -104,6 +135,7 @@ export default function App() {
           updatedAt: new Date().toLocaleDateString(),
           screens: [],
           deviceType,
+          designSystem,
         }
         handleOpenProject(project)
       }}

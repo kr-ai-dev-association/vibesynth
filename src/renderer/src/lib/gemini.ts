@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import type { DesignGuide } from '../App'
+import type { DesignGuide, DesignSystem } from '../App'
 import { generateDesignImages } from './image-gen'
 import { designGuideDB } from './design-guide-db'
 
@@ -102,6 +102,30 @@ DO'S AND DON'TS: ${guide.dosAndDonts}
 === END DESIGN GUIDE ===`
 }
 
+function formatDesignSystemTokens(ds: DesignSystem): string {
+  const lines: string[] = [
+    '=== PRESET DESIGN SYSTEM TOKENS (use these EXACT values) ===',
+    `Theme: "${ds.name}"`,
+    `Primary: ${ds.colors.primary.base}`,
+    `Secondary: ${ds.colors.secondary.base}`,
+    `Tertiary: ${ds.colors.tertiary.base}`,
+    `Neutral: ${ds.colors.neutral.base}`,
+    `Headline Font: ${ds.typography.headline.family} (${ds.typography.headline.size || '32px'}, weight ${ds.typography.headline.weight || '700'})`,
+    `Body Font: ${ds.typography.body.family} (${ds.typography.body.size || '16px'}, weight ${ds.typography.body.weight || '400'})`,
+    `Label Font: ${ds.typography.label.family} (${ds.typography.label.size || '12px'}, weight ${ds.typography.label.weight || '500'})`,
+  ]
+  if (ds.components) {
+    lines.push(
+      `Button: radius ${ds.components.buttonRadius}, padding ${ds.components.buttonPadding}, weight ${ds.components.buttonFontWeight}`,
+      `Input: radius ${ds.components.inputRadius}, border ${ds.components.inputBorder}, bg ${ds.components.inputBg}`,
+      `Card: radius ${ds.components.cardRadius}, shadow ${ds.components.cardShadow}, padding ${ds.components.cardPadding}`,
+      `Chip: radius ${ds.components.chipRadius}, padding ${ds.components.chipPadding}, bg ${ds.components.chipBg}`,
+    )
+  }
+  lines.push('=== END PRESET TOKENS ===')
+  return lines.join('\n')
+}
+
 // ─── Image Placeholder Replacement ──────────────────────────────
 
 function replaceImagePlaceholders(html: string, images: Map<string, string>): string {
@@ -139,6 +163,7 @@ export async function generateDesign(
   guide?: DesignGuide,
   callbacks?: GenerationCallbacks,
   existingScreenHtml?: string,
+  presetDesignSystem?: DesignSystem,
 ): Promise<GenerateDesignResult[]> {
   const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
 
@@ -160,6 +185,10 @@ export async function generateDesign(
 
   const guideContext = activeGuide
     ? `\n\n${formatGuideForPrompt(activeGuide)}\n\nYou MUST follow the design guide above when choosing colors, typography, elevation, components, and overall visual style.`
+    : ''
+
+  const presetTokenContext = presetDesignSystem
+    ? `\n\n${formatDesignSystemTokens(presetDesignSystem)}\n\nYou MUST use the exact color hex codes, font families, and component CSS values listed above.`
     : ''
 
   // If the project already has screens, enforce design consistency
@@ -185,7 +214,7 @@ Use the EXACT same colors, fonts, border-radius, shadows, navigation style, and 
 
   const result = await model.generateContent([
     SYSTEM_PROMPT,
-    `${deviceContext}${guideContext}${consistencyContext}\n\nUser request: ${prompt}\n\nGenerate a single complete, production-quality screen. Use the image placeholders {{HERO_IMAGE}}, {{CONTENT_IMAGE_1}}, {{CONTENT_IMAGE_2}} where photos should appear. Include realistic content, proper component styling, and polished visual hierarchy.`,
+    `${deviceContext}${guideContext}${presetTokenContext}${consistencyContext}\n\nUser request: ${prompt}\n\nGenerate a single complete, production-quality screen. Use the image placeholders {{HERO_IMAGE}}, {{CONTENT_IMAGE_1}}, {{CONTENT_IMAGE_2}} where photos should appear. Include realistic content, proper component styling, and polished visual hierarchy.`,
   ])
   callbacks?.onDesignGenComplete?.()
 
@@ -286,6 +315,7 @@ export async function generateMultiScreen(
   callbacks?: GenerationCallbacks & {
     onScreenComplete?: (index: number, total: number, name: string, html: string) => void
   },
+  presetDesignSystem?: DesignSystem,
 ): Promise<GenerateDesignResult[]> {
   const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
   const activeGuide = guide || designGuideDB.findBestMatch(appDescription)?.guide
@@ -302,6 +332,10 @@ export async function generateMultiScreen(
 
   const guideContext = activeGuide
     ? `\n\n${formatGuideForPrompt(activeGuide)}\n\nYou MUST follow the design guide above.`
+    : ''
+
+  const presetTokenContext = presetDesignSystem
+    ? `\n\n${formatDesignSystemTokens(presetDesignSystem)}\n\nYou MUST use the exact color hex codes, font families, and component CSS values listed above.`
     : ''
 
   const images = await imagePromise
@@ -343,7 +377,7 @@ CRITICAL RULES:
 
     const result = await model.generateContent([
       SYSTEM_PROMPT,
-      `${deviceContext}${guideContext}${consistencyContext}\n\nApp description: ${appDescription}\n\nGenerate the "${screenName}" screen/page. Use image placeholders {{HERO_IMAGE}}, {{CONTENT_IMAGE_1}}, {{CONTENT_IMAGE_2}} where photos should appear. Include realistic content specific to this screen.`,
+      `${deviceContext}${guideContext}${presetTokenContext}${consistencyContext}\n\nApp description: ${appDescription}\n\nGenerate the "${screenName}" screen/page. Use image placeholders {{HERO_IMAGE}}, {{CONTENT_IMAGE_1}}, {{CONTENT_IMAGE_2}} where photos should appear. Include realistic content specific to this screen.`,
     ])
 
     let html = result.response.text().trim()
@@ -468,9 +502,16 @@ export async function generateDesignSystem(html: string, baseGuide?: DesignGuide
     neutral: { base: string; tones: string[] }
   }
   typography: {
-    headline: { family: string }
-    body: { family: string }
-    label: { family: string }
+    headline: { family: string; size?: string; weight?: string; lineHeight?: string }
+    body: { family: string; size?: string; weight?: string; lineHeight?: string }
+    label: { family: string; size?: string; weight?: string; lineHeight?: string }
+  }
+  components?: {
+    buttonRadius: string; buttonPadding: string; buttonFontWeight: string
+    inputRadius: string; inputBorder: string; inputPadding: string; inputBg: string
+    cardRadius: string; cardShadow: string; cardPadding: string
+    chipRadius: string; chipPadding: string; chipBg: string
+    fabSize: string; fabRadius: string
   }
   name: string
   guide: DesignGuide
@@ -492,23 +533,39 @@ export async function generateDesignSystem(html: string, baseGuide?: DesignGuide
     "neutral": { "base": "#HEX", "tones": [...12 tones...] }
   },
   "typography": {
-    "headline": { "family": "Font Name" },
-    "body": { "family": "Font Name" },
-    "label": { "family": "Font Name" }
+    "headline": { "family": "Font Name", "size": "32px", "weight": "700", "lineHeight": "1.2" },
+    "body": { "family": "Font Name", "size": "16px", "weight": "400", "lineHeight": "1.5" },
+    "label": { "family": "Font Name", "size": "12px", "weight": "500", "lineHeight": "1.4" }
+  },
+  "components": {
+    "buttonRadius": "8px",
+    "buttonPadding": "10px 20px",
+    "buttonFontWeight": "600",
+    "inputRadius": "8px",
+    "inputBorder": "1px solid #ccc",
+    "inputPadding": "10px 14px",
+    "inputBg": "#ffffff",
+    "cardRadius": "12px",
+    "cardShadow": "0 2px 8px rgba(0,0,0,0.08)",
+    "cardPadding": "20px",
+    "chipRadius": "9999px",
+    "chipPadding": "4px 12px",
+    "chipBg": "#f0f0f0",
+    "fabSize": "56px",
+    "fabRadius": "16px"
   },
   "guide": {
-    "overview": "A 2-3 sentence creative north star describing this design's visual philosophy and aesthetic goals.",
-    "colorRules": "Specific rules for how colors should be used in this design system — surface hierarchy, accent usage, gradient rules.",
-    "typographyRules": "Typography scale, font usage rules, hierarchy definitions.",
-    "elevationRules": "How depth and elevation are expressed — shadows, layering, borders.",
-    "componentRules": "Button styles, input patterns, chip/tag styles, card behaviors specific to this design.",
-    "dosAndDonts": "3 DO rules and 3 DON'T rules specific to maintaining this design's visual language."
+    "overview": "A 2-3 sentence creative north star.",
+    "colorRules": "Color usage rules — surface hierarchy, accent usage, gradient rules.",
+    "typographyRules": "Typography scale, font usage rules, hierarchy.",
+    "elevationRules": "Shadows, layering, borders.",
+    "componentRules": "Button styles, input patterns, chip/tag styles, card behaviors.",
+    "dosAndDonts": "3 DO rules and 3 DON'T rules."
   }
 }
 
-The tones should be: T0 (darkest/black), T10, T20, T30, T40, T50, T60 (base area), T70, T80, T90, T95, T100 (lightest/white).
-Generate appropriate tonal variations for each color role.
-The guide should be a practical, opinionated design guide tailored to the specific visual style of this HTML design.${guideRef}
+Extract exact CSS values from the HTML. The tones: T0 (darkest) to T100 (lightest), 12 entries.
+The components object must contain exact CSS values observed in the design.${guideRef}
 Return ONLY the JSON, no other text.`,
     stripHeavyContent(html),
   ])
@@ -862,4 +919,96 @@ function slugify(name: string): string {
 function deriveScreenName(prompt: string): string {
   const words = prompt.split(/\s+/).slice(0, 4)
   return words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+}
+
+/**
+ * Analyze a design image (from Pinterest, Dribbble, etc.) using Gemini Vision
+ * and extract a full DesignSystem with colors, typography, and guide.
+ */
+export async function analyzeDesignFromImage(base64: string, mimeType: string): Promise<{
+  colors: {
+    primary: { base: string; tones: string[] }
+    secondary: { base: string; tones: string[] }
+    tertiary: { base: string; tones: string[] }
+    neutral: { base: string; tones: string[] }
+  }
+  typography: {
+    headline: { family: string; size?: string; weight?: string; lineHeight?: string }
+    body: { family: string; size?: string; weight?: string; lineHeight?: string }
+    label: { family: string; size?: string; weight?: string; lineHeight?: string }
+  }
+  components?: {
+    buttonRadius: string; buttonPadding: string; buttonFontWeight: string
+    inputRadius: string; inputBorder: string; inputPadding: string; inputBg: string
+    cardRadius: string; cardShadow: string; cardPadding: string
+    chipRadius: string; chipPadding: string; chipBg: string
+    fabSize: string; fabRadius: string
+  }
+  name: string
+  guide: DesignGuide
+}> {
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+
+  const result = await model.generateContent([
+    {
+      inlineData: {
+        mimeType,
+        data: base64,
+      },
+    },
+    `Analyze this UI/UX design image and extract a complete design system including component styles. Look carefully at colors, typography, spacing, button shapes, input fields, card styles, and overall visual language.
+
+Return ONLY valid JSON with this exact structure:
+{
+  "name": "Theme Name (creative, 2-3 words)",
+  "colors": {
+    "primary": { "base": "#HEX", "tones": ["#T0_darkest", "#T10", "#T20", "#T30", "#T40", "#T50", "#T60_base", "#T70", "#T80", "#T90", "#T95", "#T100_lightest"] },
+    "secondary": { "base": "#HEX", "tones": [...12 tones...] },
+    "tertiary": { "base": "#HEX", "tones": [...12 tones...] },
+    "neutral": { "base": "#HEX", "tones": [...12 tones...] }
+  },
+  "typography": {
+    "headline": { "family": "Font Name", "size": "32px", "weight": "700", "lineHeight": "1.2" },
+    "body": { "family": "Font Name", "size": "16px", "weight": "400", "lineHeight": "1.5" },
+    "label": { "family": "Font Name", "size": "12px", "weight": "500", "lineHeight": "1.4" }
+  },
+  "components": {
+    "buttonRadius": "8px",
+    "buttonPadding": "10px 20px",
+    "buttonFontWeight": "600",
+    "inputRadius": "8px",
+    "inputBorder": "1px solid #ccc",
+    "inputPadding": "10px 14px",
+    "inputBg": "#ffffff",
+    "cardRadius": "12px",
+    "cardShadow": "0 2px 8px rgba(0,0,0,0.08)",
+    "cardPadding": "20px",
+    "chipRadius": "9999px",
+    "chipPadding": "4px 12px",
+    "chipBg": "#f0f0f0",
+    "fabSize": "56px",
+    "fabRadius": "16px"
+  },
+  "guide": {
+    "overview": "A 2-3 sentence creative north star.",
+    "colorRules": "Color usage rules with exact hex codes.",
+    "typographyRules": "Typography scale with sizes, weights, line-heights. Include Google Fonts @import.",
+    "elevationRules": "Shadows, layering, borders, blur effects.",
+    "componentRules": "Button styles, card styles, input patterns, navigation patterns.",
+    "dosAndDonts": "3 DO rules and 3 DON'T rules."
+  }
+}
+
+Extract EXACT colors and CSS values observed in the design. For typography, identify the closest Google Font.
+The tones array must have exactly 12 entries from darkest (T0) to lightest (T100).
+The components object must contain realistic CSS values matching the design's visual style.
+Return ONLY the JSON, no other text.`,
+  ])
+
+  let json = result.response.text().trim()
+  if (json.startsWith('```json')) json = json.slice(7)
+  else if (json.startsWith('```')) json = json.slice(3)
+  if (json.endsWith('```')) json = json.slice(0, -3)
+
+  return JSON.parse(json.trim())
 }

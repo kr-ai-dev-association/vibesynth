@@ -409,38 +409,48 @@ Stitch에는 없는 VibeSynth의 핵심 차별점.
 ```
 vibesynth/
 ├── electron/
-│   ├── main.ts              # Electron main process (IPC, 윈도우 관리)
-│   └── preload.ts           # Preload scripts (electronAPI 노출)
+│   ├── main.ts              # Electron main process (IPC, 윈도우 관리, 좀비 프로세스 정리)
+│   ├── preload.ts           # Preload scripts (electronAPI + pinterest API 노출)
+│   └── preload-pinterest.ts # Pinterest 전용 preload (레거시)
 ├── src/renderer/src/
-│   ├── App.tsx              # 루트: Project, Screen, DesignSystem, DesignGuide 인터페이스
+│   ├── App.tsx              # 루트: Project, Screen, DesignSystem, ComponentTokens, DesignGuide 인터페이스
 │   ├── pages/
-│   │   ├── Dashboard.tsx    # 대시보드 (예제, 프롬프트, 사이드바)
-│   │   ├── Editor.tsx       # 에디터 (캔버스, 패닝, 생성)
+│   │   ├── Dashboard.tsx    # 대시보드 (예제, 프롬프트, 디자인 시스템 피커)
+│   │   ├── Editor.tsx       # 에디터 (캔버스, 패닝, 다중 화면 생성, 증분 빌드)
 │   │   └── Settings.tsx     # 설정 페이지
 │   ├── components/
 │   │   ├── common/
 │   │   │   ├── PromptBar.tsx        # App/Tablet/Web 토글 포함 프롬프트 바
 │   │   │   └── AppearanceToggle.tsx # Light/System/Dark 토글
 │   │   └── editor/
-│   │       ├── RightPanel.tsx       # Design/Components/Layers 3탭 패널
+│   │       ├── RightPanel.tsx       # Design/Components/Layers 3탭 (추천 DS, 컴포넌트 토큰)
 │   │       ├── AgentLog.tsx         # AI 작업 로그
 │   │       └── ScreenContextToolbar.tsx
 │   ├── lib/
-│   │   ├── gemini.ts              # Gemini API 클라이언트 (생성/편집/DS추출)
+│   │   ├── gemini.ts              # Gemini API (생성/편집/DS추출/히트맵/프론트빌드/증분빌드)
+│   │   ├── image-gen.ts           # AI 이미지 생성
+│   │   ├── design-guide-db.ts     # 디자인 가이드 localStorage 저장/로드
+│   │   ├── pinterest-designs.ts   # 13개 추천 디자인 시스템 데이터
 │   │   └── default-design-guide.ts # design_guide.md 기반 기본 가이드
 │   └── types/
-│       └── electron.d.ts          # ElectronAPI 타입 정의
+│       └── electron.d.ts          # ElectronAPI 타입 정의 (pinterest API 포함)
 ├── tests/e2e/
-│   ├── dashboard.spec.ts          # 대시보드 기능 테스트
-│   ├── editor.spec.ts             # 에디터 기능 테스트
-│   ├── header-icons.spec.ts       # 헤더 아이콘/메뉴 테스트
-│   ├── parity-dashboard.spec.ts   # Stitch UX 패리티 테스트
-│   ├── visual-check.spec.ts       # 스크린샷 비주얼 테스트
-│   └── stitch-explore.spec.ts     # Stitch 탐색 (수동 로그인)
-├── design_guide.md                # 기본 디자인 가이드 원본
-├── .env                           # VITE_GEMINI_API_KEY
-├── vite.config.ts                 # Electron 빌드 (envDir 설정)
-└── vite.config.web.ts             # 웹 전용 개발 빌드
+│   ├── full-workflow.spec.ts        # 전체 워크플로우 (생성→히트맵→빌드→수정→증분)
+│   ├── steal-design.spec.ts        # Pinterest 디자인 훔치기 테스트
+│   ├── steal-dashboard.spec.ts     # 대시보드 디자인 훔치기 테스트
+│   ├── recommended-designs.spec.ts # 추천 디자인 시스템 로드 테스트
+│   ├── load-design-system.spec.ts  # 디자인 시스템 로드/변경 테스트
+│   ├── generate-design-systems.spec.ts # 디자인 시스템 생성/저장 테스트
+│   ├── dashboard.spec.ts           # 대시보드 기능 테스트
+│   ├── editor.spec.ts              # 에디터 기능 테스트
+│   ├── header-icons.spec.ts        # 헤더 아이콘/메뉴 테스트
+│   ├── parity-dashboard.spec.ts    # Stitch UX 패리티 테스트
+│   ├── visual-check.spec.ts        # 스크린샷 비주얼 테스트
+│   └── stitch-explore.spec.ts      # Stitch 탐색 (수동 로그인)
+├── design_guide.md                  # 기본 디자인 가이드 원본
+├── .env                             # VITE_GEMINI_API_KEY
+├── vite.config.ts                   # Electron 빌드 (envDir 설정, pinterest preload)
+└── vite.config.web.ts               # 웹 전용 개발 빌드
 ```
 
 ### 6.2 Core Data Models
@@ -457,6 +467,23 @@ interface Project {
   deviceType: 'app' | 'web' | 'tablet'
 }
 
+interface Screen {
+  id: string
+  name: string
+  html: string
+  heatmap?: HeatmapZone[]
+  generating?: boolean      // AI 생성 진행 중 플래그
+}
+
+interface HeatmapZone {
+  cssPath: string
+  tagName: string
+  label: string
+  intensity: number         // 0.0 ~ 1.0
+  reason: string
+  rect: { x: number; y: number; w: number; h: number }
+}
+
 interface DesignGuide {
   overview: string          // 크리에이티브 노스 스타
   colorRules: string        // 색상 사용 규칙
@@ -466,10 +493,26 @@ interface DesignGuide {
   dosAndDonts: string       // Do's & Don'ts
 }
 
+interface TypographyLevel {
+  family: string
+  size?: string             // e.g. "32px"
+  weight?: string           // e.g. "700"
+  lineHeight?: string       // e.g. "1.2"
+}
+
+interface ComponentTokens {
+  buttonRadius: string; buttonPadding: string; buttonFontWeight: string
+  inputRadius: string; inputBorder: string; inputPadding: string; inputBg: string
+  cardRadius: string; cardShadow: string; cardPadding: string
+  chipRadius: string; chipPadding: string; chipBg: string
+  fabSize: string; fabRadius: string
+}
+
 interface DesignSystem {
   name: string
-  colors: { primary, secondary, tertiary, neutral } // 각 { base, tones[12] }
-  typography: { headline, body, label }              // 각 { family }
+  colors: { primary, secondary, tertiary, neutral } // 각 { base: string, tones: string[12] }
+  typography: { headline, body, label }              // 각 TypographyLevel
+  components?: ComponentTokens                       // 컴포넌트 CSS 토큰
   guide?: DesignGuide
 }
 ```
@@ -477,16 +520,38 @@ interface DesignSystem {
 ### 6.3 AI Integration (Gemini API)
 
 ```
-generateDesign(prompt, deviceType, guide?)
-  → 디자인 가이드를 프롬프트에 포함
+generateDesign(prompt, deviceType, guide?, callbacks?, existingHtml?, presetDesignSystem?)
+  → 디자인 가이드 + 프리셋 토큰을 프롬프트에 포함
   → HTML+CSS 반환
+
+generateMultiScreen(appDescription, screenNames, deviceType, guide?, callbacks?, presetDesignSystem?)
+  → 첫 화면에서 디자인 토큰 추출 → 이후 화면에 일관성 강제
+  → 화면별 순차 생성 + 콜백으로 진행 상태 전달
 
 generateDesignSystem(html, baseGuide?)
   → 생성된 HTML 분석
-  → 색상/타이포/이름 + 맞춤형 디자인 가이드 반환
+  → 색상/타이포/컴포넌트 토큰/이름 + 맞춤형 디자인 가이드 반환
+
+analyzeDesignFromImage(base64, mimeType)
+  → 이미지(Pinterest 등) 분석 → 전체 DesignSystem 추출
 
 editDesign(currentHtml, editPrompt)
   → 기존 HTML에 변경사항 적용
+
+editDesignElement(currentHtml, cssPath, elementOuterHtml, editPrompt)
+  → 선택된 특정 요소만 수정
+
+generateHeatmap(html)
+  → UX 히트맵 예측 (주목도 0~1, CSS 경로)
+
+generateFrontendApp(screens, deviceType)
+  → React + Vite + React Router 프로젝트 풀 빌드
+
+generateIncrementalFrontend(newScreens, allScreens, existingFiles, deviceType)
+  → 변경된 화면만 증분 빌드 + App.tsx 라우팅 업데이트
+
+fixBuildErrors(errorOutput, projectFiles)
+  → 빌드 에러 자동 수정
 ```
 
 #### 환경 변수
@@ -545,11 +610,212 @@ editDesign(currentHtml, editPrompt)
 | **프롬프트 기반 예제** | 하드코딩 대신 프롬프트로 AI 생성 |
 | **Dashboard More 메뉴** | Help & feedback, Keyboard shortcuts, About |
 | **캔버스 드래그 패닝** | 빈 영역 클릭+드래그, Space+드래그, Alt+드래그 |
-| **E2E 테스트 스위트** | Playwright 83개 테스트 (Dashboard, Editor, Header, Parity, Visual) |
+| **Pinterest 디자인 훔치기** | Pinterest 이미지 → Gemini Vision → DesignSystem 자동 추출 |
+| **추천 디자인 시스템** | 13개 큐레이션 디자인 (프리셋 색상/타이포/컴포넌트 토큰) |
+| **Dashboard 디자인 피커** | 프로젝트 생성 시 추천 디자인 시스템 미리 선택 가능 |
+| **컴포넌트 토큰** | 버튼/입력/카드/칩/FAB CSS 토큰 (DesignSystem 확장) |
+| **다중 화면 순차 생성** | 디자인 일관성 강제 + 블러→선명 애니메이션 |
+| **증분 빌드** | 변경된 화면만 재빌드, HTML 해시 기반 캐시 |
+| **히트맵 예측** | AI UX 히트맵 (주목도 시각화 + 효과 부여) |
+| **요소 단위 편집** | 클릭으로 선택한 요소만 AI 수정 |
+| **빌드 에러 자동 수정** | Gemini로 컴파일 에러 자동 진단/수정 |
+| **좀비 프로세스 정리** | 앱 시작 시 기존 Electron 프로세스 자동 종료 |
+| **전체 화면 시작** | Electron 앱 항상 fullscreen으로 시작 |
+| **E2E 테스트 스위트** | Playwright 다수 테스트 (워크플로우, 디자인 훔치기, 추천 DS 등) |
 
 ---
 
-## 8. Screenshots Reference (Stitch 분석용)
+## 8. Implemented Features (Phase 2+)
+
+아래는 초기 PRD 이후 추가 구현된 기능들이다.
+
+### 8.1 Pinterest Design Steal (디자인 훔치기)
+
+Pinterest 이미지에서 디자인 시스템을 추출하여 프로젝트에 적용하는 기능.
+
+#### 워크플로우
+1. **Pinterest 연결:** `Connect Pinterest Account` 버튼 → 시스템 기본 브라우저(`shell.openExternal`)로 Pinterest 로그인
+2. **이미지 URL 입력:** 디자인 탭에서 Pinterest 이미지 URL을 붙여넣기
+3. **분석:** Electron main process에서 `net.fetch`로 이미지 다운로드 → Gemini Vision API(`gemini-2.0-flash`)로 분석
+4. **적용:** 추출된 `DesignSystem`(색상, 타이포, 컴포넌트 토큰, 가이드)을 프로젝트에 즉시 적용
+
+#### 검색 카테고리
+- Homepage Design / iPhone App Design / Android App Design / iPad App Design / **Dashboard Design**
+
+#### IPC 채널
+- `pinterest:connect` — 시스템 브라우저로 로그인 페이지 오픈
+- `pinterest:open` — 카테고리 검색 결과를 시스템 브라우저에서 오픈
+- `pinterest:steal-url` — 이미지 URL로 직접 분석 (main process에서 다운로드)
+- `pinterest:image-captured` — 분석 완료 시 renderer에 결과 전송
+
+### 8.2 Recommended Design Systems (추천 디자인 시스템)
+
+13개의 Pinterest 소스 디자인을 사전 분석하여 앱 내에 큐레이션된 추천 디자인으로 제공.
+
+#### 데이터 구조
+```typescript
+interface PinterestDesignEntry {
+  id: string           // e.g. "pin-finance-dashboard"
+  name: string         // e.g. "Ornate Quartz"
+  keywords: string[]   // 검색 키워드
+  mood: string[]       // 분위기 태그
+  domains: string[]    // 적용 도메인
+  previewUrl: string   // 원본 Pinterest 이미지 URL
+  designSystem: DesignSystem  // 전체 디자인 시스템 (colors, typography, components)
+  guide: DesignGuide          // 디자인 가이드
+}
+```
+
+#### UI 위치
+- **Design 탭 → "Recommended Designs"** 접기/펼치기 섹션
+  - 2열 그리드로 색상 스와치 + 폰트 프리뷰 표시
+  - 클릭 시 해당 디자인 시스템을 프로젝트에 로드
+- **Dashboard → Design Style Picker** (프롬프트 바 상단)
+  - 프로젝트 생성 시 디자인 시스템을 미리 선택 가능
+  - 예제 프로젝트에도 적용 가능
+  - "Auto" 옵션으로 AI 자동 결정 지원
+
+#### 포함된 13개 디자인
+| ID | 이름 | 분위기 |
+|----|------|--------|
+| pin-finance-dashboard | Ornate Quartz | dark, tech |
+| pin-dark-analytics | Finance Oasis | dark, premium |
+| pin-gradient-cards | Gradient Pulse | vibrant, modern |
+| pin-clean-saas | Clean SaaS | minimal, professional |
+| pin-mint-dashboard | Airy Mint Design | fresh, calm |
+| pin-orange-crm | Orange CRM | warm, energetic |
+| pin-purple-analytics | Purple Analytics | deep, sophisticated |
+| pin-blue-dashboard | Blue Dashboard | corporate, clean |
+| pin-green-eco | Green Eco | natural, organic |
+| pin-red-social | Red Social | bold, social |
+| pin-teal-health | Teal Health | calming, health |
+| pin-yellow-learning | Yellow Learning | cheerful, education |
+| pin-pink-lifestyle | Pink Lifestyle | soft, lifestyle |
+
+### 8.3 Design System Picker (Dashboard 디자인 시스템 선택기)
+
+프로젝트 생성 시점에 추천 디자인 시스템을 선택하여, 첫 화면부터 해당 스타일로 생성.
+
+#### 동작 방식
+1. Dashboard 프롬프트 바 상단에 `"Choose a design style (optional)"` 토글
+2. 클릭 시 13개 추천 디자인의 색상 스와치 그리드 표시 (반응형 4~7열)
+3. 선택된 디자인 시스템이 `Project.designSystem`에 설정됨
+4. Gemini 프롬프트에 구체적 토큰(색상 hex, 폰트, 컴포넌트 CSS 값) 포함
+5. 예제 프로젝트 클릭 시에도 선택된 디자인 시스템 적용
+
+#### 데이터 플로우
+```
+Dashboard (designSystem 선택)
+  → onCreateProject(prompt, deviceType, designSystem?)
+    → App.tsx: Project { designSystem } 설정
+      → Editor: activeGuide = project.designSystem.guide
+        → generateDesign/generateMultiScreen에 presetDesignSystem 전달
+          → Gemini 프롬프트에 구체적 토큰 + 가이드 포함
+```
+
+### 8.4 Extended Design System (확장된 디자인 시스템)
+
+#### ComponentTokens (컴포넌트 토큰)
+```typescript
+interface ComponentTokens {
+  buttonRadius: string       // e.g. "8px"
+  buttonPadding: string      // e.g. "10px 20px"
+  buttonFontWeight: string   // e.g. "600"
+  inputRadius: string        // e.g. "8px"
+  inputBorder: string        // e.g. "1px solid #ccc"
+  inputPadding: string       // e.g. "10px 14px"
+  inputBg: string            // e.g. "#ffffff"
+  cardRadius: string         // e.g. "12px"
+  cardShadow: string         // e.g. "0 2px 8px rgba(0,0,0,0.08)"
+  cardPadding: string        // e.g. "20px"
+  chipRadius: string         // e.g. "9999px"
+  chipPadding: string        // e.g. "4px 12px"
+  chipBg: string             // e.g. "#f0f0f0"
+  fabSize: string            // e.g. "56px"
+  fabRadius: string          // e.g. "16px"
+}
+```
+
+#### TypographyLevel 확장
+```typescript
+interface TypographyLevel {
+  family: string
+  size?: string        // e.g. "32px"
+  weight?: string      // e.g. "700"
+  lineHeight?: string  // e.g. "1.2"
+}
+```
+
+#### Components 탭 개선
+- **Typography 프리뷰:** Headline/Body/Label 각 레벨의 size, weight, lineHeight 표시
+- **Text Input 프리뷰:** 기본 입력 필드 + 라벨 포함 입력 필드
+- **Card 프리뷰:** 타이틀, 설명, 액션 버튼 포함
+- **Button/Search/FAB/Chip:** `ComponentTokens`에서 동적으로 스타일 로드
+- **Icon Set:** Material SVG 아이콘으로 교체
+
+### 8.5 Multi-Screen Generation (다중 화면 생성)
+
+#### 순차 생성 + 애니메이션
+1. AI가 프롬프트에서 화면 이름 목록을 먼저 분석
+2. 첫 화면 생성 → 디자인 토큰 추출 → 이후 화면들은 동일 토큰 강제 적용
+3. 각 화면 생성 시 캔버스에 블러 → 선명 애니메이션 효과
+
+#### 디자인 일관성 강제
+```
+첫 화면 → extractDesignTokens(html)
+  → EXACT COLORS, FONT FAMILIES, BORDER RADIUS, BOX SHADOWS, FULL CSS
+    → 이후 화면 프롬프트에 "MANDATORY DESIGN CONSISTENCY" 블록으로 포함
+```
+
+### 8.6 Incremental Build (증분 빌드)
+
+기존 빌드된 화면의 HTML이 변경되지 않았으면 Gemini 재생성을 건너뜀.
+
+#### 빌드 캐시
+```typescript
+// screenId → { htmlHash, generatedFiles }
+buildCacheRef = useRef<Map<string, { htmlHash: string; files: Record<string, string> }>>()
+```
+
+#### 동작
+1. 각 화면의 HTML 해시를 비교
+2. 변경된 화면만 `generateIncrementalFrontend()`에 전달
+3. `App.tsx` 라우팅만 전체 재생성 (새 화면 라우트 추가)
+4. 빌드 에러 발생 시 `fixBuildErrors()`로 자동 수정 시도
+
+### 8.7 Electron Process Management
+
+#### 좀비 프로세스 정리
+앱 시작 시 `killZombieElectrons()` 함수가 기존의 Electron 헬퍼 프로세스를 자동 종료:
+- macOS: `ps aux | grep Electron` → 자기 프로세스 제외하고 `process.kill()`
+- Windows: `tasklist` 기반 동일 로직
+
+#### 전체 화면 시작
+`mainWindow.setFullScreen(true)` — 항상 전체 화면 모드로 시작
+
+### 8.8 Design Guide Persistence (디자인 가이드 저장)
+
+#### DesignGuideStore (localStorage)
+```typescript
+interface DesignGuideEntry {
+  id: string
+  name: string
+  prompt: string
+  guide: DesignGuide
+  createdAt: string
+  source: 'generated' | 'edited' | 'curated'
+  previewUrl?: string
+}
+```
+
+- **저장:** AI 생성 후 자동 저장, 사용자 편집 시 저장
+- **로드:** Design 탭의 "Save / Load" 섹션에서 저장된 디자인 시스템 목록 표시
+- **큐레이션:** `PINTEREST_DESIGNS` 데이터가 curated 엔트리로 자동 통합
+- **삭제:** 앱 시작 시 `deleteAllSaved()`로 이전 AI 생성 데이터 초기화 (curated는 보존)
+
+---
+
+## 9. Screenshots Reference (Stitch 분석용)
 
 | # | 파일명 | VibeSynth 참고 포인트 |
 |---|--------|----------------------|
@@ -566,15 +832,21 @@ editDesign(currentHtml, editPrompt)
 
 ---
 
-## 9. E2E Test Coverage
+## 10. E2E Test Coverage
 
-Playwright 기반 83개 자동화 테스트:
+Playwright 기반 자동화 테스트:
 
-| 테스트 파일 | 개수 | 범위 |
-|-------------|------|------|
-| `dashboard.spec.ts` | 14 | 대시보드 레이아웃, 사이드바, 프롬프트, 모델, App/Tablet/Web 토글 |
-| `editor.spec.ts` | 16 | 에디터 레이아웃, 우측 패널, 탭, 디자인 가이드, 생성 상태 |
-| `header-icons.spec.ts` | 14 | Appearance 토글, Settings 이동, More 메뉴, Run 버튼, 햄버거 메뉴 |
-| `parity-dashboard.spec.ts` | 22 | VibeSynth vs Stitch UX 패리티 (양쪽 프로젝트 동시 테스트) |
-| `visual-check.spec.ts` | 11 | 주요 화면 스크린샷 캡처 (대시보드, 에디터, 다크모드, 패널) |
-| `stitch-explore.spec.ts` | 1 | Stitch 수동 탐색 (로그인 필요, page.pause 활용) |
+| 테스트 파일 | 범위 |
+|-------------|------|
+| `full-workflow.spec.ts` | 전체 워크플로우: 3화면 생성 → 히트맵 → 빌드 → 런타임 수정 → 추가 화면 → 증분 빌드 |
+| `steal-design.spec.ts` | Pinterest 디자인 훔치기 (SaaS 프로젝트 + 이미지 URL 분석) |
+| `steal-dashboard.spec.ts` | 대시보드 디자인 훔치기 (컴포넌트 토큰 검증 포함) |
+| `recommended-designs.spec.ts` | 13개 추천 디자인 로드/적용/전환 검증 |
+| `load-design-system.spec.ts` | 저장된 디자인 시스템 로드/변경 테스트 |
+| `generate-design-systems.spec.ts` | 디자인 시스템 생성/저장 반복 테스트 |
+| `dashboard.spec.ts` | 대시보드 레이아웃, 사이드바, 프롬프트, 모델, App/Tablet/Web 토글 |
+| `editor.spec.ts` | 에디터 레이아웃, 우측 패널, 탭, 디자인 가이드, 생성 상태 |
+| `header-icons.spec.ts` | Appearance 토글, Settings 이동, More 메뉴, Run 버튼, 햄버거 메뉴 |
+| `parity-dashboard.spec.ts` | VibeSynth vs Stitch UX 패리티 (양쪽 프로젝트 동시 테스트) |
+| `visual-check.spec.ts` | 주요 화면 스크린샷 캡처 (대시보드, 에디터, 다크모드, 패널) |
+| `stitch-explore.spec.ts` | Stitch 수동 탐색 (로그인 필요, page.pause 활용) |

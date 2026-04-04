@@ -38,6 +38,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getStatus: () => ipcRenderer.invoke('project:get-status'),
   },
 
+  // Pinterest Design Steal
+  pinterest: {
+    connect: () => ipcRenderer.invoke('pinterest:connect'),
+    open: (query: string) => ipcRenderer.invoke('pinterest:open', query),
+    cancel: () => ipcRenderer.invoke('pinterest:cancel'),
+    stealUrl: (imageUrl: string) =>
+      ipcRenderer.invoke('pinterest:steal-url', imageUrl) as Promise<{ success: boolean; error?: string }>,
+    onImageCaptured: (callback: (base64: string | null, mimeType: string | null) => void) => {
+      const handler = (_e: any, b64: string | null, mime: string | null) => callback(b64, mime)
+      ipcRenderer.on('pinterest:image-captured', handler)
+      return () => ipcRenderer.removeListener('pinterest:image-captured', handler)
+    },
+    onConnectDone: (callback: () => void) => {
+      const handler = () => callback()
+      ipcRenderer.on('pinterest:connect-done', handler)
+      return () => ipcRenderer.removeListener('pinterest:connect-done', handler)
+    },
+  },
+
   // Database API
   db: {
     getAllProjects: (userId: string) => ipcRenderer.invoke('db:get-all-projects', userId),

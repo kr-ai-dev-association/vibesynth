@@ -11,17 +11,20 @@
  * - Keyword matching scores prompts against stored guides
  */
 
-import type { DesignGuide } from '../App'
+import type { DesignGuide, DesignSystem } from '../App'
+import { PINTEREST_DESIGNS } from './pinterest-designs'
 
 // ─── Guide Entry ────────────────────────────────────────────────
 
 export interface DesignGuideEntry {
   id: string
   name: string
-  keywords: string[]         // Match keywords for automatic mapping
-  mood: string[]             // Visual mood tags: "dark", "minimal", "playful", etc.
-  domains: string[]          // App domain tags: "fitness", "food", "travel", etc.
+  keywords: string[]
+  mood: string[]
+  domains: string[]
   guide: DesignGuide
+  designSystem?: DesignSystem
+  previewUrl?: string
   createdAt: string
   source: 'curated' | 'ai-generated' | 'user-edited'
 }
@@ -49,6 +52,23 @@ class DesignGuideStore {
     for (const curated of CURATED_GUIDES) {
       if (!this.entries.find(e => e.id === curated.id)) {
         this.entries.push(curated)
+      }
+    }
+    // Merge Pinterest-sourced curated design systems
+    for (const pin of PINTEREST_DESIGNS) {
+      if (!this.entries.find(e => e.id === pin.id)) {
+        this.entries.push({
+          id: pin.id,
+          name: pin.name,
+          keywords: pin.keywords,
+          mood: pin.mood,
+          domains: pin.domains,
+          guide: pin.guide,
+          designSystem: pin.designSystem,
+          previewUrl: pin.previewUrl,
+          createdAt: '2025-01-01T00:00:00Z',
+          source: 'curated',
+        })
       }
     }
   }
@@ -131,6 +151,7 @@ class DesignGuideStore {
     projectName: string,
     prompt: string,
     guide: DesignGuide,
+    designSystem?: DesignSystem,
   ): DesignGuideEntry {
     const keywords = extractKeywords(prompt)
     const mood = detectMood(prompt)
@@ -143,6 +164,7 @@ class DesignGuideStore {
       mood,
       domains,
       guide,
+      designSystem,
       createdAt: new Date().toISOString(),
       source: 'ai-generated',
     }
@@ -151,9 +173,23 @@ class DesignGuideStore {
     return entry
   }
 
+  /**
+   * Get all entries that have a full design system saved.
+   */
+  getAllWithDesignSystem(): DesignGuideEntry[] {
+    this.load()
+    return this.entries.filter(e => e.designSystem != null)
+  }
+
   delete(id: string) {
     this.load()
     this.entries = this.entries.filter(e => e.id !== id)
+    this.save()
+  }
+
+  deleteAllSaved() {
+    this.load()
+    this.entries = this.entries.filter(e => e.source === 'curated')
     this.save()
   }
 }
