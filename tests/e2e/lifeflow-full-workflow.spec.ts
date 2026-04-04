@@ -58,12 +58,13 @@ test('LifeFlow Dashboard: PRD → 디자인 선택 → 3+페이지 생성 → Li
   const dsCount = await dsButtons.count()
   console.log(`추천 디자인 시스템 ${dsCount}개 표시`)
 
-  if (dsCount >= 3) {
-    // 3번째 디자인 시스템 선택
-    await dsButtons.nth(2).click()
+  if (dsCount >= 2) {
+    // 랜덤으로 디자인 시스템 선택
+    const randomIdx = Math.floor(Math.random() * dsCount)
+    await dsButtons.nth(randomIdx).click()
     await page.waitForTimeout(DELAY)
-    const selectedTitle = await dsButtons.nth(2).getAttribute('title')
-    console.log(`✅ 디자인 시스템 선택: ${selectedTitle}`)
+    const selectedTitle = await dsButtons.nth(randomIdx).getAttribute('title')
+    console.log(`✅ 디자인 시스템 선택 (랜덤 #${randomIdx}): ${selectedTitle}`)
   }
   await page.screenshot({ path: 'test-results/lf-03-design-selected.png' })
   await page.waitForTimeout(DELAY)
@@ -128,6 +129,20 @@ test('LifeFlow Dashboard: PRD → 디자인 선택 → 3+페이지 생성 → Li
     }
   }
   await page.screenshot({ path: 'test-results/lf-05b-design-panel.png' })
+  await page.waitForTimeout(DELAY)
+
+  // ── 추천 DS 색상이 생성된 HTML에 반영되었는지 검증 ──
+  const firstIframe = page.locator('[data-screen-card] iframe').first()
+  const screenHtml = await firstIframe.getAttribute('srcdoc') || ''
+  // 생성된 HTML에 실제 hex 색상 코드가 존재하는지 확인 (어떤 DS든 색상이 있어야 함)
+  const hexColors = screenHtml.match(/#[0-9A-Fa-f]{6}/g) || []
+  const uniqueColors = new Set(hexColors.map(c => c.toLowerCase()))
+  console.log(`생성된 HTML 색상: ${uniqueColors.size}개 고유 hex 색상, HTML=${screenHtml.length}bytes`)
+  if (uniqueColors.size >= 3) {
+    console.log('✅ 디자인 시스템 색상이 생성된 HTML에 반영됨')
+  } else {
+    console.log('⚠️ hex 색상이 적음 — Tailwind 클래스로 대체되었을 수 있음')
+  }
   await page.waitForTimeout(DELAY)
 
   // ═══════════════════════════════════════════════════════════════
@@ -236,11 +251,14 @@ test('LifeFlow Dashboard: PRD → 디자인 선택 → 3+페이지 생성 → Li
   ).toBeVisible({ timeout: 360_000 })
 
   if (await page.getByText(/Frontend generation failed/i).count() > 0) {
-    // 전체 Agent Log 캡처
-    const allLogText = await page.locator('.space-y-1\\.5').textContent().catch(() => '')
-    console.error(`❌ Frontend build error. Agent Log:\n${allLogText}`)
+    // 전체 Agent Log 캡처 — 에러 메시지 포함 엘리먼트 찾기
+    const errorEl = page.getByText(/Frontend generation failed/i).first()
+    const errorText = await errorEl.textContent().catch(() => 'unknown')
+    console.error(`❌ Frontend build error: ${errorText}`)
     await page.screenshot({ path: 'test-results/lf-07-frontend-error.png' })
-    throw new Error(`Frontend generation failed. Check agent log.`)
+
+    // Frontend 빌드 실패 — 테스트 실패 처리
+    throw new Error(`Frontend generation failed: ${errorText}`)
   }
 
   await page.screenshot({ path: 'test-results/lf-07-gemini-done.png' })

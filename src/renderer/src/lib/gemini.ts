@@ -104,25 +104,42 @@ DO'S AND DON'TS: ${guide.dosAndDonts}
 
 function formatDesignSystemTokens(ds: DesignSystem): string {
   const lines: string[] = [
-    '=== PRESET DESIGN SYSTEM TOKENS (use these EXACT values) ===',
-    `Theme: "${ds.name}"`,
-    `Primary: ${ds.colors.primary.base}`,
-    `Secondary: ${ds.colors.secondary.base}`,
-    `Tertiary: ${ds.colors.tertiary.base}`,
-    `Neutral: ${ds.colors.neutral.base}`,
-    `Headline Font: ${ds.typography.headline.family} (${ds.typography.headline.size || '32px'}, weight ${ds.typography.headline.weight || '700'})`,
-    `Body Font: ${ds.typography.body.family} (${ds.typography.body.size || '16px'}, weight ${ds.typography.body.weight || '400'})`,
-    `Label Font: ${ds.typography.label.family} (${ds.typography.label.size || '12px'}, weight ${ds.typography.label.weight || '500'})`,
+    '╔══════════════════════════════════════════════════════════╗',
+    '║  MANDATORY DESIGN SYSTEM — YOU MUST USE THESE EXACT     ║',
+    '║  COLORS AND FONTS. DO NOT SUBSTITUTE OR CHANGE THEM.    ║',
+    '╚══════════════════════════════════════════════════════════╝',
+    '',
+    `Theme Name: "${ds.name}"`,
+    '',
+    `PRIMARY COLOR: ${ds.colors.primary.base} — Use for CTAs, active states, key accents`,
+    `SECONDARY COLOR: ${ds.colors.secondary.base} — Use for secondary elements, badges`,
+    `TERTIARY COLOR: ${ds.colors.tertiary.base} — Use for highlights, links`,
+    `NEUTRAL COLOR: ${ds.colors.neutral.base} — Use for backgrounds, borders, text`,
+    '',
+    `HEADLINE FONT: font-family: '${ds.typography.headline.family}' — Import from Google Fonts`,
+    `  Size: ${ds.typography.headline.size || '32px'}, Weight: ${ds.typography.headline.weight || '700'}`,
+    `BODY FONT: font-family: '${ds.typography.body.family}'`,
+    `  Size: ${ds.typography.body.size || '16px'}, Weight: ${ds.typography.body.weight || '400'}`,
+    `LABEL FONT: font-family: '${ds.typography.label.family}'`,
+    `  Size: ${ds.typography.label.size || '12px'}, Weight: ${ds.typography.label.weight || '500'}`,
   ]
   if (ds.components) {
     lines.push(
-      `Button: radius ${ds.components.buttonRadius}, padding ${ds.components.buttonPadding}, weight ${ds.components.buttonFontWeight}`,
-      `Input: radius ${ds.components.inputRadius}, border ${ds.components.inputBorder}, bg ${ds.components.inputBg}`,
-      `Card: radius ${ds.components.cardRadius}, shadow ${ds.components.cardShadow}, padding ${ds.components.cardPadding}`,
-      `Chip: radius ${ds.components.chipRadius}, padding ${ds.components.chipPadding}, bg ${ds.components.chipBg}`,
+      '',
+      'COMPONENT STYLES:',
+      `  Button: border-radius: ${ds.components.buttonRadius}; padding: ${ds.components.buttonPadding}; font-weight: ${ds.components.buttonFontWeight};`,
+      `  Input: border-radius: ${ds.components.inputRadius}; border: ${ds.components.inputBorder}; background: ${ds.components.inputBg}; padding: ${ds.components.inputPadding};`,
+      `  Card: border-radius: ${ds.components.cardRadius}; box-shadow: ${ds.components.cardShadow}; padding: ${ds.components.cardPadding};`,
+      `  Chip: border-radius: ${ds.components.chipRadius}; padding: ${ds.components.chipPadding}; background: ${ds.components.chipBg};`,
     )
   }
-  lines.push('=== END PRESET TOKENS ===')
+  lines.push(
+    '',
+    'CRITICAL: The primary color MUST appear in the generated HTML as a hex code.',
+    `Every CTA button must use background-color: ${ds.colors.primary.base};`,
+    `The @import for Google Fonts must include '${ds.typography.headline.family}'.`,
+    '══════════════════════════════════════════════════════════',
+  )
   return lines.join('\n')
 }
 
@@ -732,10 +749,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   }
 
   // ─── Step 3: Gemini converts HTML→TSX pages + App.tsx + index.css ───
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-3-flash-preview',
-    generationConfig: { responseMimeType: 'application/json' },
-  })
+  // Note: some preview models may not support responseMimeType: 'application/json'
+  // so we request JSON in the prompt and parse manually
+  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
 
   const screenSummaries = screens.map((s, i) => {
     const stripped = stripHeavyContent(s.html)
@@ -810,7 +826,8 @@ ${screenSummaries}`,
     if (braceStart !== -1 && braceEnd > braceStart) {
       parsed = JSON.parse(json.slice(braceStart, braceEnd + 1))
     } else {
-      throw new Error('Failed to parse generated project JSON')
+      console.error('[VibeSynth] Failed to parse frontend JSON. Response preview:', json.slice(0, 500))
+      throw new Error(`Failed to parse generated project JSON. Response starts with: ${json.slice(0, 200)}`)
     }
   }
 
@@ -884,7 +901,7 @@ export async function generateIncrementalFrontend(
 ): Promise<Record<string, string>> {
   const model = genAI.getGenerativeModel({
     model: 'gemini-3-flash-preview',
-    generationConfig: { responseMimeType: 'application/json' },
+    // responseMimeType removed — preview models may not support it; parse JSON from text
   })
 
   const allRoutes = allScreens.map((s, i) => ({
@@ -982,7 +999,7 @@ export async function fixBuildErrors(
 ): Promise<Record<string, string>> {
   const model = genAI.getGenerativeModel({
     model: 'gemini-3-flash-preview',
-    generationConfig: { responseMimeType: 'application/json' },
+    // responseMimeType removed — preview models may not support it; parse JSON from text
   })
 
   const fileList = Object.entries(projectFiles)
