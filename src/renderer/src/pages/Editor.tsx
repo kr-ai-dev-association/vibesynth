@@ -2044,7 +2044,7 @@ function intensityBorder(intensity: number): string {
 
 function ScreenCard({
   screen, width, minHeight, isSelected, isMultiSelected, deviceType, editMode, heatmapMode, heatmapZones,
-  onClick, onContextMenu, onElementSelect, onHeatmapZoneClick, onHeightMeasured,
+  onClick, onContextMenu, onElementSelect, onHeatmapZoneClick, onHeightMeasured, onResize,
 }: {
   screen: Screen; width: number; minHeight: number; deviceType: 'app' | 'web' | 'tablet'
   isSelected?: boolean; isMultiSelected?: boolean; editMode?: boolean; heatmapMode?: boolean; heatmapZones?: HeatmapZone[]
@@ -2052,6 +2052,7 @@ function ScreenCard({
   onElementSelect?: (info: { cssPath: string; tagName: string; textPreview: string; outerHtml: string }) => void
   onHeatmapZoneClick?: (zone: HeatmapZone, x: number, y: number) => void
   onHeightMeasured?: (screenId: string, height: number) => void
+  onResize?: (screenId: string, newWidth: number, newHeight: number) => void
 }) {
   const isGenerating = screen.generating === true
   const [revealed, setRevealed] = useState(!isGenerating)
@@ -2076,6 +2077,11 @@ function ScreenCard({
   const [contentHeight, setContentHeight] = useState(initialHeight)
   const measuredRef = useRef(false)
 
+  // Manual resize via drag handles
+  const [manualWidth, setManualWidth] = useState<number | null>(null)
+  const [manualHeight, setManualHeight] = useState<number | null>(null)
+  const resizingRef = useRef<{ type: 'right' | 'bottom' | 'corner'; startX: number; startY: number; startW: number; startH: number } | null>(null)
+
   useEffect(() => {
     measuredRef.current = false
     setContentHeight(isFixedHeight ? minHeight : 4000)
@@ -2095,20 +2101,28 @@ function ScreenCard({
         // #region agent log
         // #endregion
         if (!doc || !doc.body) return
-        // Calculate actual content height by finding the bottommost child element
-        // (body.scrollHeight often reflects the iframe's 4000px height attribute)
+        // Calculate actual content dimensions by finding the bottommost/rightmost child
         let h = 0
+        let w = 0
         const children = doc.body.children
         for (let ci = 0; ci < children.length; ci++) {
           const child = children[ci] as HTMLElement
           if (child.tagName === 'STYLE' || child.tagName === 'SCRIPT') continue
           const bottom = child.offsetTop + child.offsetHeight
+          const right = child.offsetLeft + child.offsetWidth
           if (bottom > h) h = bottom
+          if (right > w) w = right
         }
-        // Fallback: if no children measured, use body
         if (h < 50) h = Math.max(doc.body.scrollHeight, doc.body.offsetHeight)
-        // Add small padding
+        if (w < 50) w = doc.body.scrollWidth
         h += 20
+        w += 20
+
+        // Auto-adjust width if content is wider than current width (and no manual override)
+        if (w > width && w < 5000 && !manualWidth) {
+          setManualWidth(w)
+        }
+
         if (h > 100 && h < 10000) {
           const measured = Math.max(h, minHeight)
           // #region agent log
@@ -2154,8 +2168,9 @@ function ScreenCard({
     }
   }, [screen.html, isFixedHeight, minHeight, iframeMounted]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const height = contentHeight
-  const displayWidth = width * scale
+  const effectiveWidth = manualWidth || width
+  const height = manualHeight || contentHeight
+  const displayWidth = effectiveWidth * scale
   const displayHeight = height * scale
 
   const isEditable = isSelected && editMode
@@ -2369,7 +2384,7 @@ body>*{min-height:0!important;}
           sandbox={isFixedHeight ? 'allow-scripts' : 'allow-scripts allow-same-origin'}
           className={isEditable ? '' : 'pointer-events-none'}
           style={{
-            width: width,
+            width: effectiveWidth,
             height: height,
             transform: `scale(${scale})`,
             transformOrigin: '0 0',
@@ -2454,9 +2469,91 @@ body>*{min-height:0!important;}
             })}
           </div>
         )}
+
+        {/* Resize handles — right, bottom, corner */}
+        {isSelected && !isGenerating && (
+          <>
+            {/* Right handle */}
+            <div
+              className="absolute right-0 top-0 w-2 h-full cursor-ew-resize hover:bg-blue-500/20 transition-colors z-20"
+              onMouseDown={(e) => {
+                e.stopPropagation()
+                e.preventDefault()
+                resizingRef.current = { type: 'right', startX: e.clientX, startY: e.clientY, startW: effectiveWidth, startH: height }
+                const onMove = (ev: MouseEvent) => {
+                  if (!resizingRef.current) return
+                  const delta = (ev.clientX - resizingRef.current.startX) / scale
+                  setManualWidth(Math.max(200, resizingRef.current.startW + delta))
+                }
+                const onUp = () => {
+                  if (resizingRef.current && onResize) {
+                    onResize(screen.id, manualWidth || effectiveWidth, manualHeight || height)
+                  }
+                  resizingRef.current = null
+                  document.removeEventListener('mousemove', onMove)
+                  document.removeEventListener('mouseup', onUp)
+                }
+                document.addEventListener('mousemove', onMove)
+                document.addEventListener('mouseup', onUp)
+              }}
+            />
+            {/* Bottom handle */}
+            <div
+              className="absolute bottom-0 left-0 w-full h-2 cursor-ns-resize hover:bg-blue-500/20 transition-colors z-20"
+              onMouseDown={(e) => {
+                e.stopPropagation()
+                e.preventDefault()
+                resizingRef.current = { type: 'bottom', startX: e.clientX, startY: e.clientY, startW: effectiveWidth, startH: height }
+                const onMove = (ev: MouseEvent) => {
+                  if (!resizingRef.current) return
+                  const delta = (ev.clientY - resizingRef.current.startY) / scale
+                  setManualHeight(Math.max(200, resizingRef.current.startH + delta))
+                }
+                const onUp = () => {
+                  if (resizingRef.current && onResize) {
+                    onResize(screen.id, manualWidth || effectiveWidth, manualHeight || height)
+                  }
+                  resizingRef.current = null
+                  document.removeEventListener('mousemove', onMove)
+                  document.removeEventListener('mouseup', onUp)
+                }
+                document.addEventListener('mousemove', onMove)
+                document.addEventListener('mouseup', onUp)
+              }}
+            />
+            {/* Corner handle */}
+            <div
+              className="absolute right-0 bottom-0 w-4 h-4 cursor-nwse-resize z-20 flex items-center justify-center"
+              onMouseDown={(e) => {
+                e.stopPropagation()
+                e.preventDefault()
+                resizingRef.current = { type: 'corner', startX: e.clientX, startY: e.clientY, startW: effectiveWidth, startH: height }
+                const onMove = (ev: MouseEvent) => {
+                  if (!resizingRef.current) return
+                  const dx = (ev.clientX - resizingRef.current.startX) / scale
+                  const dy = (ev.clientY - resizingRef.current.startY) / scale
+                  setManualWidth(Math.max(200, resizingRef.current.startW + dx))
+                  setManualHeight(Math.max(200, resizingRef.current.startH + dy))
+                }
+                const onUp = () => {
+                  if (resizingRef.current && onResize) {
+                    onResize(screen.id, manualWidth || effectiveWidth, manualHeight || height)
+                  }
+                  resizingRef.current = null
+                  document.removeEventListener('mousemove', onMove)
+                  document.removeEventListener('mouseup', onUp)
+                }
+                document.addEventListener('mousemove', onMove)
+                document.addEventListener('mouseup', onUp)
+              }}
+            >
+              <svg className="w-3 h-3 text-blue-400 opacity-50" viewBox="0 0 10 10"><path d="M9 1L1 9M9 5L5 9M9 9L9 9" stroke="currentColor" strokeWidth="1.5" fill="none" /></svg>
+            </div>
+          </>
+        )}
       </div>
       {isSelected && !isEditable && !showHeatmap && (
-        <div className="text-[10px] text-blue-500 mt-1 text-center">{width} x {height}</div>
+        <div className="text-[10px] text-blue-500 mt-1 text-center">{effectiveWidth} x {height}</div>
       )}
       {isEditable && (
         <div className="text-[10px] text-blue-500 mt-1 text-center">Click an element to select it</div>
