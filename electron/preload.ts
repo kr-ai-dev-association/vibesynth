@@ -58,8 +58,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Live Edit popup
   liveEdit: {
     open: () => ipcRenderer.invoke('live-edit:open'),
-    updateFeedback: (message: string, type: 'success' | 'error' | 'generating') =>
-      ipcRenderer.invoke('live-edit:update-feedback', message, type),
+    updateFeedback: (message: string, type: 'success' | 'error' | 'generating', devMarkdown?: string) =>
+      ipcRenderer.invoke('live-edit:update-feedback', message, type, devMarkdown),
     close: () => ipcRenderer.invoke('live-edit:close'),
   },
 

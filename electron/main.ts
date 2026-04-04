@@ -537,47 +537,76 @@ ipcMain.handle('live-edit:open', () => {
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f17;color:#e2e8f0;display:flex;flex-direction:column;height:100vh}
-  .header{padding:12px 16px;border-bottom:1px solid #1e1e2e;display:flex;align-items:center;gap:8px;-webkit-app-region:drag}
+  .header{padding:10px 16px;border-bottom:1px solid #1e1e2e;display:flex;align-items:center;justify-content:space-between;-webkit-app-region:drag}
   .header .logo{font-size:13px;font-weight:600;color:#a5b4fc}
-  .content{flex:1;display:flex;flex-direction:column;padding:16px;gap:12px;overflow-y:auto}
+  .mode-toggle{display:flex;gap:2px;background:#1a1a2e;border-radius:8px;padding:2px;-webkit-app-region:no-drag}
+  .mode-btn{padding:4px 10px;font-size:11px;font-weight:600;border:none;border-radius:6px;cursor:pointer;transition:all 0.15s;background:transparent;color:#64748b}
+  .mode-btn.active{color:white}
+  .mode-btn.designer.active{background:#7c3aed}
+  .mode-btn.developer.active{background:#3b82f6}
+  .content{flex:1;display:flex;flex-direction:column;padding:12px 16px;gap:10px;overflow-y:auto}
   .input-area{display:flex;gap:8px}
-  textarea{flex:1;background:#1a1a2e;border:1px solid #2d2d44;border-radius:10px;padding:10px 14px;color:#e2e8f0;font-size:13px;resize:none;outline:none;font-family:inherit;min-height:60px}
+  textarea{flex:1;background:#1a1a2e;border:1px solid #2d2d44;border-radius:10px;padding:10px 14px;color:#e2e8f0;font-size:13px;resize:none;outline:none;font-family:inherit;min-height:50px}
   textarea:focus{border-color:#7c3aed}
   textarea::placeholder{color:#4a4a6a}
-  button.submit{background:#7c3aed;color:white;border:none;border-radius:10px;padding:10px 20px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+  button.submit{background:#7c3aed;color:white;border:none;border-radius:10px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:background 0.15s}
   button.submit:hover{background:#6d28d9}
   button.submit:disabled{opacity:0.4;cursor:not-allowed}
-  .feedback{font-size:12px;line-height:1.6;color:#94a3b8;white-space:pre-wrap;max-height:180px;overflow-y:auto;padding:10px;background:#1a1a2e;border-radius:8px}
+  .feedback{font-size:12px;line-height:1.6;color:#94a3b8;white-space:pre-wrap;max-height:200px;overflow-y:auto;padding:10px;background:#1a1a2e;border-radius:8px;display:none}
+  .feedback.visible{display:block}
   .feedback.success{border-left:3px solid #34d399}
   .feedback.error{border-left:3px solid #f87171}
   .feedback.generating{border-left:3px solid #fbbf24}
-  .status{font-size:11px;color:#64748b;text-align:center;padding:4px}
+  .feedback h3{font-size:11px;font-weight:700;margin-bottom:4px;color:#a5b4fc}
+  .feedback pre{background:#000;padding:8px;border-radius:6px;font-size:10px;overflow-x:auto;margin:4px 0}
+  .feedback code{background:#ffffff10;padding:1px 4px;border-radius:3px;font-size:10px}
+  .status{font-size:11px;color:#64748b;text-align:center;padding:2px}
+  @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 </style></head><body>
-<div class="header"><span class="logo">✦ Live Edit</span></div>
+<div class="header">
+  <span class="logo">✦ Live Edit</span>
+  <div class="mode-toggle">
+    <button class="mode-btn designer active" id="le-mode-designer" onclick="setMode('designer')">🎨 Designer</button>
+    <button class="mode-btn developer" id="le-mode-developer" onclick="setMode('developer')">💻 Developer</button>
+  </div>
+</div>
 <div class="content">
   <div class="input-area">
-    <textarea id="le-input" rows="2" placeholder="Describe changes to apply to the live app..."></textarea>
+    <textarea id="le-input" rows="2" placeholder="Describe changes to apply..."></textarea>
     <button class="submit" id="le-submit">Apply</button>
   </div>
-  <div class="feedback" id="le-feedback" style="display:none"></div>
+  <div class="feedback" id="le-feedback"></div>
   <div class="status" id="le-status"></div>
 </div>
 <script>
+  let currentMode = localStorage.getItem('vibesynth-live-feedback-mode') || 'designer';
   const input = document.getElementById('le-input');
   const submit = document.getElementById('le-submit');
   const feedback = document.getElementById('le-feedback');
   const status = document.getElementById('le-status');
+  const designerBtn = document.getElementById('le-mode-designer');
+  const developerBtn = document.getElementById('le-mode-developer');
+
+  function setMode(mode) {
+    currentMode = mode;
+    localStorage.setItem('vibesynth-live-feedback-mode', mode);
+    designerBtn.className = 'mode-btn designer' + (mode === 'designer' ? ' active' : '');
+    developerBtn.className = 'mode-btn developer' + (mode === 'developer' ? ' active' : '');
+  }
+  // Init mode from localStorage
+  setMode(currentMode);
 
   async function handleSubmit() {
     const prompt = input.value.trim();
     if (!prompt) return;
     submit.disabled = true;
     status.textContent = 'Applying changes...';
-    feedback.style.display = 'none';
+    feedback.className = 'feedback generating visible';
+    feedback.innerHTML = '<div style="display:flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="animation:spin 1s linear infinite"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" opacity="0.2"/><path d="M12 2a10 10 0 019.95 9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg> Processing...</div>';
     try {
-      await window.electronAPI?.sendLiveEditResult?.({ success: false, message: '' });
-      // The actual edit is handled by the main editor via IPC
-      // We just send the request through the existing live-edit-request channel
+      // Send edit request via IPC — the main editor handles it
+      // The prompt and mode are sent together
+      await window.electronAPI?.sendLiveEditResult?.({ success: false, message: '', devMarkdown: '' });
     } catch {}
   }
 
@@ -593,15 +622,39 @@ ipcMain.handle('live-edit:open', () => {
   liveEditWindow.on('closed', () => { liveEditWindow = null })
 })
 
-ipcMain.handle('live-edit:update-feedback', (_event, message: string, type: 'success' | 'error' | 'generating') => {
+ipcMain.handle('live-edit:update-feedback', (_event, message: string, type: 'success' | 'error' | 'generating', devMarkdown?: string) => {
   if (liveEditWindow) {
+    const escapedMsg = JSON.stringify(message)
+    const escapedMd = devMarkdown ? JSON.stringify(devMarkdown) : 'null'
     liveEditWindow.webContents.executeJavaScript(`
-      const fb = document.getElementById('le-feedback');
-      const st = document.getElementById('le-status');
-      const sub = document.getElementById('le-submit');
-      if (fb) { fb.textContent = ${JSON.stringify(message)}; fb.className = 'feedback ${type}'; fb.style.display = 'block'; }
-      if (st) { st.textContent = '${type === 'success' ? '✓ Applied' : type === 'error' ? '✗ Failed' : '⏳ Processing...'}'; }
-      if (sub) { sub.disabled = ${type === 'generating'}; }
+      (function() {
+        const fb = document.getElementById('le-feedback');
+        const st = document.getElementById('le-status');
+        const sub = document.getElementById('le-submit');
+        const md = ${escapedMd};
+        const mode = localStorage.getItem('vibesynth-live-feedback-mode') || 'designer';
+
+        if (fb) {
+          if (mode === 'developer' && md) {
+            // Developer mode: show markdown diff
+            let html = md
+              .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+              .replace(/^## (.+)$/gm, '<h3 style="color:#a5b4fc">$1</h3>')
+              .replace(/\`\`\`([\\s\\S]*?)\`\`\`/g, '<pre>$1</pre>')
+              .replace(/\`([^\`]+)\`/g, '<code>$1</code>')
+              .replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>')
+              .replace(/^- (.+)$/gm, '• $1');
+            fb.innerHTML = html;
+          } else {
+            // Designer mode: friendly text
+            fb.textContent = ${escapedMsg};
+          }
+          fb.className = 'feedback ${type} visible';
+        }
+        if (st) { st.textContent = '${type === 'success' ? '✓ Applied' : type === 'error' ? '✗ Failed' : '⏳ Processing...'}'; }
+        if (sub) { sub.disabled = ${type === 'generating'}; }
+        if ('${type}' === 'success' && sub) { document.getElementById('le-input').value = ''; }
+      })();
     `)
   }
 })

@@ -1087,22 +1087,23 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             prompt, targetFile, beforeContent.slice(0, 500), updated.slice(0, 500), locale,
           )
           addLog(friendlyMsg, 'success')
-          window.electronAPI?.feedback.show(friendlyMsg, 'designer')
+          window.electronAPI?.liveEdit.updateFeedback(friendlyMsg, 'success')
           window.electronAPI?.sendLiveEditResult({ success: true, message: friendlyMsg })
         } else {
           const md = buildLiveEditDeveloperMarkdown(prompt, targetFile, beforeContent, updated, locale)
-          setDevMarkdown(md)
           addLog(t('editor.log.liveEditApplied'), 'success')
-          window.electronAPI?.feedback.show(md, 'developer')
+          window.electronAPI?.liveEdit.updateFeedback('Changes applied', 'success', md)
           window.electronAPI?.sendLiveEditResult({ success: true, message: 'Changes applied', devMarkdown: md })
         }
       } catch (err: any) {
         if (feedbackMode === 'designer') {
           const friendlyErr = await paraphraseLiveEditFailure(prompt, err.message, locale).catch(() => err.message)
           addLog(friendlyErr, 'error')
+          window.electronAPI?.liveEdit.updateFeedback(friendlyErr, 'error')
           window.electronAPI?.sendLiveEditResult({ success: false, message: friendlyErr })
         } else {
           addLog(t('editor.log.liveEditFailed', { error: err.message }), 'error')
+          window.electronAPI?.liveEdit.updateFeedback(err.message, 'error')
           window.electronAPI?.sendLiveEditResult({ success: false, message: err.message })
         }
       }
