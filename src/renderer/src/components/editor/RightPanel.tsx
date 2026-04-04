@@ -176,27 +176,50 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
   const [stealUrlValue, setStealUrlValue] = useState('')
   const [stealUrlLoading, setStealUrlLoading] = useState(false)
 
-  const isPlaceholder = designSystem.name === 'Generating...'
+  // Pending changes — accumulated until "Apply" button is clicked
+  const [pendingDS, setPendingDS] = useState<DesignSystem>(designSystem)
+  const [hasChanges, setHasChanges] = useState(false)
+
+  // Sync when external designSystem changes (e.g., loaded from DB)
+  useMemo(() => {
+    setPendingDS(designSystem)
+    setHasChanges(false)
+    setNameValue(designSystem.name)
+  }, [designSystem.name, designSystem.colors.primary.base]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const updatePending = (ds: DesignSystem) => {
+    setPendingDS(ds)
+    setHasChanges(true)
+  }
+
+  const applyChanges = () => {
+    if (onDesignSystemUpdate && hasChanges) {
+      onDesignSystemUpdate(pendingDS)
+      setHasChanges(false)
+    }
+  }
+
+  const isPlaceholder = pendingDS.name === 'Generating...'
 
   const saveNameEdit = () => {
-    if (nameValue.trim() && onDesignSystemUpdate) {
-      onDesignSystemUpdate({ ...designSystem, name: nameValue.trim() })
+    if (nameValue.trim()) {
+      updatePending({ ...pendingDS, name: nameValue.trim() })
     }
     setEditingName(false)
   }
 
   const saveColorEdit = () => {
-    if (!editingColor || !onDesignSystemUpdate || !/^#[0-9a-fA-F]{3,8}$/.test(colorValue)) {
+    if (!editingColor || !/^#[0-9a-fA-F]{3,8}$/.test(colorValue)) {
       setEditingColor(null)
       return
     }
-    const roleKey = editingColor.role.toLowerCase() as keyof typeof designSystem.colors
-    const role = designSystem.colors[roleKey]
+    const roleKey = editingColor.role.toLowerCase() as keyof typeof pendingDS.colors
+    const role = pendingDS.colors[roleKey]
     if (!role) { setEditingColor(null); return }
     const newTones = [...role.tones]
     newTones[editingColor.index] = colorValue
     const newBase = editingColor.index === 6 ? colorValue : role.base
-    onDesignSystemUpdate({
+    updatePending({
       ...designSystem,
       colors: { ...designSystem.colors, [roleKey]: { base: newBase, tones: newTones } },
     })
@@ -204,12 +227,12 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
   }
 
   const saveFontEdit = () => {
-    if (!editingFont || !fontValue.trim() || !onDesignSystemUpdate) { setEditingFont(null); return }
-    const level = editingFont as keyof typeof designSystem.typography
-    if (designSystem.typography[level]?.family === fontValue.trim()) { setEditingFont(null); return }
-    onDesignSystemUpdate({
-      ...designSystem,
-      typography: { ...designSystem.typography, [level]: { ...designSystem.typography[level], family: fontValue.trim() } },
+    if (!editingFont || !fontValue.trim()) { setEditingFont(null); return }
+    const level = editingFont as keyof typeof pendingDS.typography
+    if (pendingDS.typography[level]?.family === fontValue.trim()) { setEditingFont(null); return }
+    updatePending({
+      ...pendingDS,
+      typography: { ...pendingDS.typography, [level]: { ...pendingDS.typography[level], family: fontValue.trim() } },
     })
     setEditingFont(null)
   }
@@ -230,7 +253,7 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
       dosAndDonts: designSystem.guide?.dosAndDonts || '',
       [editingGuideKey]: editValue,
     }
-    onDesignSystemUpdate({ ...designSystem, guide: updatedGuide })
+    updatePending({ ...pendingDS, guide: updatedGuide })
     setEditingGuideKey(null)
   }
 
@@ -261,10 +284,10 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
   }
 
   const colorRoles = [
-    { label: t('panel.primary'), roleKey: 'Primary', ...designSystem.colors.primary },
-    { label: t('panel.secondary'), roleKey: 'Secondary', ...designSystem.colors.secondary },
-    { label: t('panel.tertiary'), roleKey: 'Tertiary', ...designSystem.colors.tertiary },
-    { label: t('panel.neutral'), roleKey: 'Neutral', ...designSystem.colors.neutral },
+    { label: t('panel.primary'), roleKey: 'Primary', ...pendingDS.colors.primary },
+    { label: t('panel.secondary'), roleKey: 'Secondary', ...pendingDS.colors.secondary },
+    { label: t('panel.tertiary'), roleKey: 'Tertiary', ...pendingDS.colors.tertiary },
+    { label: t('panel.neutral'), roleKey: 'Neutral', ...pendingDS.colors.neutral },
   ]
 
   return (
@@ -302,7 +325,7 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
             <button
               key={mode}
               data-testid={`scheme-${mode}`}
-              onClick={() => onDesignSystemUpdate({ ...designSystem, colorScheme: mode })}
+              onClick={() => updatePending({ ...pendingDS, colorScheme: mode })}
               className={`px-2 py-0.5 text-[10px] font-medium rounded-md transition-colors ${
                 (designSystem.colorScheme || 'auto') === mode
                   ? 'bg-neutral-200 dark:bg-neutral-600 text-neutral-800 dark:text-white'
@@ -313,6 +336,17 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
             </button>
           ))}
         </div>
+      )}
+
+      {/* Apply Changes button — visible when there are pending changes */}
+      {hasChanges && (
+        <button
+          data-testid="apply-ds-changes"
+          onClick={applyChanges}
+          className="w-full py-2 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors shadow-sm"
+        >
+          ✓ Apply Changes to Screens
+        </button>
       )}
 
       {/* Save / Load buttons */}
