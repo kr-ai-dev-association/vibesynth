@@ -424,6 +424,14 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     }
   }
 
+  // Helper: set screen(s) to blur state during LLM processing
+  const setScreensGenerating = (screenIds: string[], generating: boolean) => {
+    const updated = project.screens.map(s =>
+      screenIds.includes(s.id) ? { ...s, generating } : s
+    )
+    onProjectUpdate({ ...project, screens: updated })
+  }
+
   const handleEditScreen = async (prompt: string) => {
     if (isGenerating || !selectedScreen) return
 
@@ -437,13 +445,14 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     setAgentLogOpen(true)
 
     if (isGlobalEdit && project.screens.length > 1) {
-      // ─── Batch edit: apply to all screens (Stitch parity) ───
+      // ─── Batch edit: apply to all screens ───
+      setScreensGenerating(project.screens.map(s => s.id), true) // blur all
       const logId = addLog(t('editor.log.batchEditing', { count: project.screens.length, prompt }), 'generating')
 
       try {
         const editPromises = project.screens.map(async (s) => {
           const newHtml = await editDesign(s.html, prompt)
-          return { ...s, html: newHtml }
+          return { ...s, html: newHtml, generating: false }
         })
 
         const updatedScreens = await Promise.all(editPromises)
@@ -478,6 +487,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       }
     } else {
       // ─── Single screen edit ───
+      setScreensGenerating([screen.id], true) // blur this screen
       const logId = addLog(t('editor.log.editing', { screen: screen.name, prompt }), 'generating')
 
       try {
@@ -485,7 +495,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         updateLog(logId, t('editor.log.updatedScreen', { name: screen.name }), 'success')
 
         const updatedScreens = project.screens.map((s) =>
-          s.id === screen.id ? { ...s, html: newHtml } : s
+          s.id === screen.id ? { ...s, html: newHtml, generating: false } : s
         )
         onProjectUpdate({
           ...project,
@@ -523,6 +533,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
 
     setIsGenerating(true)
     setAgentLogOpen(true)
+    setScreensGenerating([screen.id], true) // blur
     const logId = addLog(t('editor.log.editingElement', { tag: selectedElement.tagName, screen: screen.name, prompt }), 'generating')
 
     try {
@@ -531,7 +542,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       updateLog(logId, t('editor.log.updatedElement', { name: screen.name }), 'success')
 
       const updatedScreens = project.screens.map((s) =>
-        s.id === screen.id ? { ...s, html: newHtml } : s
+        s.id === screen.id ? { ...s, html: newHtml, generating: false } : s
       )
       onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
       setSelectedElement(null)
@@ -642,7 +653,8 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         )
         onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
       } else {
-        // For AI-powered actions (make-prominent, improve-hierarchy), use Gemini
+        // For AI-powered actions — blur during processing
+        setScreensGenerating([screen.id], true)
         const actionPrompts: Record<string, string> = {
           'make-prominent': `Make this UI element more visually prominent. Increase size slightly, bolder colors, more contrast. Keep content.`,
           'improve-hierarchy': `Improve visual hierarchy: adjust font weight, size, color contrast, spacing. Keep content.`,
@@ -658,7 +670,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         const newHtml = await editDesignElement(screen.html, zone.cssPath, outerHtml, prompt)
         updateLog(logId, `Applied "${action}" to <${zone.tagName}> in ${screenName}`, 'success')
         const updatedScreens = project.screens.map((s) =>
-          s.id === screen.id ? { ...s, html: newHtml } : s
+          s.id === screen.id ? { ...s, html: newHtml, generating: false } : s
         )
         onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
       }
@@ -671,6 +683,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       updateLog(logId, t('editor.log.actionFailed', { action, error: message }), 'error')
+      setScreensGenerating([screen.id], false) // remove blur on error
     } finally {
       setIsGenerating(false)
     }
@@ -724,6 +737,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
 
     setIsGenerating(true)
     setAgentLogOpen(true)
+    setScreensGenerating([screen.id], true) // blur
     const logId = addLog(t('editor.log.regenerating', { name: screen.name }), 'generating')
 
     try {
@@ -731,12 +745,13 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       if (results[0]) {
         updateLog(logId, t('editor.log.regenerated', { name: screen.name }), 'success')
         const updatedScreens = project.screens.map((s) =>
-          s.id === screen.id ? { ...s, html: results[0].html } : s
+          s.id === screen.id ? { ...s, html: results[0].html, generating: false } : s
         )
         onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
       }
     } catch (err) {
       updateLog(logId, t('editor.log.regenerateFailed', { error: err instanceof Error ? err.message : 'Unknown error' }), 'error')
+      setScreensGenerating([screen.id], false)
     } finally {
       setIsGenerating(false)
     }
