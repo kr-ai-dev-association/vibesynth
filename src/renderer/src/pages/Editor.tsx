@@ -2119,14 +2119,10 @@ function ScreenCard({
         }
         if (h < 50) h = Math.max(doc.body.scrollHeight, doc.body.offsetHeight)
 
-        // Width: use scrollWidth which detects horizontal overflow
-        const w = doc.body.scrollWidth + 20
         h += 20
 
-        // Auto-adjust width if content is wider than default (only when no manual override)
-        if (w > width && w < 5000 && !manualWidth) {
-          setManualWidth(w)
-        }
+        // Width is NOT auto-adjusted — use drag resize handles instead.
+        // body.scrollWidth is unreliable (returns iframe width, not content width).
 
         // Auto-adjust height (only when no manual override)
         if (!manualHeight && h > 100 && h < 10000) {
