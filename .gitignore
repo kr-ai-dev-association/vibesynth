@@ -6,3 +6,4 @@ dist-electron/
 screenshots/
 test-results/
 *.log
+*.tsbuildinfo
