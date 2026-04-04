@@ -10,7 +10,8 @@ export default defineConfig({
   retries: 0,
   outputDir: 'test-results',
   webServer: {
-    command: 'VIBESYNTH_NO_ELECTRON=1 ELECTRON_RUN_AS_NODE= npx vite --port 5199',
+    // Kill any existing process on port 5199 before starting
+    command: 'lsof -ti :5199 | xargs kill -9 2>/dev/null; sleep 1; VIBESYNTH_NO_ELECTRON=1 ELECTRON_RUN_AS_NODE= npx vite --port 5199 --strictPort',
     port: 5199,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
