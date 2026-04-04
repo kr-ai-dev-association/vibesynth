@@ -673,6 +673,58 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     setSelectedScreen(null)
   }
 
+  const handleGenerateVariation = async () => {
+    if (!selectedScreen || isGenerating) return
+    const screen = project.screens.find((s) => s.name === selectedScreen)
+    if (!screen) return
+
+    setIsGenerating(true)
+    setAgentLogOpen(true)
+    const logId = addLog(`Generating layout variation for "${screen.name}"...`, 'generating')
+
+    try {
+      const dsTokens = project.designSystem ? formatDSForVariation(project.designSystem) : ''
+      const results = await generateDesign(
+        `Create a completely different layout variation of the "${screen.name}" screen. ` +
+        `The content and functionality must be the same, but use a DIFFERENT layout structure: ` +
+        `different grid arrangement, different card sizes, different component ordering, different navigation placement. ` +
+        `Keep the same design system (colors, fonts, spacing).${dsTokens}`,
+        deviceType,
+        activeGuide,
+        undefined,
+        screen.html,
+        project.designSystem,
+      )
+
+      if (results[0]) {
+        const variation: Screen = {
+          id: crypto.randomUUID(),
+          name: `${screen.name} (variation)`,
+          html: results[0].html,
+        }
+
+        // Insert variation right after the original screen
+        const idx = project.screens.findIndex((s) => s.id === screen.id)
+        const newScreens = [...project.screens]
+        newScreens.splice(idx + 1, 0, variation)
+
+        onProjectUpdate({ ...project, screens: newScreens, updatedAt: new Date().toLocaleDateString() })
+        updateLog(logId, `Variation created: "${variation.name}"`, 'success')
+        setSelectedScreen(variation.name)
+      }
+    } catch (err) {
+      updateLog(logId, `Variation failed: ${err instanceof Error ? err.message : 'Unknown'}`, 'error')
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  function formatDSForVariation(ds: any): string {
+    if (!ds?.colors?.primary?.base) return ''
+    return ` Use exactly these colors: primary ${ds.colors.primary.base}, secondary ${ds.colors.secondary.base}, ` +
+      `font: ${ds.typography?.headline?.family || 'auto'}.`
+  }
+
   const handleScreenAction = (action: string) => {
     setContextMenu(null)
 
@@ -731,7 +783,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         addLog(t('editor.log.alwaysOnTop'), 'info')
         break
       case 'variations':
-        addLog(t('common.comingSoon', { action: 'Variations' }), 'info')
+        handleGenerateVariation()
         break
       case 'desktop-web':
         addLog(t('common.comingSoon', { action: 'Desktop web version' }), 'info')
@@ -1136,8 +1188,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             {showHamburger && (
               <div className="absolute top-full left-0 mt-1 w-52 bg-white dark:bg-neutral-800 rounded-xl shadow-lg border border-neutral-200 dark:border-neutral-700 py-1 z-50">
                 <MenuItem icon="←" label={t('editor.menu.goToProjects')} onClick={() => { setShowHamburger(false); onBack() }} />
-                <MenuItem icon="📁" label={t('editor.menu.openFolder')} onClick={() => setShowHamburger(false)} />
-                <MenuItem icon="📝" label={t('editor.menu.openExtEditor')} onClick={() => setShowHamburger(false)} />
+                {/* Open project folder / Open in external editor 제거됨 */}
                 <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-1" />
                 <MenuItem icon="🎨" label={t('editor.menu.appearance')} onClick={() => {
                   setShowHamburger(false)
@@ -1254,7 +1305,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             <ToolButton icon={<SelectIcon />} title={t('editor.tool.select')} label={leftSidebarWidth > 80 ? t('editor.tool.select') : undefined} />
             <ToolButton icon={<PenIcon />} title={t('editor.tool.pen')} label={leftSidebarWidth > 80 ? t('editor.tool.pen') : undefined} />
             <div className="h-px w-6 bg-neutral-200 dark:bg-neutral-700 my-1 self-center" />
-            <ToolButton icon={<MicIcon />} title={t('editor.tool.voice')} label={leftSidebarWidth > 80 ? t('editor.tool.voiceShort') : undefined} />
+            {/* 마이크 아이콘 제거됨 */}
             <ToolButton icon={<ImageIcon />} title={t('editor.tool.image')} label={leftSidebarWidth > 80 ? t('editor.tool.image') : undefined} />
           </div>
           {/* Resize handle */}
