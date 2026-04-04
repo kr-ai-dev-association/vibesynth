@@ -34,6 +34,7 @@ export function PromptBar({
 }: PromptBarProps) {
   const { t } = useI18n()
   const [prompt, setPrompt] = useState('')
+  const [attachedFiles, setAttachedFiles] = useState<{ name: string; type: string; content: string }[]>([])
   const [model, setModel] = useState('3.0 Flash')
   const [showModelMenu, setShowModelMenu] = useState(false)
 
@@ -46,8 +47,16 @@ export function PromptBar({
 
   const handleSubmit = () => {
     if (prompt.trim()) {
-      onSubmit(prompt.trim())
+      // Append text file contents to prompt for AI context
+      let fullPrompt = prompt.trim()
+      for (const file of attachedFiles) {
+        if (!file.type.startsWith('image/')) {
+          fullPrompt += `\n\n--- Attached file: ${file.name} ---\n${file.content.slice(0, 3000)}`
+        }
+      }
+      onSubmit(fullPrompt)
       setPrompt('')
+      setAttachedFiles([])
     }
   }
 
@@ -88,6 +97,19 @@ export function PromptBar({
         </div>
       )}
 
+      {/* Attached files */}
+      {attachedFiles.length > 0 && (
+        <div className="px-4 pt-2 flex flex-wrap gap-1.5">
+          {attachedFiles.map((file, i) => (
+            <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full bg-neutral-100 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300">
+              {file.type.startsWith('image/') ? '🖼' : file.name.endsWith('.csv') ? '📊' : '📄'}
+              {file.name}
+              <button onClick={() => setAttachedFiles(prev => prev.filter((_, j) => j !== i))} className="ml-0.5 hover:text-red-500">✕</button>
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Text input */}
       <textarea
         value={prompt}
@@ -106,8 +128,35 @@ export function PromptBar({
       {/* Bottom toolbar */}
       <div className="flex items-center justify-between px-3 pb-2.5">
         <div className="flex items-center gap-1">
-          {/* Add file */}
-          <button className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700" title={t('promptBar.chooseFile')}>
+          {/* Add file — supports image, txt, csv, md */}
+          <button
+            className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700"
+            title={t('promptBar.chooseFile')}
+            onClick={() => {
+              const input = document.createElement('input')
+              input.type = 'file'
+              input.accept = 'image/*,.txt,.csv,.md,.markdown'
+              input.multiple = true
+              input.onchange = () => {
+                const files = Array.from(input.files || [])
+                files.forEach(file => {
+                  const reader = new FileReader()
+                  reader.onload = () => {
+                    const content = file.type.startsWith('image/')
+                      ? (reader.result as string) // data URL for images
+                      : (reader.result as string) // text content
+                    setAttachedFiles(prev => [...prev, { name: file.name, type: file.type, content }])
+                  }
+                  if (file.type.startsWith('image/')) {
+                    reader.readAsDataURL(file)
+                  } else {
+                    reader.readAsText(file)
+                  }
+                })
+              }
+              input.click()
+            }}
+          >
             <PlusIcon className="w-4 h-4" />
           </button>
 

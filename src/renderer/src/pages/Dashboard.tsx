@@ -277,7 +277,7 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
           />
 
           {/* Prompt Input */}
-          <div className="w-full max-w-2xl">
+          <div className="w-full max-w-3xl">
             <PromptBar
               placeholder={
                 deviceType === 'app'
@@ -454,7 +454,7 @@ function DesignSystemPicker({ selectedId, onSelect }: { selectedId: string | nul
   const [expanded, setExpanded] = useState(false)
 
   return (
-    <div className="w-full max-w-2xl mb-4">
+    <div className="w-full max-w-3xl mb-4">
       <button
         onClick={() => setExpanded(!expanded)}
         className="flex items-center gap-2 text-xs text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors mx-auto"
@@ -470,7 +470,7 @@ function DesignSystemPicker({ selectedId, onSelect }: { selectedId: string | nul
       </button>
 
       {expanded && (
-        <div className="mt-3 grid grid-cols-4 sm:grid-cols-5 md:grid-cols-7 gap-2 max-w-2xl" data-testid="design-system-picker-grid">
+        <div className="mt-3 grid grid-cols-5 sm:grid-cols-6 md:grid-cols-8 gap-2 w-full" data-testid="design-system-picker-grid">
           <button
             onClick={() => { onSelect(null); setExpanded(false) }}
             className={`rounded-xl border-2 transition-all p-1.5 ${
