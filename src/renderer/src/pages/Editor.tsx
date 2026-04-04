@@ -2108,22 +2108,20 @@ function ScreenCard({
         // #region agent log
         // #endregion
         if (!doc || !doc.body) return
-        // Calculate actual content dimensions by finding the bottommost/rightmost child
+        // Calculate actual content dimensions
         let h = 0
-        let w = 0
         const children = doc.body.children
         for (let ci = 0; ci < children.length; ci++) {
           const child = children[ci] as HTMLElement
           if (child.tagName === 'STYLE' || child.tagName === 'SCRIPT') continue
           const bottom = child.offsetTop + child.offsetHeight
-          const right = child.offsetLeft + child.offsetWidth
           if (bottom > h) h = bottom
-          if (right > w) w = right
         }
         if (h < 50) h = Math.max(doc.body.scrollHeight, doc.body.offsetHeight)
-        if (w < 50) w = doc.body.scrollWidth
+
+        // Width: use scrollWidth which detects horizontal overflow
+        const w = doc.body.scrollWidth + 20
         h += 20
-        w += 20
 
         // Auto-adjust width if content is wider than default (only when no manual override)
         if (w > width && w < 5000 && !manualWidth) {
