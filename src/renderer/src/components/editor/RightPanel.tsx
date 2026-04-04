@@ -18,6 +18,7 @@ interface RightPanelProps {
   onDesignSystemUpdate?: (ds: DesignSystem) => void
   onSaveDesignSystem?: () => void
   onLoadDesignSystem?: (id: string) => void
+  getDesignSystemById?: (id: string) => DesignSystem | undefined
   onDeleteDesignSystem?: (id: string) => void
   savedDesignSystems?: SavedEntry[]
   onStealDesign?: (query: string) => void
@@ -25,7 +26,7 @@ interface RightPanelProps {
   onConnectPinterest?: () => void
 }
 
-export function RightPanel({ designSystem, screenNames, selectedScreen, onSelectScreen, onDesignSystemUpdate, onSaveDesignSystem, onLoadDesignSystem, onDeleteDesignSystem, savedDesignSystems, onStealDesign, onStealUrl, onConnectPinterest }: RightPanelProps) {
+export function RightPanel({ designSystem, screenNames, selectedScreen, onSelectScreen, onDesignSystemUpdate, onSaveDesignSystem, onLoadDesignSystem, getDesignSystemById, onDeleteDesignSystem, savedDesignSystems, onStealDesign, onStealUrl, onConnectPinterest }: RightPanelProps) {
   const { t } = useI18n()
   const [isOpen, setIsOpen] = useState(true)
   const [tab, setTab] = useState<PanelTab>('design')
@@ -78,7 +79,7 @@ export function RightPanel({ designSystem, screenNames, selectedScreen, onSelect
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {tab === 'design' && (
-          <DesignTab designSystem={designSystem} onCopy={handleCopy} copiedValue={copiedValue} onDesignSystemUpdate={onDesignSystemUpdate} onSave={onSaveDesignSystem} onLoad={onLoadDesignSystem} onDelete={onDeleteDesignSystem} savedSystems={savedDesignSystems} onSteal={onStealDesign} onStealUrl={onStealUrl} onConnect={onConnectPinterest} />
+          <DesignTab designSystem={designSystem} onCopy={handleCopy} copiedValue={copiedValue} onDesignSystemUpdate={onDesignSystemUpdate} onSave={onSaveDesignSystem} onLoad={onLoadDesignSystem} getById={getDesignSystemById} onDelete={onDeleteDesignSystem} savedSystems={savedDesignSystems} onSteal={onStealDesign} onStealUrl={onStealUrl} onConnect={onConnectPinterest} />
         )}
         {tab === 'components' && (
           <ComponentsTab designSystem={designSystem} />
@@ -158,9 +159,9 @@ function RecommendedDesigns({ onLoad }: { onLoad: (id: string) => void }) {
 }
 
 // === Design Tab ===
-function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, onSave, onLoad, onDelete, savedSystems, onSteal, onStealUrl, onConnect }: {
+function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, onSave, onLoad, getById, onDelete, savedSystems, onSteal, onStealUrl, onConnect }: {
   designSystem: DesignSystem; onCopy: (v: string) => void; copiedValue: string | null; onDesignSystemUpdate?: (ds: DesignSystem) => void
-  onSave?: () => void; onLoad?: (id: string) => void; onDelete?: (id: string) => void; savedSystems?: SavedEntry[]; onSteal?: (query: string) => void; onStealUrl?: (url: string) => void; onConnect?: () => void
+  onSave?: () => void; onLoad?: (id: string) => void; getById?: (id: string) => DesignSystem | undefined; onDelete?: (id: string) => void; savedSystems?: SavedEntry[]; onSteal?: (query: string) => void; onStealUrl?: (url: string) => void; onConnect?: () => void
 }) {
   const { t } = useI18n()
   const [editingGuideKey, setEditingGuideKey] = useState<keyof DesignGuide | null>(null)
@@ -370,7 +371,13 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
             <div className="flex-1 relative group">
               <select
                 data-testid="load-design-system"
-                onChange={(e) => { if (e.target.value) onLoad(e.target.value); e.target.value = '' }}
+                onChange={(e) => {
+                  if (e.target.value && getById) {
+                    const ds = getById(e.target.value)
+                    if (ds) updatePending(ds)
+                  }
+                  e.target.value = ''
+                }}
                 className="w-full text-[10px] font-medium px-2 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-600 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
                 defaultValue=""
               >
@@ -391,7 +398,14 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
           {savedSystems.filter(s => !s.id.startsWith('pin-')).map(s => (
             <div key={s.id} className="flex items-center gap-1 group">
               <button
-                onClick={() => onLoad?.(s.id)}
+                onClick={() => {
+                  if (getById) {
+                    const ds = getById(s.id)
+                    if (ds) updatePending(ds)
+                  } else {
+                    onLoad?.(s.id)
+                  }
+                }}
                 className="flex-1 text-left text-[10px] px-2 py-1 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-700 truncate"
               >
                 {s.name}
@@ -411,7 +425,11 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
 
       {/* Recommended Design Systems */}
       {onLoad && (
-        <RecommendedDesigns onLoad={onLoad} />
+        <RecommendedDesigns onLoad={(id) => {
+          // Preview recommended DS in pending state
+          const d = PINTEREST_DESIGNS.find(p => p.id === id)
+          if (d) updatePending(d.designSystem)
+        }} />
       )}
 
       {/* Pinterest Design Steal */}

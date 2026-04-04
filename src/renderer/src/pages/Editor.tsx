@@ -1736,6 +1736,10 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             designGuideDB.delete(id)
             addLog(`Design system deleted`, 'info')
           }}
+          getDesignSystemById={(id) => {
+            const entry = designGuideDB.getById(id)
+            return entry?.designSystem
+          }}
           savedDesignSystems={designGuideDB.getAllWithDesignSystem().map(e => ({ id: e.id, name: e.name, savedAt: e.createdAt }))}
           onStealDesign={(query) => {
             if (!window.electronAPI?.pinterest) {
