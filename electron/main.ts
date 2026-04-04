@@ -605,9 +605,16 @@ ipcMain.handle('project:export-to-folder', (_event, projectId: string, destPath:
   const projectDir = getProjectDir(projectId)
   const dest = expandUserPath(destPath)
   try {
+    if (!fs.existsSync(projectDir)) {
+      return { success: false, error: `Project directory not found: ${projectDir}` }
+    }
+    const files = listRelativePathsSync(projectDir)
+    if (files.length === 0) {
+      return { success: false, error: 'Project has no files to export' }
+    }
     ensureDir(dest)
     copyProjectTree(projectDir, dest)
-    return { success: true, path: dest }
+    return { success: true, path: dest, fileCount: files.length }
   } catch (err: any) {
     return { success: false, error: err.message }
   }

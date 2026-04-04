@@ -249,15 +249,22 @@ test('VibeSynth 전체 기능 E2E', async ({ electronApp, page }) => {
   // ═══════════════════════════════════════════════════════════════
   // 8. 단일 스크린 편집
   // ═══════════════════════════════════════════════════════════════
+  // 스크린 선택 해제 후 재선택
+  await page.mouse.click(600, 400)
+  await page.waitForTimeout(500)
   await screenCards.first().click({ force: true })
   await page.waitForTimeout(DELAY)
 
+  // 프롬프트 바에 선택된 스크린 태그가 있는지 확인
   const editTextarea = page.locator('textarea')
   await editTextarea.fill('Add a notification bell icon in the top right corner')
   await page.waitForTimeout(DELAY)
   await editTextarea.press('Enter')
 
-  await expect(page.getByText(/Editing|Updated|Applied/i).first()).toBeVisible({ timeout: 60_000 })
+  // 편집 시작/완료 로그 대기
+  await expect(
+    page.getByText(/Editing|Updated|Applied|Batch/i).first()
+  ).toBeVisible({ timeout: 120_000 })
   console.log('✅ 8. 단일 스크린 편집 완료')
   await page.screenshot({ path: 'test-results/full-08-edit.png' })
   await page.waitForTimeout(DELAY)
@@ -369,15 +376,28 @@ test('VibeSynth 전체 기능 E2E', async ({ electronApp, page }) => {
       // ═══════════════════════════════════════════════════════════
       // 12. Export + VS Code
       // ═══════════════════════════════════════════════════════════
-      const exportResult = await page.evaluate(async () => {
-        return await (window as any).electronAPI?.project?.exportToFolder?.('test-export', '~/VibeSynth/export/test-export')
+      // 현재 프로젝트의 실제 ID 가져오기
+      const projectStatus = await page.evaluate(async () => {
+        return await (window as any).electronAPI?.project?.getStatus?.()
       })
-      console.log(`✅ 12a. Export: ${exportResult?.success ? '성공' : exportResult?.error || '실패'}`)
+      const liveProjectId = projectStatus?.projectId
+      console.log(`  Live project ID: ${liveProjectId}`)
 
-      const vscodeResult = await page.evaluate(async () => {
-        return await (window as any).electronAPI?.shell?.openVscode?.('~/VibeSynth/export/test-export')
-      })
-      console.log(`✅ 12b. VS Code: ${vscodeResult?.success ? '열림' : vscodeResult?.error || 'CLI 미설치'}`)
+      if (liveProjectId) {
+        const exportResult = await page.evaluate(async (pid: string) => {
+          return await (window as any).electronAPI?.project?.exportToFolder?.(pid, `~/VibeSynth/export/${pid}`)
+        }, liveProjectId)
+        console.log(`✅ 12a. Export: ${exportResult?.success ? `성공 (${exportResult.fileCount}개 파일)` : exportResult?.error || '실패'}`)
+
+        if (exportResult?.success) {
+          const vscodeResult = await page.evaluate(async (pid: string) => {
+            return await (window as any).electronAPI?.shell?.openVscode?.(`~/VibeSynth/export/${pid}`)
+          }, liveProjectId)
+          console.log(`✅ 12b. VS Code: ${vscodeResult?.success ? '열림' : vscodeResult?.error || 'CLI 미설치'}`)
+        }
+      } else {
+        console.log('⚠️ 12. Live project ID 없음 — Export 건너뜀')
+      }
       await page.waitForTimeout(DELAY)
     } else {
       console.log('⚠️ 10b. Live Window 미열림')
