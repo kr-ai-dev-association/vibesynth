@@ -60,8 +60,35 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   // Left toolbar active tool
   type CanvasTool = 'cursor' | 'select' | 'pen' | 'image'
   const [activeTool, setActiveTool] = useState<CanvasTool>('cursor')
+
+  // Multi-screen selection helpers
+  const toggleScreenInSelection = (name: string) => {
+    setSelectedScreens(prev => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
+
+  const clearMultiSelection = () => {
+    setSelectedScreens(new Set())
+  }
+
+  const handleScreenClick = (screenName: string) => {
+    if (activeTool === 'select') {
+      // Multi-select mode: toggle screen in selection set
+      toggleScreenInSelection(screenName)
+      setSelectedScreen(screenName)
+    } else {
+      // Cursor mode: single select
+      setSelectedScreen(selectedScreen === screenName ? null : screenName)
+      setSelectedScreens(new Set())
+    }
+  }
   const [agentLogOpen, setAgentLogOpen] = useState(true)
   const [selectedScreen, setSelectedScreen] = useState<string | null>(null)
+  const [selectedScreens, setSelectedScreens] = useState<Set<string>>(new Set())
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [logEntries, setLogEntries] = useState<AgentLogEntry[]>([])
@@ -1307,8 +1334,64 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           </button>
         </div>
 
-        {/* Screen context toolbar - shown when a screen is selected */}
-        {selectedScreen && (
+        {/* Multi-select toolbar — shown when multiple screens are selected */}
+        {selectedScreens.size >= 2 && (
+          <div className="absolute left-1/2 -translate-x-1/2 top-1 z-40">
+            <div className="flex items-center gap-2 bg-violet-600 dark:bg-violet-700 text-white px-4 py-2 rounded-xl shadow-lg text-sm">
+              <span className="font-semibold">{selectedScreens.size} screens selected</span>
+              <div className="w-px h-4 bg-violet-400" />
+              <button
+                onClick={() => {
+                  // Batch delete
+                  const updated = project.screens.filter(s => !selectedScreens.has(s.name))
+                  onProjectUpdate({ ...project, screens: updated, updatedAt: new Date().toLocaleDateString() })
+                  addLog(`Deleted ${selectedScreens.size} screens`, 'info')
+                  clearMultiSelection()
+                  setSelectedScreen(null)
+                }}
+                className="px-2 py-0.5 rounded-lg hover:bg-violet-500 text-xs font-medium"
+              >
+                🗑 Delete All
+              </button>
+              <button
+                onClick={async () => {
+                  // Batch edit — open prompt
+                  const prompt = window.prompt('Edit all selected screens:')
+                  if (!prompt) return
+                  setIsGenerating(true)
+                  addLog(`Batch editing ${selectedScreens.size} screens: "${prompt}"`, 'generating')
+                  try {
+                    const targets = project.screens.filter(s => selectedScreens.has(s.name))
+                    const promises = targets.map(s => editDesign(s.html, prompt).then(html => ({ ...s, html })))
+                    const updated = await Promise.all(promises)
+                    const newScreens = project.screens.map(s => {
+                      const u = updated.find(us => us.id === s.id)
+                      return u || s
+                    })
+                    onProjectUpdate({ ...project, screens: newScreens, updatedAt: new Date().toLocaleDateString() })
+                    addLog(`Batch updated ${updated.length} screens`, 'success')
+                  } catch (err: any) {
+                    addLog(`Batch edit failed: ${err.message}`, 'error')
+                  } finally {
+                    setIsGenerating(false)
+                  }
+                }}
+                className="px-2 py-0.5 rounded-lg hover:bg-violet-500 text-xs font-medium"
+              >
+                ✏️ Edit All
+              </button>
+              <button
+                onClick={clearMultiSelection}
+                className="px-2 py-0.5 rounded-lg hover:bg-violet-500 text-xs"
+              >
+                ✕ Clear
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Screen context toolbar - shown when single screen is selected */}
+        {selectedScreen && selectedScreens.size < 2 && (
           <div className="absolute left-1/2 -translate-x-1/2 top-1 z-40">
             <ScreenContextToolbar
               screenName={selectedScreen}
@@ -1327,7 +1410,15 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         >
           <div className={`flex flex-col gap-1 ${leftSidebarWidth > 80 ? 'items-start px-2' : 'items-center'}`}>
             <ToolButton icon={<CursorIcon />} title={t('editor.tool.cursor')} active={activeTool === 'cursor'} label={leftSidebarWidth > 80 ? t('editor.tool.cursor') : undefined} onClick={() => setActiveTool('cursor')} />
-            <ToolButton icon={<SelectIcon />} title={t('editor.tool.select')} active={activeTool === 'select'} label={leftSidebarWidth > 80 ? t('editor.tool.select') : undefined} onClick={() => setActiveTool('select')} />
+            <ToolButton icon={<SelectIcon />} title={t('editor.tool.select')} active={activeTool === 'select'} label={leftSidebarWidth > 80 ? t('editor.tool.select') : undefined} onClick={() => {
+              if (activeTool === 'select') {
+                setActiveTool('cursor')
+                clearMultiSelection()
+              } else {
+                setActiveTool('select')
+                addLog('Multi-select mode: click screens to select/deselect. Shift+click also works in cursor mode.', 'info')
+              }
+            }} />
             <ToolButton icon={<PenIcon />} title={t('editor.tool.pen')} active={activeTool === 'pen'} label={leftSidebarWidth > 80 ? t('editor.tool.pen') : undefined} onClick={() => { setActiveTool('pen'); addLog('Pen tool — coming soon', 'info') }} />
             <div className="h-px w-6 bg-neutral-200 dark:bg-neutral-700 my-1 self-center" />
             {/* 마이크 아이콘 제거됨 */}
@@ -1394,12 +1485,13 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                       width={screenWidth}
                       minHeight={screenMinHeight}
                       isSelected={selectedScreen === screen.name}
+                      isMultiSelected={selectedScreens.has(screen.name)}
                       editMode={editMode}
                       heatmapMode={heatmapMode}
                       heatmapZones={heatmapData.get(screen.id)}
                       deviceType={deviceType}
                       onClick={() => {
-                        if (!editMode && !heatmapMode) setSelectedScreen(selectedScreen === screen.name ? null : screen.name)
+                        if (!editMode && !heatmapMode) handleScreenClick(screen.name)
                       }}
                       onContextMenu={(e) => {
                         e.preventDefault()
@@ -1825,11 +1917,11 @@ function intensityBorder(intensity: number): string {
 }
 
 function ScreenCard({
-  screen, width, minHeight, isSelected, deviceType, editMode, heatmapMode, heatmapZones,
+  screen, width, minHeight, isSelected, isMultiSelected, deviceType, editMode, heatmapMode, heatmapZones,
   onClick, onContextMenu, onElementSelect, onHeatmapZoneClick, onHeightMeasured,
 }: {
   screen: Screen; width: number; minHeight: number; deviceType: 'app' | 'web' | 'tablet'
-  isSelected?: boolean; editMode?: boolean; heatmapMode?: boolean; heatmapZones?: HeatmapZone[]
+  isSelected?: boolean; isMultiSelected?: boolean; editMode?: boolean; heatmapMode?: boolean; heatmapZones?: HeatmapZone[]
   onClick?: () => void; onContextMenu?: (e: React.MouseEvent) => void
   onElementSelect?: (info: { cssPath: string; tagName: string; textPreview: string; outerHtml: string }) => void
   onHeatmapZoneClick?: (zone: HeatmapZone, x: number, y: number) => void
@@ -2096,6 +2188,9 @@ html,body,[data-vs-root]{height:auto!important;max-height:none!important;overflo
       onContextMenu={onContextMenu}
     >
       <div className="flex items-center gap-1 mb-1 text-xs text-neutral-500">
+        {isMultiSelected && (
+          <span className="w-3.5 h-3.5 rounded-sm bg-violet-500 text-white flex items-center justify-center text-[9px] font-bold shrink-0">✓</span>
+        )}
         {deviceType === 'app' ? <PhoneSmallIcon /> : deviceType === 'tablet' ? <TabletSmallIcon /> : <MonitorSmallIcon />}
         <span>{screen.name}</span>
         {isEditable && (
@@ -2115,6 +2210,8 @@ html,body,[data-vs-root]{height:auto!important;max-height:none!important;overflo
             ? 'border-orange-500 shadow-lg shadow-orange-500/30 ring-2 ring-orange-500/20'
             : isEditable
             ? 'border-blue-500 shadow-lg shadow-blue-500/30 ring-2 ring-blue-500/20'
+            : isMultiSelected
+            ? 'border-violet-500 shadow-lg shadow-violet-500/20 ring-2 ring-violet-500/20'
             : isSelected
             ? 'border-blue-500 shadow-lg shadow-blue-500/20'
             : 'border-neutral-200 dark:border-neutral-600 hover:border-neutral-400'
