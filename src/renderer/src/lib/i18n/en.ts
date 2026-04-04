@@ -243,6 +243,7 @@ export const en = {
   'panel.editThemeName': 'Click to edit theme name',
   'panel.saveDS': 'Save Design System',
   'panel.loadSaved': 'Load Saved...',
+  'panel.savedSystems': 'Saved Design Systems',
   'panel.recommendedDesigns': 'Recommended Designs',
   'panel.stealDesign': 'Steal Design',
   'panel.browsePinterest': 'Browse Pinterest',

@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import type { DesignSystem, DesignGuide } from '../../App'
 import { PINTEREST_DESIGNS } from '../../lib/pinterest-designs'
 import { useI18n } from '../../lib/i18n'
+import { GOOGLE_FONTS as GOOGLE_FONTS_LIST } from '../../lib/google-fonts'
 
 type PanelTab = 'design' | 'components' | 'layers'
 
@@ -17,13 +18,14 @@ interface RightPanelProps {
   onDesignSystemUpdate?: (ds: DesignSystem) => void
   onSaveDesignSystem?: () => void
   onLoadDesignSystem?: (id: string) => void
+  onDeleteDesignSystem?: (id: string) => void
   savedDesignSystems?: SavedEntry[]
   onStealDesign?: (query: string) => void
   onStealUrl?: (url: string) => void
   onConnectPinterest?: () => void
 }
 
-export function RightPanel({ designSystem, screenNames, selectedScreen, onSelectScreen, onDesignSystemUpdate, onSaveDesignSystem, onLoadDesignSystem, savedDesignSystems, onStealDesign, onStealUrl, onConnectPinterest }: RightPanelProps) {
+export function RightPanel({ designSystem, screenNames, selectedScreen, onSelectScreen, onDesignSystemUpdate, onSaveDesignSystem, onLoadDesignSystem, onDeleteDesignSystem, savedDesignSystems, onStealDesign, onStealUrl, onConnectPinterest }: RightPanelProps) {
   const { t } = useI18n()
   const [isOpen, setIsOpen] = useState(true)
   const [tab, setTab] = useState<PanelTab>('design')
@@ -76,7 +78,7 @@ export function RightPanel({ designSystem, screenNames, selectedScreen, onSelect
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {tab === 'design' && (
-          <DesignTab designSystem={designSystem} onCopy={handleCopy} copiedValue={copiedValue} onDesignSystemUpdate={onDesignSystemUpdate} onSave={onSaveDesignSystem} onLoad={onLoadDesignSystem} savedSystems={savedDesignSystems} onSteal={onStealDesign} onStealUrl={onStealUrl} onConnect={onConnectPinterest} />
+          <DesignTab designSystem={designSystem} onCopy={handleCopy} copiedValue={copiedValue} onDesignSystemUpdate={onDesignSystemUpdate} onSave={onSaveDesignSystem} onLoad={onLoadDesignSystem} onDelete={onDeleteDesignSystem} savedSystems={savedDesignSystems} onSteal={onStealDesign} onStealUrl={onStealUrl} onConnect={onConnectPinterest} />
         )}
         {tab === 'components' && (
           <ComponentsTab designSystem={designSystem} />
@@ -156,9 +158,9 @@ function RecommendedDesigns({ onLoad }: { onLoad: (id: string) => void }) {
 }
 
 // === Design Tab ===
-function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, onSave, onLoad, savedSystems, onSteal, onStealUrl, onConnect }: {
+function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, onSave, onLoad, onDelete, savedSystems, onSteal, onStealUrl, onConnect }: {
   designSystem: DesignSystem; onCopy: (v: string) => void; copiedValue: string | null; onDesignSystemUpdate?: (ds: DesignSystem) => void
-  onSave?: () => void; onLoad?: (id: string) => void; savedSystems?: SavedEntry[]; onSteal?: (query: string) => void; onStealUrl?: (url: string) => void; onConnect?: () => void
+  onSave?: () => void; onLoad?: (id: string) => void; onDelete?: (id: string) => void; savedSystems?: SavedEntry[]; onSteal?: (query: string) => void; onStealUrl?: (url: string) => void; onConnect?: () => void
 }) {
   const { t } = useI18n()
   const [editingGuideKey, setEditingGuideKey] = useState<keyof DesignGuide | null>(null)
@@ -292,6 +294,27 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
         )}
       </div>
 
+      {/* Dark / Light mode switch */}
+      {onDesignSystemUpdate && (
+        <div className="flex items-center gap-1" data-testid="color-scheme-switch">
+          <span className="text-[10px] text-neutral-400 mr-1">Mode:</span>
+          {(['light', 'auto', 'dark'] as const).map((mode) => (
+            <button
+              key={mode}
+              data-testid={`scheme-${mode}`}
+              onClick={() => onDesignSystemUpdate({ ...designSystem, colorScheme: mode })}
+              className={`px-2 py-0.5 text-[10px] font-medium rounded-md transition-colors ${
+                (designSystem.colorScheme || 'auto') === mode
+                  ? 'bg-neutral-200 dark:bg-neutral-600 text-neutral-800 dark:text-white'
+                  : 'text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300'
+              }`}
+            >
+              {mode === 'light' ? '☀️ Light' : mode === 'dark' ? '🌙 Dark' : '🔄 Auto'}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Save / Load buttons */}
       {(onSave || (savedSystems && savedSystems.length > 0)) && (
         <div className="flex items-center gap-1.5">
@@ -304,19 +327,46 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
               {t('panel.saveDS')}
             </button>
           )}
-          {onLoad && savedSystems && savedSystems.length > 0 && (
-            <select
-              data-testid="load-design-system"
-              onChange={(e) => { if (e.target.value) onLoad(e.target.value); e.target.value = '' }}
-              className="flex-1 text-[10px] font-medium px-2 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-600 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
-              defaultValue=""
-            >
-              <option value="" disabled>{t('panel.loadSaved')}</option>
-              {savedSystems.filter(s => !s.id.startsWith('pin-')).map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
+          {onLoad && savedSystems && savedSystems.filter(s => !s.id.startsWith('pin-')).length > 0 && (
+            <div className="flex-1 relative group">
+              <select
+                data-testid="load-design-system"
+                onChange={(e) => { if (e.target.value) onLoad(e.target.value); e.target.value = '' }}
+                className="w-full text-[10px] font-medium px-2 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-600 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
+                defaultValue=""
+              >
+                <option value="" disabled>{t('panel.loadSaved')}</option>
+                {savedSystems.filter(s => !s.id.startsWith('pin-')).map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
           )}
+        </div>
+      )}
+
+      {/* Saved design systems with delete */}
+      {onDelete && savedSystems && savedSystems.filter(s => !s.id.startsWith('pin-')).length > 0 && (
+        <div className="space-y-1">
+          <span className="text-[10px] font-medium text-neutral-400">{t('panel.savedSystems')}</span>
+          {savedSystems.filter(s => !s.id.startsWith('pin-')).map(s => (
+            <div key={s.id} className="flex items-center gap-1 group">
+              <button
+                onClick={() => onLoad?.(s.id)}
+                className="flex-1 text-left text-[10px] px-2 py-1 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-700 truncate"
+              >
+                {s.name}
+              </button>
+              <button
+                data-testid={`delete-ds-${s.id}`}
+                onClick={() => onDelete(s.id)}
+                className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-red-100 dark:hover:bg-red-900/30 text-neutral-400 hover:text-red-500 transition-all"
+                title="Delete"
+              >
+                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
@@ -473,15 +523,19 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
             <div key={level} className="bg-neutral-50 dark:bg-neutral-700/50 rounded-lg px-3 py-2 group">
               <div className="flex items-center justify-between">
                 {editingFont === level ? (
-                  <input
-                    data-testid={`font-edit-${level}`}
+                  <select
+                    data-testid={`font-select-${level}`}
                     autoFocus
                     value={fontValue}
-                    onChange={(e) => setFontValue(e.target.value)}
+                    onChange={(e) => { setFontValue(e.target.value); }}
                     onBlur={saveFontEdit}
-                    onKeyDown={(e) => { if (e.key === 'Enter') saveFontEdit(); if (e.key === 'Escape') setEditingFont(null); }}
-                    className="flex-1 text-[11px] bg-transparent border-b border-blue-400 outline-none mr-2"
-                  />
+                    className="flex-1 text-[11px] bg-white dark:bg-neutral-700 border border-blue-400 rounded-md px-1.5 py-0.5 outline-none mr-2"
+                  >
+                    {!(GOOGLE_FONTS_LIST as readonly string[]).includes(fontValue) && <option value={fontValue}>{fontValue}</option>}
+                    {GOOGLE_FONTS_LIST.map(f => (
+                      <option key={f} value={f}>{f}</option>
+                    ))}
+                  </select>
                 ) : (
                   <button
                     className="text-left flex-1"

@@ -245,6 +245,7 @@ const _ko: Record<keyof typeof en, string> = {
   'panel.editThemeName': '테마 이름 수정하려면 클릭',
   'panel.saveDS': '디자인 시스템 저장',
   'panel.loadSaved': '저장된 시스템 불러오기...',
+  'panel.savedSystems': '저장된 디자인 시스템',
   'panel.recommendedDesigns': '추천 디자인',
   'panel.stealDesign': '디자인 훔치기',
   'panel.browsePinterest': 'Pinterest 둘러보기',

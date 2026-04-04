@@ -1670,6 +1670,10 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             onProjectUpdate({ ...project, screens: updatedScreens, designSystem: newDs, updatedAt: new Date().toLocaleDateString() })
             addLog(t('editor.log.dsLoaded', { name: newDs.name, count: updatedScreens.filter((s, i) => s !== project.screens[i]).length }), 'success')
           }}
+          onDeleteDesignSystem={(id) => {
+            designGuideDB.delete(id)
+            addLog(`Design system deleted`, 'info')
+          }}
           savedDesignSystems={designGuideDB.getAllWithDesignSystem().map(e => ({ id: e.id, name: e.name, savedAt: e.createdAt }))}
           onStealDesign={(query) => {
             if (!window.electronAPI?.pinterest) {
