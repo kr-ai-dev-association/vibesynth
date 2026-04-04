@@ -1796,12 +1796,14 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                   }
                 }
 
+                // Save stolen DS to recommended list
                 designGuideDB.saveFromGeneration(
                   newDs.name,
-                  'Pinterest design steal',
+                  `Stolen from Pinterest: ${imageUrl.substring(0, 60)}`,
                   newDs.guide || { overview: '', colorRules: '', typographyRules: '', elevationRules: '', componentRules: '', dosAndDonts: '' },
                   newDs
                 )
+                addLog(`"${newDs.name}" added to saved design systems`, 'info')
 
                 onProjectUpdate({
                   ...project,

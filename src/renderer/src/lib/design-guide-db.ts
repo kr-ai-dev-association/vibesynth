@@ -159,7 +159,7 @@ class DesignGuideStore {
 
     const entry: DesignGuideEntry = {
       id: `gen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name: `${projectName} Guide`,
+      name: projectName,
       keywords,
       mood,
       domains,
