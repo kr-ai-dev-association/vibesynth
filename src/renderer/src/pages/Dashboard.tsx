@@ -40,6 +40,7 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
   }, [])
   const [searchQuery, setSearchQuery] = useState('')
   const [deviceType, setDeviceType] = useState<'app' | 'web' | 'tablet'>('app')
+  const [colorScheme, setColorScheme] = useState<'light' | 'dark' | 'auto'>('auto')
   const [selectedDesignId, setSelectedDesignId] = useState<string | null>(null)
   const [sidebarTab, setSidebarTab] = useState<'my' | 'shared'>('my')
   const [showMoreMenu, setShowMoreMenu] = useState(false)
@@ -288,6 +289,8 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
               }
               deviceType={deviceType}
               onDeviceTypeChange={setDeviceType}
+              colorScheme={colorScheme}
+              onColorSchemeChange={setColorScheme}
               onSubmit={(prompt) => onCreateProject(prompt, deviceType, selectedDesignSystem)}
             />
           </div>
