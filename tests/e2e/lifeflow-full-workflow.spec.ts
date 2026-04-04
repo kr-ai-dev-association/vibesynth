@@ -437,7 +437,7 @@ test('LifeFlow Dashboard: PRD → 디자인 선택 → 3+페이지 생성 → Li
   const stopBtn = page.getByRole('button', { name: /Stop/i })
   if (await stopBtn.isVisible().catch(() => false)) {
     await stopBtn.click({ force: true })
-    await expect(page.getByRole('button', { name: /Run/i })).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('button').filter({ hasText: '▶ Run' }).first()).toBeVisible({ timeout: 10_000 })
   }
   await page.waitForTimeout(DELAY)
   await page.screenshot({ path: 'test-results/lf-15-complete.png' })

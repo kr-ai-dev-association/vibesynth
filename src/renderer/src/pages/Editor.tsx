@@ -10,6 +10,7 @@ import { DEFAULT_DESIGN_GUIDE } from '../lib/default-design-guide'
 import { designGuideDB } from '../lib/design-guide-db'
 import { useI18n } from '../lib/i18n'
 import { paraphraseLiveEditForDesigner, paraphraseLiveEditFailure } from '../lib/gemini'
+import { generatePrdPrompt } from '../lib/prd-generator'
 import { buildLiveEditDeveloperMarkdown } from '../lib/live-diff'
 
 export interface AgentLogEntry {
@@ -589,13 +590,13 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     }
   }
 
-  const handlePromptSubmit = (prompt: string) => {
+  const handlePromptSubmit = async (prompt: string) => {
     if (editMode && selectedElement && selectedScreen) {
       handleElementEdit(prompt)
     } else if (selectedScreen && project.screens.some((s) => s.name === selectedScreen)) {
       handleEditScreen(prompt)
     } else {
-      // Inject color scheme hint into prompt if not 'auto'
+      // Inject color scheme hint
       let enhancedPrompt = prompt
       if (colorScheme === 'light' && !/light|bright|white/i.test(prompt)) {
         enhancedPrompt += '. Use a LIGHT theme with bright, white/cream backgrounds. NO dark backgrounds.'
@@ -603,7 +604,21 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         enhancedPrompt += '. Use a DARK theme with dark/black backgrounds and light text.'
       }
 
-      const multiMatch = enhancedPrompt.match(/screens?\s*:\s*(.+)/i)
+      // Auto-detect multi-screen prompt or apply PRD generation
+      let multiMatch = enhancedPrompt.match(/screens?\s*:\s*(.+)/i)
+
+      // If no screens: syntax, auto-generate PRD-style screen names
+      if (!multiMatch && project.screens.length === 0) {
+        try {
+          const prd = await generatePrdPrompt(enhancedPrompt, deviceType)
+          if (prd.screenNames.length >= 2) {
+            addLog(`Auto-detected ${prd.screenNames.length} screens: ${prd.screenNames.join(', ')}`, 'info')
+            handleGenerateMultiScreen(enhancedPrompt, prd.screenNames)
+            return
+          }
+        } catch { /* fallback to single screen */ }
+      }
+
       if (multiMatch) {
         const screenNames = multiMatch[1].split(/[,;]/).map(s => s.trim()).filter(Boolean)
         const appDescription = enhancedPrompt.replace(multiMatch[0], '').trim()
@@ -2239,53 +2254,94 @@ function HeatmapActionMenu({ x, y, zone, onAction, onClose }: {
     return () => document.removeEventListener('mousedown', handler)
   }, [onClose])
 
-  const clampedX = Math.min(x, window.innerWidth - 260)
-  const clampedY = Math.min(y, window.innerHeight - 340)
+  const clampedX = Math.min(x, window.innerWidth - 300)
+  const clampedY = Math.min(y, window.innerHeight - 420)
+
+  const intensityColor = zone.intensity > 0.7
+    ? 'text-red-500 bg-red-500/10 border-red-500/20'
+    : zone.intensity > 0.4
+    ? 'text-orange-500 bg-orange-500/10 border-orange-500/20'
+    : 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20'
+
+  const interactions = [
+    { id: 'hover-effect', icon: '👆', label: 'Hover Effect', desc: 'Scale up + shadow on hover', color: 'from-blue-500/10 to-cyan-500/10' },
+    { id: 'click-animation', icon: '💫', label: 'Click Animation', desc: 'Ripple or bounce on click', color: 'from-violet-500/10 to-purple-500/10' },
+    { id: 'focus-state', icon: '🔲', label: 'Focus Ring', desc: 'Accessibility focus indicator', color: 'from-emerald-500/10 to-green-500/10' },
+  ]
+
+  const enhancements = [
+    { id: 'make-prominent', icon: '🔍', label: 'Boost Visibility', desc: 'Increase size and contrast', color: 'from-amber-500/10 to-orange-500/10' },
+    { id: 'improve-hierarchy', icon: '📊', label: 'Fix Hierarchy', desc: 'Adjust visual weight', color: 'from-rose-500/10 to-pink-500/10' },
+    { id: 'micro-animation', icon: '✨', label: 'Micro-animation', desc: 'Subtle fade, pulse, or float', color: 'from-indigo-500/10 to-blue-500/10' },
+  ]
 
   return (
     <div
       ref={menuRef}
-      className="fixed z-[100] w-60 bg-white dark:bg-neutral-800 rounded-xl shadow-xl border border-neutral-200 dark:border-neutral-700 py-1 text-sm"
+      className="fixed z-[100] w-72 bg-white dark:bg-neutral-800 rounded-2xl shadow-2xl border border-neutral-200 dark:border-neutral-700 overflow-hidden text-sm"
       style={{ left: clampedX, top: clampedY }}
     >
-      <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-700">
-        <div className="text-xs font-semibold text-orange-600 dark:text-orange-400">{zone.label}</div>
-        <div className="text-[10px] text-neutral-500 mt-0.5">{zone.reason}</div>
-        <div className="text-[10px] text-neutral-400 mt-0.5">Attention: {Math.round(zone.intensity * 100)}%</div>
+      {/* Header — element info + attention bar */}
+      <div className="px-4 py-3 border-b border-neutral-100 dark:border-neutral-700/50">
+        <div className="flex items-center gap-2 mb-2">
+          <span className={`text-xs font-bold px-2 py-0.5 rounded-full border ${intensityColor}`}>
+            {Math.round(zone.intensity * 100)}%
+          </span>
+          <span className="text-xs font-semibold truncate">{zone.label}</span>
+        </div>
+        <div className="text-[10px] text-neutral-500 dark:text-neutral-400 leading-relaxed">{zone.reason}</div>
+        {/* Attention bar */}
+        <div className="mt-2 h-1.5 bg-neutral-100 dark:bg-neutral-700 rounded-full overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all"
+            style={{
+              width: `${zone.intensity * 100}%`,
+              background: zone.intensity > 0.7 ? '#ef4444' : zone.intensity > 0.4 ? '#f97316' : '#eab308',
+            }}
+          />
+        </div>
       </div>
 
-      <div className="py-1">
-        <div className="px-3 pt-1.5 pb-0.5 text-[10px] font-semibold text-neutral-400 tracking-wider">ADD INTERACTION</div>
-        <button onClick={() => onAction('hover-effect')} className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-700">
-          <span>Hover effect</span>
-          <span className="text-xs text-neutral-400">scale + shadow</span>
-        </button>
-        <button onClick={() => onAction('click-animation')} className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-700">
-          <span>Click animation</span>
-          <span className="text-xs text-neutral-400">ripple / bounce</span>
-        </button>
-        <button onClick={() => onAction('focus-state')} className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-700">
-          <span>Focus state</span>
-          <span className="text-xs text-neutral-400">a11y ring</span>
-        </button>
+      {/* Interaction effects */}
+      <div className="px-2 pt-2 pb-1">
+        <div className="px-2 text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-1.5">Interactions</div>
+        <div className="space-y-1">
+          {interactions.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => onAction(item.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-gradient-to-r ${item.color} transition-all group`}
+            >
+              <span className="text-base group-hover:scale-110 transition-transform">{item.icon}</span>
+              <div className="text-left">
+                <div className="text-xs font-medium">{item.label}</div>
+                <div className="text-[10px] text-neutral-400">{item.desc}</div>
+              </div>
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="h-px bg-neutral-200 dark:bg-neutral-700" />
+      <div className="h-px mx-3 bg-neutral-100 dark:bg-neutral-700/50" />
 
-      <div className="py-1">
-        <div className="px-3 pt-1.5 pb-0.5 text-[10px] font-semibold text-neutral-400 tracking-wider">AI ENHANCE</div>
-        <button onClick={() => onAction('make-prominent')} className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-700">
-          <span>Make more prominent</span>
-          <span className="text-xs text-neutral-400">size + contrast</span>
-        </button>
-        <button onClick={() => onAction('improve-hierarchy')} className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-700">
-          <span>Improve hierarchy</span>
-          <span className="text-xs text-neutral-400">visual weight</span>
-        </button>
-        <button onClick={() => onAction('micro-animation')} className="w-full flex items-center justify-between px-3 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-700">
-          <span>Add micro-animation</span>
-          <span className="text-xs text-neutral-400">fade / pulse / float</span>
-        </button>
+      {/* AI enhancements */}
+      <div className="px-2 pt-2 pb-2">
+        <div className="px-2 text-[10px] font-semibold text-neutral-400 dark:text-neutral-500 uppercase tracking-wider mb-1.5">AI Enhance</div>
+        <div className="space-y-1">
+          {enhancements.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => onAction(item.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-gradient-to-r ${item.color} transition-all group`}
+            >
+              <span className="text-base group-hover:scale-110 transition-transform">{item.icon}</span>
+              <div className="text-left">
+                <div className="text-xs font-medium">{item.label}</div>
+                <div className="text-[10px] text-neutral-400">{item.desc}</div>
+              </div>
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   )
