@@ -54,6 +54,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   const [isRunning, setIsRunning] = useState(false)
   const [showHamburger, setShowHamburger] = useState(false)
   const [deviceType, setDeviceType] = useState<'app' | 'web' | 'tablet'>(project.deviceType)
+  const [colorScheme, setColorScheme] = useState<'light' | 'dark' | 'auto'>(project.designSystem?.colorScheme || 'auto')
   const [agentLogOpen, setAgentLogOpen] = useState(true)
   const [selectedScreen, setSelectedScreen] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
@@ -594,16 +595,24 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     } else if (selectedScreen && project.screens.some((s) => s.name === selectedScreen)) {
       handleEditScreen(prompt)
     } else {
-      const multiMatch = prompt.match(/screens?\s*:\s*(.+)/i)
+      // Inject color scheme hint into prompt if not 'auto'
+      let enhancedPrompt = prompt
+      if (colorScheme === 'light' && !/light|bright|white/i.test(prompt)) {
+        enhancedPrompt += '. Use a LIGHT theme with bright, white/cream backgrounds. NO dark backgrounds.'
+      } else if (colorScheme === 'dark' && !/dark|black|night/i.test(prompt)) {
+        enhancedPrompt += '. Use a DARK theme with dark/black backgrounds and light text.'
+      }
+
+      const multiMatch = enhancedPrompt.match(/screens?\s*:\s*(.+)/i)
       if (multiMatch) {
         const screenNames = multiMatch[1].split(/[,;]/).map(s => s.trim()).filter(Boolean)
-        const appDescription = prompt.replace(multiMatch[0], '').trim()
+        const appDescription = enhancedPrompt.replace(multiMatch[0], '').trim()
         if (screenNames.length > 1 && appDescription) {
           handleGenerateMultiScreen(appDescription, screenNames)
           return
         }
       }
-      handleGenerateScreen(prompt)
+      handleGenerateScreen(enhancedPrompt)
     }
   }
 
@@ -1523,6 +1532,8 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             }
             deviceType={deviceType}
             onDeviceTypeChange={(dt) => { setDeviceType(dt); autoZoomDone.current = false }}
+            colorScheme={colorScheme}
+            onColorSchemeChange={setColorScheme}
             onSubmit={handlePromptSubmit}
             selectedScreen={selectedScreen || undefined}
             onRemoveScreen={() => { setSelectedScreen(null); setEditMode(false); setSelectedElement(null) }}

@@ -1,10 +1,14 @@
 import { useState } from 'react'
 import { useI18n } from '../../lib/i18n'
 
+import type { ColorSchemeMode } from '../../App'
+
 interface PromptBarProps {
   placeholder: string
   deviceType: 'app' | 'web' | 'tablet'
   onDeviceTypeChange: (type: 'app' | 'web' | 'tablet') => void
+  colorScheme?: ColorSchemeMode
+  onColorSchemeChange?: (scheme: ColorSchemeMode) => void
   onSubmit: (prompt: string) => void
   selectedScreen?: string
   onRemoveScreen?: () => void
@@ -18,6 +22,8 @@ export function PromptBar({
   placeholder,
   deviceType,
   onDeviceTypeChange,
+  colorScheme = 'auto',
+  onColorSchemeChange,
   onSubmit,
   selectedScreen,
   onRemoveScreen,
@@ -141,6 +147,26 @@ export function PromptBar({
               {t('promptBar.web')}
             </button>
           </div>
+
+          {/* Color scheme toggle (Light / Dark / Auto) */}
+          {onColorSchemeChange && (
+            <div className="flex items-center rounded-lg border border-neutral-200 dark:border-neutral-600 overflow-hidden">
+              {(['light', 'auto', 'dark'] as const).map((scheme) => (
+                <button
+                  key={scheme}
+                  onClick={() => onColorSchemeChange(scheme)}
+                  className={`flex items-center gap-1 px-2 py-1 text-xs font-medium ${
+                    colorScheme === scheme
+                      ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
+                      : 'hover:bg-neutral-50 dark:hover:bg-neutral-700'
+                  }`}
+                >
+                  {scheme === 'light' ? '☀️' : scheme === 'dark' ? '🌙' : '🔄'}
+                  <span className="hidden sm:inline">{scheme === 'light' ? 'Light' : scheme === 'dark' ? 'Dark' : 'Auto'}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-1">

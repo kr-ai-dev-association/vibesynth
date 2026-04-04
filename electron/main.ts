@@ -111,8 +111,8 @@ function createLiveAppWindow(url?: string) {
     : path.join(__dirname, 'preload.js')
 
   liveAppWindow = new BrowserWindow({
-    width: 1280,
-    height: 900,
+    width: 420,
+    height: 750,
     minWidth: 320,
     minHeight: 480,
     title: 'Live App',
