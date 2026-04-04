@@ -1602,6 +1602,12 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                         setHeatmapActionMenu({ zone, screenName: screen.name, x, y })
                       }}
                       onHeightMeasured={handleScreenHeightMeasured}
+                      onResize={(screenId, newW, newH) => {
+                        const updatedScreens = project.screens.map(s =>
+                          s.id === screenId ? { ...s, customWidth: newW, customHeight: newH } : s
+                        )
+                        onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
+                      }}
                     />
                   ))
                 ) : (
@@ -2078,9 +2084,9 @@ function ScreenCard({
   const [contentHeight, setContentHeight] = useState(initialHeight)
   const measuredRef = useRef(false)
 
-  // Manual resize via drag handles
-  const [manualWidth, setManualWidth] = useState<number | null>(null)
-  const [manualHeight, setManualHeight] = useState<number | null>(null)
+  // Manual resize via drag handles — restore from saved customWidth/customHeight
+  const [manualWidth, setManualWidth] = useState<number | null>(screen.customWidth || null)
+  const [manualHeight, setManualHeight] = useState<number | null>(screen.customHeight || null)
   const resizingRef = useRef<{ type: 'right' | 'bottom' | 'corner'; startX: number; startY: number; startW: number; startH: number } | null>(null)
 
   useEffect(() => {

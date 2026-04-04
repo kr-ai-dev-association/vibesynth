@@ -34,6 +34,10 @@ export interface Screen {
   heatmap?: HeatmapZone[]
   /** True while AI is still generating this screen's HTML */
   generating?: boolean
+  /** User-set custom width via drag resize */
+  customWidth?: number
+  /** User-set custom height via drag resize */
+  customHeight?: number
 }
 
 export interface DesignGuide {
