@@ -1642,51 +1642,54 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           screenNames={project.screens.map(s => s.name)}
           selectedScreen={selectedScreen}
           onSelectScreen={(name) => setSelectedScreen(selectedScreen === name ? null : name)}
-          onDesignSystemUpdate={(ds) => {
-            const oldDs = project.designSystem
-            let updatedScreens = project.screens
-
-            if (oldDs) {
-              const replacements: [string, string][] = []
-
-              // Color replacements
-              for (const role of ['primary', 'secondary', 'tertiary', 'neutral'] as const) {
-                const oldRole = oldDs.colors[role]
-                const newRole = ds.colors[role]
-                if (oldRole.base !== newRole.base) replacements.push([oldRole.base, newRole.base])
-                oldRole.tones.forEach((oldT, i) => {
-                  if (oldT !== newRole.tones[i]) replacements.push([oldT, newRole.tones[i]])
-                })
-              }
-
-              // Font replacements
-              for (const level of ['headline', 'body', 'label'] as const) {
-                const oldFont = oldDs.typography[level]?.family
-                const newFont = ds.typography[level]?.family
-                if (oldFont && newFont && oldFont !== newFont) {
-                  replacements.push([oldFont, newFont])
-                }
-              }
-
-              if (replacements.length > 0) {
-                updatedScreens = project.screens.map((s) => {
-                  let html = s.html
-                  for (const [oldVal, newVal] of replacements) {
-                    html = html.split(oldVal).join(newVal)
-                  }
-                  return html !== s.html ? { ...s, html } : s
-                })
-                const changed = updatedScreens.filter((s, i) => s !== project.screens[i]).length
-                addLog(t('editor.log.dsChangesApplied', { count: replacements.length, screens: changed }), 'success')
-              }
-            }
-
+          onDesignSystemUpdate={async (ds) => {
+            // Update DS immediately for panel display
             onProjectUpdate({
               ...project,
-              screens: updatedScreens,
               designSystem: ds,
               updatedAt: new Date().toLocaleDateString(),
             })
+
+            // Ask LLM to re-apply the new design system to all screens
+            if (project.screens.length > 0 && !isGenerating) {
+              setIsGenerating(true)
+              setAgentLogOpen(true)
+              const logId = addLog(`Applying design system "${ds.name}" to ${project.screens.length} screens via AI...`, 'generating')
+
+              try {
+                const dsDescription = `Apply this design system:\n` +
+                  `Primary: ${ds.colors.primary.base}, Secondary: ${ds.colors.secondary.base}, ` +
+                  `Tertiary: ${ds.colors.tertiary.base}, Neutral: ${ds.colors.neutral.base}\n` +
+                  `Headline font: ${ds.typography.headline.family}, Body font: ${ds.typography.body.family}\n` +
+                  `Color scheme: ${ds.colorScheme || 'auto'}`
+
+                const editPromises = project.screens
+                  .filter(s => s.html && s.html.length > 100)
+                  .map(async (s) => {
+                    const newHtml = await editDesign(s.html,
+                      `Completely re-style this screen with the following design system. ` +
+                      `Change ALL colors, fonts, and component styles to match. ` +
+                      `Keep the exact same layout, content, and functionality. ` +
+                      `${dsDescription}`
+                    )
+                    return { ...s, html: newHtml }
+                  })
+
+                const updatedScreens = await Promise.all(editPromises)
+                updateLog(logId, `Design system "${ds.name}" applied to ${updatedScreens.length} screens`, 'success')
+
+                onProjectUpdate({
+                  ...project,
+                  screens: updatedScreens,
+                  designSystem: ds,
+                  updatedAt: new Date().toLocaleDateString(),
+                })
+              } catch (err: any) {
+                updateLog(logId, `Failed to apply DS: ${err.message}`, 'error')
+              } finally {
+                setIsGenerating(false)
+              }
+            }
           }}
           onSaveDesignSystem={() => {
             if (!designSystem || designSystem.name === 'Generating...') return
