@@ -557,9 +557,10 @@ ipcMain.handle('live-edit:open', () => {
   .mode-btn.active{color:white}
   .mode-btn.designer.active{background:#7c3aed}
   .mode-btn.developer.active{background:#3b82f6}
-  .content{flex:1;display:flex;flex-direction:column;padding:12px 16px;gap:10px;overflow-y:auto}
-  .input-area{display:flex;gap:8px}
-  textarea{flex:1;background:#1a1a2e;border:1px solid #2d2d44;border-radius:10px;padding:10px 14px;color:#e2e8f0;font-size:13px;resize:none;outline:none;font-family:inherit;min-height:100px}
+  .content{flex:1;display:flex;flex-direction:column;padding:12px 16px;gap:10px;overflow:hidden;min-height:0}
+  .input-area{display:flex;gap:8px;min-height:0}
+  .input-area.expand{flex:1}
+  textarea{flex:1;background:#1a1a2e;border:1px solid #2d2d44;border-radius:10px;padding:10px 14px;color:#e2e8f0;font-size:13px;resize:none;outline:none;font-family:inherit;min-height:60px}
   textarea:focus{border-color:#7c3aed}
   textarea::placeholder{color:#4a4a6a}
   button.submit{background:#7c3aed;color:white;border:none;border-radius:10px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;transition:background 0.15s}
@@ -633,7 +634,7 @@ ipcMain.handle('live-edit:open', () => {
   <div class="feedback" id="le-feedback"></div>
 
   <!-- Developer mode: project info -->
-  <div id="le-project-info" style="display:none;font-size:11px;color:#64748b;background:#1a1a2e;border-radius:8px;padding:10px;max-height:250px;overflow-y:auto">
+  <div id="le-project-info" style="display:none;font-size:11px;color:#64748b;background:#1a1a2e;border-radius:8px;padding:10px;overflow-y:auto;min-height:0">
     <div style="font-weight:600;color:#60a5fa;margin-bottom:6px">📁 Workspace</div>
     <div id="le-project-path" style="font-family:monospace;font-size:10px;color:#94a3b8;margin-bottom:8px;word-break:break-all"></div>
     <div style="font-weight:600;color:#60a5fa;margin-bottom:4px">📄 Files</div>
@@ -661,6 +662,7 @@ ipcMain.handle('live-edit:open', () => {
   const domPreview = document.getElementById('le-dom-preview');
   const domHtml = document.getElementById('le-dom-html');
   const domClear = document.getElementById('le-dom-clear');
+  const inputArea = document.querySelector('.input-area');
 
   let attachedFiles = [];
 
@@ -780,14 +782,19 @@ ipcMain.handle('live-edit:open', () => {
     localStorage.setItem('vibesynth-live-feedback-mode', mode);
     designerBtn.className = 'mode-btn designer' + (mode === 'designer' ? ' active' : '');
     developerBtn.className = 'mode-btn developer' + (mode === 'developer' ? ' active' : '');
-    // Designer: show palette, hide project info
+    // Designer: show palette + expand textarea; Developer: expand file explorer
     if (mode === 'designer') {
       palette.classList.add('visible');
       projectInfo.style.display = 'none';
+      projectInfo.style.flex = '';
+      inputArea.classList.add('expand');
       loadPalette();
     } else {
       palette.classList.remove('visible');
-      projectInfo.style.display = 'block';
+      projectInfo.style.display = 'flex';
+      projectInfo.style.flexDirection = 'column';
+      projectInfo.style.flex = '1';
+      inputArea.classList.remove('expand');
       loadProjectInfo();
     }
   }
