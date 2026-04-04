@@ -329,12 +329,10 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
               key={mode}
               data-testid={`scheme-${mode}`}
               onClick={() => {
-                // colorScheme 변경은 즉시 적용 (다음 생성에 영향)
                 updatePending({ ...pendingDS, colorScheme: mode })
-                onDesignSystemUpdate?.({ ...designSystem, colorScheme: mode })
               }}
               className={`px-2 py-0.5 text-[10px] font-medium rounded-md transition-colors ${
-                (designSystem.colorScheme || 'auto') === mode
+                (pendingDS.colorScheme || 'auto') === mode
                   ? 'bg-neutral-200 dark:bg-neutral-600 text-neutral-800 dark:text-white'
                   : 'text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300'
               }`}
