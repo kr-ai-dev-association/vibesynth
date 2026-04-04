@@ -66,16 +66,29 @@ test('VibeSynth 전체 기능 E2E', async ({ electronApp, page }) => {
   await page.getByRole('button', { name: 'Web', exact: true }).click()
   await page.waitForTimeout(DELAY)
 
-  // Light 모드 선택
-  const lightBtn = page.getByText('☀️').first()
-  if (await lightBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await lightBtn.click()
+  // DS 피커에서 추천 디자인 시스템 선택
+  const dsPickerToggle = page.locator('[data-testid="design-system-picker-toggle"]')
+  let selectedDSName = 'Auto'
+  if (await dsPickerToggle.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await dsPickerToggle.click()
     await page.waitForTimeout(DELAY)
-    console.log('✅ 3a. Light 모드 선택')
-  } else {
-    console.log('⚠️ 3a. Light 토글 미표시')
+
+    const dsGrid = page.locator('[data-testid="design-system-picker-grid"]')
+    if (await dsGrid.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      // 랜덤 DS 선택 (Auto 제외 — index 0이 Auto)
+      const dsOptions = dsGrid.locator('button[title]')
+      const dsOptionCount = await dsOptions.count()
+      if (dsOptionCount >= 2) {
+        const idx = 1 + Math.floor(Math.random() * (dsOptionCount - 1))
+        const dsTitle = await dsOptions.nth(idx).getAttribute('title') || 'Unknown'
+        await dsOptions.nth(idx).click()
+        selectedDSName = dsTitle
+        await page.waitForTimeout(DELAY)
+      }
+    }
   }
-  await page.screenshot({ path: 'test-results/full-03a-light-mode.png' })
+  console.log(`✅ 3a. DS 선택: ${selectedDSName}`)
+  await page.screenshot({ path: 'test-results/full-03a-ds-selected.png' })
 
   // 프롬프트 입력 — 라이트 모드 대시보드
   const promptTextarea = page.locator('textarea')
@@ -158,8 +171,12 @@ test('VibeSynth 전체 기능 E2E', async ({ electronApp, page }) => {
     const designTab = page.locator('button:has-text("Design")').first()
     await designTab.click()
     await page.waitForTimeout(DELAY)
-    const hasPalette = await page.getByText('Color Palette').isVisible({ timeout: 10_000 }).catch(() => false)
-    console.log(`✅ 5c. Design 탭: Palette=${hasPalette}`)
+    const hasPalette = await page.getByText('Color Palette').isVisible({ timeout: 30_000 }).catch(() => false)
+    const isGeneratingDS = await page.getByText('Generating...').first().isVisible().catch(() => false)
+    console.log(`✅ 5c. Design 탭: Palette=${hasPalette}, GeneratingDS=${isGeneratingDS}`)
+    if (selectedDSName !== 'Auto' && !hasPalette) {
+      console.log('⚠️ DS를 선택했는데 Palette가 미표시 — project.designSystem 전달 확인 필요')
+    }
   } else {
     console.log('⚠️ 5. 우측 패널 미표시')
   }

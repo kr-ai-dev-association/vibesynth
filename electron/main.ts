@@ -131,9 +131,16 @@ function createLiveAppWindow(url?: string, deviceType?: string) {
     ? path.join(__dirname, 'preload-live.js')
     : path.join(__dirname, 'preload.js')
 
+  // Position Live App window at left side of screen
+  const { screen: eScreen } = require('electron') as typeof import('electron')
+  const primaryDisplay = eScreen.getPrimaryDisplay()
+  const workArea = primaryDisplay.workAreaSize
+
   liveAppWindow = new BrowserWindow({
-    width: size.width,
-    height: size.height,
+    width: Math.min(size.width, workArea.width - 40),
+    height: Math.min(size.height, workArea.height - 40),
+    x: 20,
+    y: 20,
     minWidth: 320,
     minHeight: 480,
     fullscreen: false,
@@ -498,9 +505,17 @@ ipcMain.handle('live-edit:open', () => {
     return
   }
 
+  // Position Live Edit window at bottom-right, not overlapping Live App
+  const { screen: electronScreen } = require('electron') as typeof import('electron')
+  const display = electronScreen.getPrimaryDisplay()
+  const { width: screenW, height: screenH } = display.workAreaSize
+  const editW = 500, editH = 380
+
   liveEditWindow = new BrowserWindow({
-    width: 500,
-    height: 380,
+    width: editW,
+    height: editH,
+    x: screenW - editW - 20,
+    y: screenH - editH - 20,
     minWidth: 400,
     minHeight: 300,
     fullscreen: false,
