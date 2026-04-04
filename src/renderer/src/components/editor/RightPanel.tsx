@@ -180,11 +180,12 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
   const [pendingDS, setPendingDS] = useState<DesignSystem>(designSystem)
   const [hasChanges, setHasChanges] = useState(false)
 
-  // Sync pendingDS when external designSystem changes
+  // Sync pendingDS when external designSystem changes (including after steal)
   useEffect(() => {
     setPendingDS(designSystem)
     setHasChanges(false)
     setNameValue(designSystem.name)
+    setStealUrlLoading(false) // Stop loading spinner when DS is updated
   }, [designSystem]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const updatePending = (ds: DesignSystem) => {
@@ -325,7 +326,11 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
             <button
               key={mode}
               data-testid={`scheme-${mode}`}
-              onClick={() => updatePending({ ...pendingDS, colorScheme: mode })}
+              onClick={() => {
+                // colorScheme 변경은 즉시 적용 (다음 생성에 영향)
+                updatePending({ ...pendingDS, colorScheme: mode })
+                onDesignSystemUpdate?.({ ...designSystem, colorScheme: mode })
+              }}
               className={`px-2 py-0.5 text-[10px] font-medium rounded-md transition-colors ${
                 (designSystem.colorScheme || 'auto') === mode
                   ? 'bg-neutral-200 dark:bg-neutral-600 text-neutral-800 dark:text-white'
@@ -460,11 +465,10 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
                   value={stealUrlValue}
                   onChange={(e) => setStealUrlValue(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && stealUrlValue.trim()) {
+                    if (e.key === 'Enter' && stealUrlValue.trim() && !stealUrlLoading) {
                       setStealUrlLoading(true)
                       onStealUrl(stealUrlValue.trim())
                       setStealUrlValue('')
-                      setTimeout(() => setStealUrlLoading(false), 3000)
                     }
                   }}
                   className="flex-1 text-[10px] px-2 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-600 bg-white dark:bg-neutral-800 outline-none focus:border-blue-400"
@@ -473,18 +477,19 @@ function DesignTab({ designSystem, onCopy, copiedValue, onDesignSystemUpdate, on
                 <button
                   data-testid="steal-url-submit"
                   onClick={() => {
-                    if (stealUrlValue.trim()) {
+                    if (stealUrlValue.trim() && !stealUrlLoading) {
                       setStealUrlLoading(true)
                       onStealUrl(stealUrlValue.trim())
                       setStealUrlValue('')
-                      setTimeout(() => setStealUrlLoading(false), 3000)
                     }
                   }}
                   disabled={!stealUrlValue.trim() || stealUrlLoading}
-                  className="text-[10px] font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-40 transition-all hover:opacity-90"
+                  className="text-[10px] font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-40 transition-all hover:opacity-90 flex items-center gap-1"
                   style={{ background: '#7c3aed' }}
                 >
-                  {stealUrlLoading ? '...' : t('panel.steal')}
+                  {stealUrlLoading ? (
+                    <><svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-20" /><path d="M12 2a10 10 0 019.95 9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" /></svg> Analyzing...</>
+                  ) : t('panel.steal')}
                 </button>
               </div>
             </div>
