@@ -576,6 +576,12 @@ ipcMain.handle('live-edit:open', () => {
     <button class="submit" id="le-submit">Apply</button>
   </div>
   <div class="feedback" id="le-feedback"></div>
+  <div id="le-project-info" style="display:none;font-size:11px;color:#64748b;background:#1a1a2e;border-radius:8px;padding:10px;max-height:250px;overflow-y:auto">
+    <div style="font-weight:600;color:#60a5fa;margin-bottom:6px">📁 Workspace</div>
+    <div id="le-project-path" style="font-family:monospace;font-size:10px;color:#94a3b8;margin-bottom:8px;word-break:break-all"></div>
+    <div style="font-weight:600;color:#60a5fa;margin-bottom:4px">📄 Files</div>
+    <div id="le-project-files" style="font-family:monospace;font-size:10px;line-height:1.6"></div>
+  </div>
   <div class="status" id="le-status"></div>
 </div>
 <script>
@@ -587,12 +593,36 @@ ipcMain.handle('live-edit:open', () => {
   const designerBtn = document.getElementById('le-mode-designer');
   const developerBtn = document.getElementById('le-mode-developer');
 
+  const projectInfo = document.getElementById('le-project-info');
+  const projectPath = document.getElementById('le-project-path');
+  const projectFiles = document.getElementById('le-project-files');
+
   function setMode(mode) {
     currentMode = mode;
     localStorage.setItem('vibesynth-live-feedback-mode', mode);
     designerBtn.className = 'mode-btn designer' + (mode === 'designer' ? ' active' : '');
     developerBtn.className = 'mode-btn developer' + (mode === 'developer' ? ' active' : '');
+    // Show/hide project info based on mode
+    if (mode === 'developer' && projectInfo) {
+      projectInfo.style.display = 'block';
+      loadProjectInfo();
+    } else if (projectInfo) {
+      projectInfo.style.display = 'none';
+    }
   }
+
+  async function loadProjectInfo() {
+    try {
+      const info = await window.electronAPI?.liveEdit?.getProjectInfo?.();
+      if (info && projectPath && projectFiles) {
+        projectPath.textContent = info.path;
+        projectFiles.innerHTML = info.files
+          .map(f => '<div style="color:' + (f.endsWith('.tsx') ? '#93c5fd' : f.endsWith('.css') ? '#f9a8d4' : f.endsWith('.json') ? '#fcd34d' : '#94a3b8') + '">' + f + '</div>')
+          .join('');
+      }
+    } catch {}
+  }
+
   // Init mode from localStorage
   setMode(currentMode);
   designerBtn.addEventListener('click', () => setMode('designer'));
@@ -632,6 +662,14 @@ ipcMain.handle('live-edit:open', () => {
   liveEditWindow.loadFile(tmpFile)
 
   liveEditWindow.on('closed', () => { liveEditWindow = null })
+})
+
+// Get project workspace info for Developer mode display
+ipcMain.handle('live-edit:get-project-info', () => {
+  if (!devServerProjectId) return null
+  const projectDir = getProjectDir(devServerProjectId)
+  const files = fs.existsSync(projectDir) ? listRelativePathsSync(projectDir) : []
+  return { projectId: devServerProjectId, path: projectDir, files }
 })
 
 ipcMain.handle('live-edit:update-feedback', (_event, message: string, type: 'success' | 'error' | 'generating', devMarkdown?: string) => {
