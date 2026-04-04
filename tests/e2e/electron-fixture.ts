@@ -39,15 +39,28 @@ export const test = base.extend<ElectronFixtures>({
       if (w) w.maximize()
     })
 
-    // 다크모드 + 영어 locale 설정
-    await win.evaluate(() => {
-      localStorage.setItem('vibesynth-theme', 'dark')
-      localStorage.setItem('vibesynth-lang', 'en')
-      document.documentElement.classList.add('dark')
-    })
-    // 앱의 AppearanceToggle이 localStorage를 읽어 적용하도록 리로드
-    await win.reload({ waitUntil: 'domcontentloaded' })
-    await win.waitForTimeout(500)
+    // 페이지가 실제로 로드될 때까지 대기 (webServer가 준비될 때까지)
+    await win.waitForTimeout(2000)
+    const url = win.url()
+    if (url === 'about:blank' || url === '') {
+      // webServer가 아직 준비 안 됨 — 재시도
+      await win.waitForTimeout(5000)
+    }
+
+    // 다크모드 + 영어 locale 설정 (localStorage 접근 가능한 상태에서만)
+    try {
+      await win.evaluate(() => {
+        localStorage.setItem('vibesynth-theme', 'dark')
+        localStorage.setItem('vibesynth-lang', 'en')
+        document.documentElement.classList.add('dark')
+      })
+      await win.reload({ waitUntil: 'domcontentloaded' })
+      await win.waitForTimeout(500)
+    } catch {
+      // localStorage 접근 실패 시 건너뜀 (about:blank 상태)
+      console.warn('[Fixture] Could not set localStorage — page may not have loaded yet')
+      await win.waitForTimeout(3000)
+    }
 
     // 콘솔 로그를 터미널에 출력 (디버깅용)
     win.on('console', (msg) => {

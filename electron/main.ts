@@ -4,6 +4,7 @@ import fs from 'fs'
 import { execSync, spawn, ChildProcess } from 'child_process'
 import os from 'os'
 import { db } from './database'
+import { isGeminiCliAvailable, runGeminiCli } from './gemini-cli'
 
 let mainWindow: BrowserWindow | null = null
 let liveAppWindow: BrowserWindow | null = null
@@ -453,6 +454,21 @@ ipcMain.handle('feedback:close', () => {
   if (feedbackWindow) {
     feedbackWindow.close()
     feedbackWindow = null
+  }
+})
+
+// ─── Gemini CLI Integration ───────────────────────────────────────
+
+ipcMain.handle('gemini-cli:available', () => {
+  return isGeminiCliAvailable()
+})
+
+ipcMain.handle('gemini-cli:run', async (_event, prompt: string, outputFormat?: 'json' | 'text') => {
+  try {
+    const result = await runGeminiCli(prompt, { outputFormat })
+    return { success: true, result }
+  } catch (err: any) {
+    return { success: false, error: err.message }
   }
 })
 
