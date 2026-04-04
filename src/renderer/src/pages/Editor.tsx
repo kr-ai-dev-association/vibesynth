@@ -2084,7 +2084,7 @@ function ScreenCard({
   const [contentHeight, setContentHeight] = useState(initialHeight)
   const measuredRef = useRef(false)
 
-  // Manual resize via drag handles — restore from saved customWidth/customHeight
+  // Manual resize via drag handles — width fixed by default, changeable via drag
   const [manualWidth, setManualWidth] = useState<number | null>(screen.customWidth || null)
   const [manualHeight, setManualHeight] = useState<number | null>(screen.customHeight || null)
   const resizingRef = useRef<{ type: 'right' | 'bottom' | 'corner'; startX: number; startY: number; startW: number; startH: number } | null>(null)
@@ -2477,77 +2477,60 @@ body>*{min-height:0!important;}
             <div
               className="absolute right-0 top-0 w-2 h-full cursor-ew-resize hover:bg-blue-500/20 transition-colors z-20"
               onMouseDown={(e) => {
-                e.stopPropagation()
-                e.preventDefault()
+                e.stopPropagation(); e.preventDefault()
                 resizingRef.current = { type: 'right', startX: e.clientX, startY: e.clientY, startW: effectiveWidth, startH: height }
                 const onMove = (ev: MouseEvent) => {
                   if (!resizingRef.current) return
-                  const delta = (ev.clientX - resizingRef.current.startX) / scale
-                  setManualWidth(Math.max(200, resizingRef.current.startW + delta))
+                  setManualWidth(Math.max(200, resizingRef.current.startW + (ev.clientX - resizingRef.current.startX) / scale))
                 }
                 const onUp = () => {
-                  if (resizingRef.current && onResize) {
-                    onResize(screen.id, manualWidth || effectiveWidth, manualHeight || height)
-                  }
+                  if (onResize) onResize(screen.id, manualWidth || effectiveWidth, manualHeight || height)
                   resizingRef.current = null
-                  document.removeEventListener('mousemove', onMove)
-                  document.removeEventListener('mouseup', onUp)
+                  document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp)
                 }
-                document.addEventListener('mousemove', onMove)
-                document.addEventListener('mouseup', onUp)
+                document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp)
               }}
             />
             {/* Bottom handle */}
             <div
-              className="absolute bottom-0 left-0 w-full h-2 cursor-ns-resize hover:bg-blue-500/20 transition-colors z-20"
+              className="absolute bottom-0 left-0 w-full h-2 cursor-ns-resize hover:bg-blue-500/20 transition-colors z-20 group"
               onMouseDown={(e) => {
-                e.stopPropagation()
-                e.preventDefault()
+                e.stopPropagation(); e.preventDefault()
                 resizingRef.current = { type: 'bottom', startX: e.clientX, startY: e.clientY, startW: effectiveWidth, startH: height }
                 const onMove = (ev: MouseEvent) => {
                   if (!resizingRef.current) return
-                  const delta = (ev.clientY - resizingRef.current.startY) / scale
-                  setManualHeight(Math.max(200, resizingRef.current.startH + delta))
+                  setManualHeight(Math.max(200, resizingRef.current.startH + (ev.clientY - resizingRef.current.startY) / scale))
                 }
                 const onUp = () => {
-                  if (resizingRef.current && onResize) {
-                    onResize(screen.id, manualWidth || effectiveWidth, manualHeight || height)
-                  }
+                  if (onResize) onResize(screen.id, manualWidth || effectiveWidth, manualHeight || height)
                   resizingRef.current = null
-                  document.removeEventListener('mousemove', onMove)
-                  document.removeEventListener('mouseup', onUp)
+                  document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp)
                 }
-                document.addEventListener('mousemove', onMove)
-                document.addEventListener('mouseup', onUp)
+                document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp)
               }}
-            />
+            >
+              <div className="mx-auto w-12 h-1 rounded-full bg-blue-400/40 group-hover:bg-blue-400 mt-0.5 transition-colors" />
+            </div>
             {/* Corner handle */}
             <div
               className="absolute right-0 bottom-0 w-4 h-4 cursor-nwse-resize z-20 flex items-center justify-center"
               onMouseDown={(e) => {
-                e.stopPropagation()
-                e.preventDefault()
+                e.stopPropagation(); e.preventDefault()
                 resizingRef.current = { type: 'corner', startX: e.clientX, startY: e.clientY, startW: effectiveWidth, startH: height }
                 const onMove = (ev: MouseEvent) => {
                   if (!resizingRef.current) return
-                  const dx = (ev.clientX - resizingRef.current.startX) / scale
-                  const dy = (ev.clientY - resizingRef.current.startY) / scale
-                  setManualWidth(Math.max(200, resizingRef.current.startW + dx))
-                  setManualHeight(Math.max(200, resizingRef.current.startH + dy))
+                  setManualWidth(Math.max(200, resizingRef.current.startW + (ev.clientX - resizingRef.current.startX) / scale))
+                  setManualHeight(Math.max(200, resizingRef.current.startH + (ev.clientY - resizingRef.current.startY) / scale))
                 }
                 const onUp = () => {
-                  if (resizingRef.current && onResize) {
-                    onResize(screen.id, manualWidth || effectiveWidth, manualHeight || height)
-                  }
+                  if (onResize) onResize(screen.id, manualWidth || effectiveWidth, manualHeight || height)
                   resizingRef.current = null
-                  document.removeEventListener('mousemove', onMove)
-                  document.removeEventListener('mouseup', onUp)
+                  document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp)
                 }
-                document.addEventListener('mousemove', onMove)
-                document.addEventListener('mouseup', onUp)
+                document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp)
               }}
             >
-              <svg className="w-3 h-3 text-blue-400 opacity-50" viewBox="0 0 10 10"><path d="M9 1L1 9M9 5L5 9M9 9L9 9" stroke="currentColor" strokeWidth="1.5" fill="none" /></svg>
+              <svg className="w-3 h-3 text-blue-400 opacity-50" viewBox="0 0 10 10"><path d="M9 1L1 9M9 5L5 9" stroke="currentColor" strokeWidth="1.5" fill="none" /></svg>
             </div>
           </>
         )}
