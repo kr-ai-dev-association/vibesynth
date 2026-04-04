@@ -58,7 +58,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   const [colorScheme, setColorScheme] = useState<'light' | 'dark' | 'auto'>(project.designSystem?.colorScheme || 'auto')
 
   // Left toolbar active tool
-  type CanvasTool = 'cursor' | 'select' | 'pen' | 'image'
+  type CanvasTool = 'cursor' | 'select' | 'element' | 'image'
   const [activeTool, setActiveTool] = useState<CanvasTool>('cursor')
 
   // Multi-screen selection helpers
@@ -80,10 +80,17 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       // Multi-select mode: toggle screen in selection set
       toggleScreenInSelection(screenName)
       setSelectedScreen(screenName)
+    } else if (activeTool === 'element') {
+      // Element mode: select screen + enter edit mode
+      setSelectedScreen(screenName)
+      setSelectedScreens(new Set())
+      setEditMode(true)
     } else {
       // Cursor mode: single select
       setSelectedScreen(selectedScreen === screenName ? null : screenName)
       setSelectedScreens(new Set())
+      setEditMode(false)
+      setSelectedElement(null)
     }
   }
   const [agentLogOpen, setAgentLogOpen] = useState(true)
@@ -1419,7 +1426,23 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                 addLog('Multi-select mode: click screens to select/deselect. Shift+click also works in cursor mode.', 'info')
               }
             }} />
-            <ToolButton icon={<PenIcon />} title={t('editor.tool.pen')} active={activeTool === 'pen'} label={leftSidebarWidth > 80 ? t('editor.tool.pen') : undefined} onClick={() => { setActiveTool('pen'); addLog('Pen tool — coming soon', 'info') }} />
+            <ToolButton icon={<ElementSelectIcon />} title="Element Select" active={activeTool === 'element'} label={leftSidebarWidth > 80 ? 'Element' : undefined} onClick={() => {
+              if (activeTool === 'element') {
+                // Exit element/edit mode
+                setActiveTool('cursor')
+                setEditMode(false)
+                setSelectedElement(null)
+              } else {
+                setActiveTool('element')
+                // Enter edit mode on selected screen
+                if (selectedScreen) {
+                  setEditMode(true)
+                  addLog('Element select mode: click elements inside the screen to select and edit them.', 'info')
+                } else {
+                  addLog('Select a screen first, then use Element tool to pick elements inside it.', 'info')
+                }
+              }
+            }} />
             <div className="h-px w-6 bg-neutral-200 dark:bg-neutral-700 my-1 self-center" />
             {/* 마이크 아이콘 제거됨 */}
             <ToolButton icon={<ImageIcon />} title={t('editor.tool.image')} active={activeTool === 'image'} label={leftSidebarWidth > 80 ? t('editor.tool.image') : undefined} onClick={() => {
@@ -2408,8 +2431,9 @@ function CursorIcon() {
 function SelectIcon() {
   return <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="4 2" /></svg>
 }
-function PenIcon() {
-  return <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 19l7-7 3 3-7 7H12v-3zM18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" /></svg>
+function ElementSelectIcon() {
+  // Crosshair + element box icon — represents element-level selection
+  return <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 2v4M12 18v4M2 12h4M18 12h4" /><rect x="7" y="7" width="10" height="10" rx="1" strokeDasharray="3 2" /></svg>
 }
 function MicIcon() {
   return <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="1" width="6" height="12" rx="3" /><path d="M5 10a7 7 0 0014 0M12 19v4M8 23h8" /></svg>
