@@ -1,8 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  openLiveWindow: (html?: string) => ipcRenderer.invoke('open-live-window', html),
-  openLiveWindowUrl: (url: string) => ipcRenderer.invoke('open-live-window-url', url),
+  openLiveWindow: (html?: string, deviceType?: string) => ipcRenderer.invoke('open-live-window', html, deviceType),
+  openLiveWindowUrl: (url: string, deviceType?: string) => ipcRenderer.invoke('open-live-window-url', url, deviceType),
   closeLiveWindow: () => ipcRenderer.invoke('close-live-window'),
   updateLiveWindow: (html: string) => ipcRenderer.invoke('update-live-window', html),
   setLiveWindowAlwaysOnTop: (value: boolean) =>

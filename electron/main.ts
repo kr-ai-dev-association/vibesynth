@@ -119,6 +119,7 @@ function getDeviceWindowSize(deviceType?: string): { width: number; height: numb
 
 function createLiveAppWindow(url?: string, deviceType?: string) {
   const size = getDeviceWindowSize(deviceType)
+  console.log(`[VibeSynth] createLiveAppWindow: deviceType=${deviceType}, size=${size.width}x${size.height}`)
 
   if (liveAppWindow) {
     liveAppWindow.setSize(size.width, size.height)
@@ -182,6 +183,7 @@ function loadHtmlInLiveWindow(html: string) {
 
 // IPC Handlers
 ipcMain.handle('open-live-window', (_event, html?: string, deviceType?: string) => {
+  console.log(`[VibeSynth] IPC open-live-window: deviceType=${deviceType}`)
   if (html) currentLiveHtml = html
   createLiveAppWindow(undefined, deviceType)
 })
@@ -368,6 +370,7 @@ ipcMain.handle('project:get-status', () => {
 })
 
 ipcMain.handle('open-live-window-url', (_event, url: string, deviceType?: string) => {
+  console.log(`[VibeSynth] IPC open-live-window-url: url=${url}, deviceType=${deviceType}`)
   createLiveAppWindow(url, deviceType)
 })
 
