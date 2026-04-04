@@ -566,8 +566,8 @@ ipcMain.handle('live-edit:open', () => {
 <div class="header">
   <span class="logo">✦ Live Edit</span>
   <div class="mode-toggle">
-    <button class="mode-btn designer active" id="le-mode-designer" onclick="setMode('designer')">🎨 Designer</button>
-    <button class="mode-btn developer" id="le-mode-developer" onclick="setMode('developer')">💻 Developer</button>
+    <button class="mode-btn designer active" id="le-mode-designer">🎨 Designer</button>
+    <button class="mode-btn developer" id="le-mode-developer">💻 Developer</button>
   </div>
 </div>
 <div class="content">
@@ -595,6 +595,8 @@ ipcMain.handle('live-edit:open', () => {
   }
   // Init mode from localStorage
   setMode(currentMode);
+  designerBtn.addEventListener('click', () => setMode('designer'));
+  developerBtn.addEventListener('click', () => setMode('developer'));
 
   async function handleSubmit() {
     const prompt = input.value.trim();
