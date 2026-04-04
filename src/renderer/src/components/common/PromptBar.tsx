@@ -35,14 +35,13 @@ export function PromptBar({
   const { t } = useI18n()
   const [prompt, setPrompt] = useState('')
   const [attachedFiles, setAttachedFiles] = useState<{ name: string; type: string; content: string }[]>([])
-  const [model, setModel] = useState('3.0 Flash')
+  const [model, setModel] = useState('Pro')
   const [showModelMenu, setShowModelMenu] = useState(false)
 
-  const models = [
-    { name: t('promptBar.modelFlash'), desc: t('promptBar.modelFlashDesc') },
-    { name: t('promptBar.modelQuality'), desc: t('promptBar.modelQualityDesc') },
-    { name: t('promptBar.modelRedesign'), desc: t('promptBar.modelRedesignDesc') },
-    { name: t('promptBar.modelIdeate'), desc: t('promptBar.modelIdeateDesc') },
+  const models: { name: string; desc: string; modelId: string; disabled?: boolean }[] = [
+    { name: 'Basic', desc: 'Qwen 3.5-397B — Fast iteration (coming soon)', modelId: 'qwen-3.5-397b', disabled: true },
+    { name: 'Pro', desc: 'Gemini 3 Flash — Balanced speed & quality', modelId: 'gemini-3-flash-preview' },
+    { name: 'Max', desc: 'Gemini 3.1 Pro — Maximum quality & reasoning', modelId: 'gemini-3.1-pro-preview' },
   ]
 
   const handleSubmit = () => {
@@ -235,10 +234,16 @@ export function PromptBar({
                   <button
                     key={m.name}
                     onClick={() => {
+                      if (m.disabled) return
                       setModel(m.name)
                       setShowModelMenu(false)
                     }}
-                    className="w-full text-left px-3 py-2.5 hover:bg-neutral-50 dark:hover:bg-neutral-700 flex items-start gap-2"
+                    className={`w-full text-left px-3 py-2.5 flex items-start gap-2 ${
+                      m.disabled
+                        ? 'opacity-40 cursor-not-allowed'
+                        : 'hover:bg-neutral-50 dark:hover:bg-neutral-700'
+                    }`}
+                    disabled={m.disabled}
                   >
                     <SparkleIcon className="w-4 h-4 mt-0.5 shrink-0" />
                     <div>
