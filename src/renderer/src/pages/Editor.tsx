@@ -689,9 +689,45 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     }
   }
 
+  const handleBatchEditSelected = async (prompt: string) => {
+    if (isGenerating || selectedScreens.size === 0) return
+
+    const targets = project.screens.filter(s => selectedScreens.has(s.name))
+    if (targets.length === 0) return
+
+    setIsGenerating(true)
+    setAgentLogOpen(true)
+    setScreensGenerating(targets.map(s => s.id), true) // blur selected screens
+    const logId = addLog(`Editing ${targets.length} selected screens: "${prompt}"`, 'generating')
+
+    try {
+      const editPromises = targets.map(async (s) => {
+        const newHtml = await editDesign(s.html, prompt)
+        return { ...s, html: newHtml, generating: false }
+      })
+      const updated = await Promise.all(editPromises)
+
+      const newScreens = project.screens.map(s => {
+        const u = updated.find(us => us.id === s.id)
+        return u || s
+      })
+
+      updateLog(logId, `Updated ${updated.length} screens`, 'success')
+      onProjectUpdate({ ...project, screens: newScreens, updatedAt: new Date().toLocaleDateString() })
+    } catch (err: any) {
+      updateLog(logId, `Batch edit failed: ${err.message}`, 'error')
+      setScreensGenerating(targets.map(s => s.id), false)
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
   const handlePromptSubmit = async (prompt: string) => {
     if (editMode && selectedElement && selectedScreen) {
       handleElementEdit(prompt)
+    } else if (selectedScreens.size >= 2) {
+      // Multi-selected screens → batch edit all selected
+      handleBatchEditSelected(prompt)
     } else if (selectedScreen && project.screens.some((s) => s.name === selectedScreen)) {
       handleEditScreen(prompt)
     } else {
