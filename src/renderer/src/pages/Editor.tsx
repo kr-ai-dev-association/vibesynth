@@ -1247,7 +1247,18 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             {showHamburger && (
               <div className="absolute top-full left-0 mt-1 w-52 bg-white dark:bg-neutral-800 rounded-xl shadow-lg border border-neutral-200 dark:border-neutral-700 py-1 z-50">
                 <MenuItem icon="←" label={t('editor.menu.goToProjects')} onClick={() => { setShowHamburger(false); onBack() }} />
-                {/* Open project folder / Open in external editor 제거됨 */}
+                <MenuItem icon="📦" label="Export as ZIP" onClick={async () => {
+                  setShowHamburger(false)
+                  const result = await window.electronAPI?.project.exportZip(
+                    project.id,
+                    project.screens.map(s => ({ name: s.name, html: s.html }))
+                  )
+                  if (result?.success) {
+                    addLog(`Exported ZIP to ${result.path}`, 'success')
+                  } else {
+                    addLog(`ZIP export: ${result?.error || 'cancelled'}`, 'info')
+                  }
+                }} />
                 <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-1" />
                 <MenuItem icon="🎨" label={t('editor.menu.appearance')} onClick={() => {
                   setShowHamburger(false)

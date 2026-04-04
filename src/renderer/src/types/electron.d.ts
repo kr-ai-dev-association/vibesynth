@@ -18,6 +18,7 @@ interface ElectronProjectAPI {
   install: (projectId: string) => Promise<{ success: boolean; error?: string }>
   startDev: (projectId: string, port: number) => Promise<{ success: boolean; url?: string; error?: string }>
   stopDev: () => Promise<boolean>
+  exportZip: (projectId: string, screens: { name: string; html: string }[]) => Promise<{ success: boolean; path?: string; error?: string }>
   getStatus: () => Promise<{ running: boolean; projectId: string | null }>
   listRelativePaths: (projectId: string) => Promise<string[]>
   exportToFolder: (projectId: string, destPath: string) => Promise<{ success: boolean; path?: string; error?: string }>

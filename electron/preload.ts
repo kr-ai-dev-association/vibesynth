@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     startDev: (projectId: string, port: number) =>
       ipcRenderer.invoke('project:start-dev', projectId, port),
     stopDev: () => ipcRenderer.invoke('project:stop-dev'),
+    exportZip: (projectId: string, screens: { name: string; html: string }[]) =>
+      ipcRenderer.invoke('project:export-zip', projectId, screens) as Promise<{ success: boolean; path?: string; error?: string }>,
     getStatus: () => ipcRenderer.invoke('project:get-status'),
     listRelativePaths: (projectId: string) =>
       ipcRenderer.invoke('project:list-relative-paths', projectId),

@@ -620,6 +620,47 @@ ipcMain.handle('project:export-to-folder', (_event, projectId: string, destPath:
   }
 })
 
+// ZIP export — package all screens as HTML/CSS/JS files
+ipcMain.handle('project:export-zip', async (_event, projectId: string, screens: { name: string; html: string }[]) => {
+  const { dialog } = require('electron') as typeof import('electron')
+
+  const result = await dialog.showSaveDialog({
+    title: 'Export Project as ZIP',
+    defaultPath: `vibesynth-${projectId.slice(0, 8)}.zip`,
+    filters: [{ name: 'ZIP Archive', extensions: ['zip'] }],
+  })
+
+  if (result.canceled || !result.filePath) return { success: false, error: 'Cancelled' }
+
+  try {
+    const archiver = require('archiver')
+    const output = fs.createWriteStream(result.filePath)
+    const archive = archiver('zip', { zlib: { level: 9 } })
+
+    return new Promise<{ success: boolean; path?: string; error?: string }>((resolve) => {
+      output.on('close', () => resolve({ success: true, path: result.filePath! }))
+      archive.on('error', (err: any) => resolve({ success: false, error: err.message }))
+      archive.pipe(output)
+
+      // Add each screen as separate HTML file
+      for (const screen of screens) {
+        const fileName = screen.name.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase()
+        archive.append(screen.html, { name: `${fileName}.html` })
+      }
+
+      // If project has generated React files, include those too
+      const projectDir = getProjectDir(projectId)
+      if (fs.existsSync(projectDir)) {
+        archive.directory(projectDir, 'react-app')
+      }
+
+      archive.finalize()
+    })
+  } catch (err: any) {
+    return { success: false, error: err.message }
+  }
+})
+
 ipcMain.handle('shell:open-vscode', (_event, folderPath: string) => {
   const resolved = expandUserPath(folderPath)
   try {

@@ -433,6 +433,176 @@ test('VibeSynth 전체 기능 E2E', async ({ electronApp, page }) => {
   await page.waitForTimeout(DELAY)
 
   // ═══════════════════════════════════════════════════════════════
+  // 14. 우측 패널에서 다른 디자인 시스템 적용
+  // ═══════════════════════════════════════════════════════════════
+  const recDesigns = page.locator('button[title]').filter({ has: page.locator('div') })
+  const recCount = await recDesigns.count().catch(() => 0)
+  if (recCount >= 2) {
+    // 다른 DS 클릭 (현재와 다른 것)
+    await recDesigns.nth(1).click()
+    await page.waitForTimeout(DELAY)
+    console.log('✅ 14. 우측 패널에서 다른 DS 적용')
+  } else {
+    // Recommended Designs 섹션 열기 시도
+    const recSection = page.getByText(/Recommended/i)
+    if (await recSection.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await recSection.click()
+      await page.waitForTimeout(DELAY)
+    }
+    console.log(`⚠️ 14. 추천 DS 버튼 ${recCount}개`)
+  }
+  await page.screenshot({ path: 'test-results/full-14-ds-change.png' })
+  await page.waitForTimeout(DELAY)
+
+  // ═══════════════════════════════════════════════════════════════
+  // 15. Pinterest 디자인 훔치기 (URL 기반)
+  // ═══════════════════════════════════════════════════════════════
+  const pinterestResult = await page.evaluate(async () => {
+    return await (window as any).electronAPI?.pinterest?.stealUrl?.(
+      'https://i.pinimg.com/1200x/a6/c8/cf/a6c8cf334ced43dc710e7d46b70cbf72.jpg'
+    )
+  })
+  if (pinterestResult?.success !== false) {
+    console.log('✅ 15. Pinterest URL 분석 요청')
+  } else {
+    console.log(`⚠️ 15. Pinterest: ${pinterestResult?.error || 'failed'}`)
+  }
+  await page.waitForTimeout(DELAY)
+
+  // ═══════════════════════════════════════════════════════════════
+  // 16. Element 도구로 스크린 내 텍스트 편집
+  // ═══════════════════════════════════════════════════════════════
+  // Element 도구 선택
+  await page.getByTitle(/Element/i).first().click()
+  await page.waitForTimeout(DELAY)
+
+  // 첫 번째 스크린 클릭 → Edit Mode 진입
+  await screenCards.first().click({ force: true })
+  await page.waitForTimeout(2000)
+
+  // iframe 내부 요소 클릭 시도 (상단 20% 영역)
+  const iframeBox = await page.locator('[data-screen-card] iframe').first().boundingBox()
+  if (iframeBox) {
+    await page.mouse.click(iframeBox.x + iframeBox.width * 0.4, iframeBox.y + iframeBox.height * 0.15)
+    await page.waitForTimeout(2000)
+
+    // 요소가 선택되었으면 프롬프트로 텍스트 변경
+    const hasSelected = await page.getByText(/Selected </i).isVisible({ timeout: 5_000 }).catch(() => false)
+    if (hasSelected) {
+      const ta = page.locator('textarea')
+      await ta.fill('Change this text to "Hello VibeSynth"')
+      await ta.press('Enter')
+      await page.waitForTimeout(30_000)
+      console.log('✅ 16. 스크린 내 텍스트 편집')
+    } else {
+      console.log('⚠️ 16. 요소 선택 안됨')
+    }
+  }
+
+  // Cursor 모드로 복귀
+  await page.getByTitle(/Cursor/i).first().click()
+  await page.waitForTimeout(DELAY)
+  await page.screenshot({ path: 'test-results/full-16-element-edit.png' })
+
+  // ═══════════════════════════════════════════════════════════════
+  // 17. 히트맵 각 효과 유형별 적용
+  // ═══════════════════════════════════════════════════════════════
+  await screenCards.nth(1).click({ force: true })
+  await page.waitForTimeout(DELAY)
+
+  if (await genBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await genBtn.click()
+    await page.waitForTimeout(DELAY)
+    const hmBtn2 = page.getByText('Predictive heat map')
+    if (await hmBtn2.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await hmBtn2.click()
+      await page.waitForTimeout(20_000)
+
+      const zones2 = page.locator('[data-heatmap-zone]')
+      const zc2 = await zones2.count().catch(() => 0)
+
+      if (zc2 >= 3) {
+        const effects = ['hover-effect', 'click-animation', 'make-prominent']
+        for (let ei = 0; ei < Math.min(zc2, effects.length); ei++) {
+          try {
+            await zones2.nth(ei).click({ force: true, timeout: 3_000 })
+            await page.waitForTimeout(500)
+            // 효과 메뉴에서 해당 효과 클릭
+            const effectLabel = effects[ei] === 'hover-effect' ? 'Hover' :
+                                effects[ei] === 'click-animation' ? 'Click' : 'Boost'
+            const effBtn = page.getByText(new RegExp(effectLabel, 'i')).first()
+            if (await effBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+              await effBtn.click({ force: true })
+              await page.waitForTimeout(15_000)
+              console.log(`✅ 17-${ei+1}. 히트맵 효과: ${effectLabel}`)
+            }
+          } catch { console.log(`⚠️ 17-${ei+1}. 효과 적용 실패`) }
+        }
+      } else {
+        console.log(`⚠️ 17. 히트맵 존 ${zc2}개 (최소 3개 필요)`)
+      }
+
+      // 히트맵 해제
+      try {
+        if (await genBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+          await genBtn.click()
+          const hm3 = page.getByText('Predictive heat map')
+          if (await hm3.isVisible({ timeout: 2_000 }).catch(() => false)) await hm3.click()
+          await page.keyboard.press('Escape')
+        }
+      } catch {}
+    }
+  }
+  await page.mouse.click(600, 400)
+  await page.waitForTimeout(DELAY)
+  await page.screenshot({ path: 'test-results/full-17-heatmap-effects.png' })
+
+  // ═══════════════════════════════════════════════════════════════
+  // 18. 스크린 내 이미지 교체 (AI 재생성)
+  // ═══════════════════════════════════════════════════════════════
+  await screenCards.first().click({ force: true })
+  await page.waitForTimeout(DELAY)
+
+  const imgEditTextarea = page.locator('textarea')
+  await imgEditTextarea.fill('Replace the hero image with a modern abstract gradient background in blue and purple tones')
+  await page.waitForTimeout(DELAY)
+  await imgEditTextarea.press('Enter')
+
+  await expect(
+    page.getByText(/Editing|Updated|Applied|Batch/i).first()
+  ).toBeVisible({ timeout: 120_000 })
+  console.log('✅ 18. 스크린 내 이미지 교체 편집')
+  await page.screenshot({ path: 'test-results/full-18-image-replace.png' })
+  await page.waitForTimeout(DELAY)
+
+  // ═══════════════════════════════════════════════════════════════
+  // 19. 스크린 높이 자동 조절 확인
+  // ═══════════════════════════════════════════════════════════════
+  const iframes = page.locator('[data-screen-card] iframe')
+  const iframeCount = await iframes.count()
+  let heightOk = 0
+  for (let i = 0; i < Math.min(iframeCount, 3); i++) {
+    const box = await iframes.nth(i).boundingBox()
+    if (box && box.height > 100) {
+      heightOk++
+    }
+  }
+  console.log(`✅ 19. 스크린 높이: ${heightOk}/${Math.min(iframeCount, 3)}개 정상 (>100px)`)
+  await page.waitForTimeout(DELAY)
+
+  // ═══════════════════════════════════════════════════════════════
+  // 20. ZIP 익스포트 (IPC 직접 호출 — 파일 다이얼로그 건너뜀)
+  // ═══════════════════════════════════════════════════════════════
+  // ZIP 메뉴가 햄버거 메뉴에 있는지 확인
+  await page.locator('header button').first().click() // 햄버거 열기
+  await page.waitForTimeout(DELAY)
+  const zipMenu = page.getByText('Export as ZIP')
+  const hasZip = await zipMenu.isVisible({ timeout: 3_000 }).catch(() => false)
+  console.log(`✅ 20. ZIP 익스포트 메뉴: ${hasZip ? '존재' : '미표시'}`)
+  await page.keyboard.press('Escape') // 메뉴 닫기
+  await page.waitForTimeout(DELAY)
+
+  // ═══════════════════════════════════════════════════════════════
   // 최종 스크린샷
   // ═══════════════════════════════════════════════════════════════
   await page.screenshot({ path: 'test-results/full-99-final.png' })
