@@ -272,8 +272,30 @@ function injectPromptBar() {
   })
 }
 
+// Prompt bar removed from Live App — editing is done via separate Live Edit popup window
+// MD panel for developer feedback is still injected for result display
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
-  setTimeout(injectPromptBar, 500)
+  // Only inject MD panel listener, not the full prompt bar
+  setTimeout(() => {
+    // Inject MD panel only (no prompt bar)
+    const mdPanel = document.getElementById('__vs-md-panel')
+    if (!mdPanel) {
+      const panel = document.createElement('div')
+      panel.id = '__vs-md-panel'
+      panel.innerHTML = `<div class="md-header"><span>💻 Developer Summary</span><button class="md-close" onclick="this.parentElement.parentElement.classList.remove('visible')">✕</button></div><div class="md-body" id="__vs-md-body"></div>`
+      document.body.appendChild(panel)
+    }
+  }, 500)
 } else {
-  window.addEventListener('DOMContentLoaded', () => setTimeout(injectPromptBar, 500))
+  window.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+      const mdPanel = document.getElementById('__vs-md-panel')
+      if (!mdPanel) {
+        const panel = document.createElement('div')
+        panel.id = '__vs-md-panel'
+        panel.innerHTML = `<div class="md-header"><span>💻 Developer Summary</span><button class="md-close" onclick="this.parentElement.parentElement.classList.remove('visible')">✕</button></div><div class="md-body" id="__vs-md-body"></div>`
+        document.body.appendChild(panel)
+      }
+    }, 500)
+  })
 }

@@ -136,6 +136,8 @@ function createLiveAppWindow(url?: string, deviceType?: string) {
     height: size.height,
     minWidth: 320,
     minHeight: 480,
+    fullscreen: false,
+    fullscreenable: false,
     title: `Live App — ${(deviceType || 'app').toUpperCase()}`,
     webPreferences: {
       preload: preloadFile,
@@ -369,6 +371,8 @@ function createFeedbackWindow(content: string, mode: 'designer' | 'developer') {
     height: mode === 'developer' ? 600 : 400,
     minWidth: 400,
     minHeight: 300,
+    fullscreen: false,
+    fullscreenable: false,
     title: mode === 'designer' ? '🎨 Designer Feedback' : '💻 Developer Summary',
     alwaysOnTop: true,
     webPreferences: {
@@ -492,6 +496,8 @@ ipcMain.handle('live-edit:open', () => {
     height: 380,
     minWidth: 400,
     minHeight: 300,
+    fullscreen: false,
+    fullscreenable: false,
     title: '✦ VibeSynth — Live Edit',
     alwaysOnTop: true,
     webPreferences: {
