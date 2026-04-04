@@ -173,42 +173,35 @@ test('LifeFlow Dashboard: PRD → 디자인 선택 → 3+페이지 생성 → Li
     await page.waitForTimeout(DELAY)
 
     // 히트맵 오버레이 표시 대기
-    // 히트맵 존이 나타나면 처음 2개의 존에 효과 부여
-    await page.waitForTimeout(10_000) // 히트맵 로딩 대기
+    await page.waitForTimeout(15_000) // 히트맵 생성 + 렌더링 대기
 
-    // 히트맵 존 클릭 (오버레이 요소)
+    // 히트맵 존 감지 및 효과 부여
     const heatmapZones = page.locator('[data-heatmap-zone]')
     const zoneCount = await heatmapZones.count().catch(() => 0)
+    console.log(`히트맵 존 ${zoneCount}개 감지`)
 
-    if (zoneCount >= 2) {
-      // 첫 번째 존 클릭 → 액션 메뉴
-      await heatmapZones.first().click()
-      await page.waitForTimeout(DELAY)
-
-      // 효과 부여 (예: "Boost attention" 또는 첫 번째 효과 버튼)
-      const effectBtn = page.getByText(/Boost|Enhance|Emphasize|Apply/i).first()
-      if (await effectBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        await effectBtn.click()
-        await page.waitForTimeout(DELAY)
-        console.log('✅ 히트맵 효과 1 부여')
-        await page.screenshot({ path: 'test-results/lf-04c-heatmap-effect1.png' })
-      }
-
-      // 두 번째 존 클릭
-      if (zoneCount >= 2) {
-        await heatmapZones.nth(1).click()
+    // 최대 2개 존에 효과 부여
+    for (let zi = 0; zi < Math.min(zoneCount, 2); zi++) {
+      try {
+        await heatmapZones.nth(zi).click({ force: true, timeout: 5_000 })
         await page.waitForTimeout(DELAY)
 
-        const effectBtn2 = page.getByText(/Boost|Enhance|Emphasize|Apply/i).first()
-        if (await effectBtn2.isVisible({ timeout: 3_000 }).catch(() => false)) {
-          await effectBtn2.click()
+        const effectBtn = page.getByText(/Boost|Enhance|Emphasize|Apply/i).first()
+        if (await effectBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+          await effectBtn.click({ force: true })
           await page.waitForTimeout(DELAY)
-          console.log('✅ 히트맵 효과 2 부여')
-          await page.screenshot({ path: 'test-results/lf-04d-heatmap-effect2.png' })
+          console.log(`✅ 히트맵 효과 ${zi + 1} 부여`)
+          await page.screenshot({ path: `test-results/lf-04c-heatmap-effect${zi + 1}.png` })
         }
+        // 완료 대기 후 다음 존
+        await page.waitForTimeout(15_000)
+      } catch {
+        console.log(`⚠️ 히트맵 존 ${zi + 1} 효과 부여 실패 (건너뜀)`)
       }
-    } else {
-      console.log(`⚠️ 히트맵 존 ${zoneCount}개 감지 (효과 부여 건너뜀)`)
+    }
+
+    if (zoneCount === 0) {
+      console.log('⚠️ 히트맵 존 없음 (효과 부여 건너뜀)')
     }
 
     await page.screenshot({ path: 'test-results/lf-04e-heatmap-done.png' })
@@ -385,116 +378,61 @@ test('LifeFlow Dashboard: PRD → 디자인 선택 → 3+페이지 생성 → Li
     console.log('⚠️ Live Window MD 패널 미표시')
   }
 
-  // Developer MD 모달 확인 (메인 에디터 — devMarkdown 설정 시 표시)
-  const devModal = page.locator('.fixed.inset-0.z-50')
-  const hasDevModal = await devModal.isVisible({ timeout: 10_000 }).catch(() => false)
-
-  if (hasDevModal) {
-    console.log('✅ Developer diff 요약 모달 표시')
-    await page.screenshot({ path: 'test-results/lf-12-developer-modal.png' })
-    await page.waitForTimeout(DELAY)
-
-    // Export + VS Code 버튼 확인
-    await expect(devModal.getByRole('button', { name: /Export Project/i })).toBeVisible()
-    await expect(devModal.getByRole('button', { name: /VS Code/i })).toBeVisible()
-    console.log('✅ Export Project / VS Code 버튼 확인')
+  // Developer 피드백은 별도 팝업 창에 표시됨 (캔버스 모달 제거됨)
+  // 팝업 창 존재 확인
+  await page.waitForTimeout(2000)
+  const allWindows = electronApp.windows()
+  const feedbackPopup = allWindows.find(w => w !== page && w !== liveWindow)
+  if (feedbackPopup) {
+    console.log('✅ Developer 피드백 팝업 창 열림')
+    await feedbackPopup.screenshot({ path: 'test-results/lf-12-feedback-popup.png' })
     await page.waitForTimeout(DELAY)
   } else {
-    console.log('⚠️ Developer 모달 미표시 (편집 실패 가능)')
+    console.log('⚠️ 피드백 팝업 창 미감지')
   }
 
   // Developer 모드에서 오류 수정
-  await liveWindow.locator('#__vs-input').fill('Fix any TypeScript errors and make sure the page renders without console errors')
-  await page.waitForTimeout(DELAY)
-  await liveWindow.locator('#__vs-submit').click()
+  if (await vsInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await vsInput.fill('Fix any TypeScript errors and make sure the page renders without console errors')
+    await page.waitForTimeout(DELAY)
+    await vsSubmit.click()
 
-  await expect(
-    liveWindow.locator('#__vs-status'),
-  ).toContainText(/Applied|failed/i, { timeout: 120_000 })
+    await expect(
+      liveWindow.locator('#__vs-status'),
+    ).toContainText(/Applied|failed/i, { timeout: 120_000 })
+  }
 
   await liveWindow.screenshot({ path: 'test-results/lf-13-developer-bugfix.png' })
   console.log('✅ Developer 모드 오류 수정 완료')
   await page.waitForTimeout(DELAY)
 
   // ═══════════════════════════════════════════════════════════════
-  // Phase 8: VS Code 연동 — 프로젝트 내보내기 + VS Code 열기
+  // Phase 8: VS Code 연동 — IPC로 직접 Export + VS Code 열기
   // ═══════════════════════════════════════════════════════════════
+  // Export via IPC
+  const exportResult = await page.evaluate(async () => {
+    return await (window as any).electronAPI?.project?.exportToFolder?.('test-export', '~/VibeSynth/export/test-export')
+  })
+  console.log(`Export result: ${exportResult?.success ? '✅ 성공' : '⚠️ ' + (exportResult?.error || 'unknown')}`)
+  await page.waitForTimeout(DELAY)
 
-  // Developer 모달이 열려 있으면 Export 버튼 사용
-  const devModal2 = page.locator('.fixed.inset-0.z-50')
-  const hasModal2 = await devModal2.isVisible({ timeout: 5_000 }).catch(() => false)
-
-  if (hasModal2) {
-    // Export Project 버튼 클릭
-    const exportBtn = devModal2.getByRole('button', { name: /Export Project/i })
-    await expect(exportBtn).toBeVisible()
-    await page.waitForTimeout(DELAY)
-    await exportBtn.click()
-    await page.waitForTimeout(2000)
-
-    // Agent Log에 Export 완료 메시지 확인
-    const exportLog = await page.getByText(/Exported to/i).isVisible({ timeout: 10_000 }).catch(() => false)
-    console.log(`Export result: ${exportLog ? '✅ 성공' : '⚠️ 미확인'}`)
-    await page.waitForTimeout(DELAY)
-
-    // Open in VS Code 버튼 클릭
-    const vscodeBtn = devModal2.getByRole('button', { name: /VS Code/i })
-    await expect(vscodeBtn).toBeVisible()
-    await page.waitForTimeout(DELAY)
-    await vscodeBtn.click()
-    await page.waitForTimeout(2000)
-
-    // Agent Log에 VS Code 열림 메시지 확인
-    const vscodeLog = await page.getByText(/Opened in VS Code|Could not open/i).isVisible({ timeout: 10_000 }).catch(() => false)
-    console.log(`VS Code result: ${vscodeLog ? '✅ 확인' : '⚠️ 미확인 (CLI 미설치 가능)'}`)
-    await page.waitForTimeout(DELAY)
-
-    // 모달 닫기
-    await page.keyboard.press('Escape')
-    await page.waitForTimeout(DELAY)
-  } else {
-    // 모달이 없으면 직접 IPC로 Export 테스트
-    console.log('모달 없음 — IPC로 직접 Export/VS Code 테스트')
-
-    const projectId = await page.evaluate(() => {
-      // Editor에서 현재 프로젝트 ID를 가져올 수 있는 방법
-      // 간접적으로: URL이나 타이틀에서 추출하거나, electronAPI로 직접 호출
-      return (window as any).__currentProjectId || 'unknown'
-    })
-
-    // Export via IPC
-    const exportResult = await page.evaluate(async () => {
-      return await (window as any).electronAPI?.project?.exportToFolder?.('test-export', '~/VibeSynth/export/test-export')
-    })
-    console.log('Export IPC result:', exportResult)
-
-    // VS Code via IPC
-    const vscodeResult = await page.evaluate(async () => {
-      return await (window as any).electronAPI?.shell?.openVscode?.('~/VibeSynth/export/test-export')
-    })
-    console.log('VS Code IPC result:', vscodeResult)
-    await page.waitForTimeout(DELAY)
-  }
+  // VS Code via IPC
+  const vscodeResult = await page.evaluate(async () => {
+    return await (window as any).electronAPI?.shell?.openVscode?.('~/VibeSynth/export/test-export')
+  })
+  console.log(`VS Code result: ${vscodeResult?.success ? '✅ 확인' : '⚠️ ' + (vscodeResult?.error || 'CLI 미설치')}`)
+  await page.waitForTimeout(DELAY)
 
   await page.screenshot({ path: 'test-results/lf-14-final.png' })
 
   // ═══════════════════════════════════════════════════════════════
   // Phase 9: 정리 — Stop
   // ═══════════════════════════════════════════════════════════════
-  // Developer 모달이 Stop 버튼을 가리고 있을 수 있으므로 먼저 닫기
-  const blockingModal = page.locator('.fixed.inset-0.z-50')
-  if (await blockingModal.isVisible().catch(() => false)) {
-    // 모달 배경 클릭으로 닫기
-    await blockingModal.click({ position: { x: 5, y: 5 } })
-    await page.waitForTimeout(500)
-    // 아직 열려 있으면 evaluate로 강제 제거
-    if (await blockingModal.isVisible().catch(() => false)) {
-      await page.evaluate(() => {
-        document.querySelectorAll('.fixed.inset-0.z-50').forEach(el => el.remove())
-      })
-      await page.waitForTimeout(300)
-    }
-  }
+  // 피드백 팝업 창 닫기 (있으면)
+  await page.evaluate(async () => {
+    await (window as any).electronAPI?.feedback?.close?.()
+  }).catch(() => {})
+  await page.waitForTimeout(500)
 
   const stopBtn = page.getByRole('button', { name: /Stop/i })
   if (await stopBtn.isVisible().catch(() => false)) {

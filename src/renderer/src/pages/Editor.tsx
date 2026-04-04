@@ -1576,71 +1576,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         />
       )}
 
-      {/* §11.1 Developer mode markdown summary modal */}
-      {devMarkdown && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setDevMarkdown(null)}>
-          <div
-            className="w-[720px] max-h-[80vh] bg-white dark:bg-neutral-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-200 dark:border-neutral-700">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
-                💻 {locale === 'ko' ? '개발자 수정 요약' : 'Developer Edit Summary'}
-              </h3>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(devMarkdown)
-                    addLog('Copied developer summary to clipboard', 'success')
-                  }}
-                  className="px-3 py-1 text-xs font-medium rounded-lg bg-neutral-100 dark:bg-neutral-700 hover:bg-neutral-200 dark:hover:bg-neutral-600"
-                >
-                  {t('common.copy')}
-                </button>
-                <button onClick={() => setDevMarkdown(null)} className="p-1 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700">
-                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
-                </button>
-              </div>
-            </div>
-            <pre className="flex-1 overflow-auto p-5 text-xs leading-relaxed text-neutral-700 dark:text-neutral-300 font-mono whitespace-pre-wrap">
-              {devMarkdown}
-            </pre>
-            {/* §11.2 Export + VS Code buttons */}
-            <div className="flex items-center gap-2 px-5 py-3 border-t border-neutral-200 dark:border-neutral-700">
-              <button
-                onClick={async () => {
-                  const dest = `~/VibeSynth/export/${project.id}`
-                  const result = await window.electronAPI?.project.exportToFolder(project.id, dest)
-                  if (result?.success) {
-                    addLog(`Exported to ${result.path}`, 'success')
-                  } else {
-                    addLog(`Export failed: ${result?.error}`, 'error')
-                  }
-                }}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 hover:bg-emerald-200"
-              >
-                📦 {locale === 'ko' ? '프로젝트 내보내기' : 'Export Project'}
-              </button>
-              <button
-                onClick={async () => {
-                  const dest = `~/VibeSynth/export/${project.id}`
-                  // Export first if not already
-                  await window.electronAPI?.project.exportToFolder(project.id, dest)
-                  const result = await window.electronAPI?.shell.openVscode(dest)
-                  if (result?.success) {
-                    addLog('Opened in VS Code', 'success')
-                  } else {
-                    addLog(`Could not open VS Code: ${result?.error}`, 'error')
-                  }
-                }}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-200"
-              >
-                💻 {locale === 'ko' ? 'VS Code에서 열기' : 'Open in VS Code'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Developer summary is now shown in feedback popup window — no canvas modal */}
     </div>
   )
 }
