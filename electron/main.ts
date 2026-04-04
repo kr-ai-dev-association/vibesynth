@@ -108,7 +108,7 @@ function getDeviceWindowSize(deviceType?: string): { width: number; height: numb
       return { width: 420, height: 900 }
     case 'ipad':
     case 'tablet':
-      return { width: 820, height: 1100 }
+      return { width: 1060, height: 1400 }
     case 'web':
     case 'desktop':
       return { width: 1280, height: 800 }

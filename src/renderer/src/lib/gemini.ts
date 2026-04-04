@@ -29,6 +29,13 @@ LAYOUT & SPACING:
 - Cards should have 16-24px padding, 12-16px border-radius, subtle shadows.
 - Section spacing: 24-32px between major sections, 12-16px between related items.
 
+CONTENT DENSITY:
+- Mobile apps (390px): content should fit within one screen viewport (~844px). Header + main content + bottom nav. No excessive scrolling sections.
+- Tablet apps: content should fit within 1-2 viewports. Do not pad with empty sections.
+- Desktop/web: content CAN be long (landing pages, dashboards). But avoid redundant repeated sections or filler content.
+- Show ONLY meaningful, purpose-driven UI elements. Do NOT add decorative padding sections or duplicate similar components.
+- Every section must have a clear purpose — if you can't name what the section does, don't include it.
+
 TYPOGRAPHY:
 - Import Google Fonts via <style>@import url('https://fonts.googleapis.com/css2?family=...')</style>
 - Use a clear 3-level type hierarchy: Display/Headline (24-32px bold), Body (14-16px regular), Caption/Label (11-13px medium).

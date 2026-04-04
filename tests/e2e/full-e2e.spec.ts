@@ -660,8 +660,47 @@ test('VibeSynth 전체 기능 E2E', async ({ electronApp, page }) => {
   await page.waitForTimeout(DELAY)
 
   // ═══════════════════════════════════════════════════════════════
+  // 21. 컨텐츠 길이 확인 — 모바일 스크린이 지나치게 길지 않은지
+  // ═══════════════════════════════════════════════════════════════
+  const iframesForHeight = page.locator('[data-screen-card] iframe')
+  const heightCount = await iframesForHeight.count()
+  let excessiveHeightCount = 0
+  for (let i = 0; i < Math.min(heightCount, 3); i++) {
+    const srcdoc = await iframesForHeight.nth(i).getAttribute('srcdoc') || ''
+    // HTML 길이로 컨텐츠 양 추정 (base64 이미지 제외)
+    const stripped = srcdoc.replace(/data:[^"')\s]{200,}/g, '')
+    const box = await iframesForHeight.nth(i).boundingBox()
+    const displayHeight = box?.height || 0
+    console.log(`  스크린 ${i+1}: HTML ${stripped.length}자, 표시높이 ${Math.round(displayHeight)}px`)
+    // 모바일(390px) 스크린이 2000px 이상이면 지나치게 긴 것
+    if (displayHeight > 2000) excessiveHeightCount++
+  }
+  if (excessiveHeightCount > 0) {
+    console.log(`⚠️ 21. ${excessiveHeightCount}개 스크린이 지나치게 김 (>2000px)`)
+  } else {
+    console.log('✅ 21. 컨텐츠 길이 정상')
+  }
+  await page.waitForTimeout(DELAY)
+
+  // ═══════════════════════════════════════════════════════════════
+  // 22. Agent Log 에러 확인
+  // ═══════════════════════════════════════════════════════════════
+  const errorLogs = page.locator('.space-y-1\\.5 span.text-red-600, .space-y-1\\.5 span.text-red-400')
+  const errorCount = await errorLogs.count().catch(() => 0)
+  if (errorCount > 0) {
+    for (let i = 0; i < Math.min(errorCount, 3); i++) {
+      const errText = await errorLogs.nth(i).textContent()
+      console.log(`  Agent Log 에러 ${i+1}: ${errText?.slice(0, 100)}`)
+    }
+    console.log(`⚠️ 22. Agent Log에 ${errorCount}개 에러 발견`)
+  } else {
+    console.log('✅ 22. Agent Log 에러 없음')
+  }
+  await page.waitForTimeout(DELAY)
+
+  // ═══════════════════════════════════════════════════════════════
   // 최종 스크린샷
   // ═══════════════════════════════════════════════════════════════
   await page.screenshot({ path: 'test-results/full-99-final.png' })
-  console.log('\n🏁 VibeSynth 전체 기능 E2E 테스트 완료!')
+  console.log('\n🏁 VibeSynth 전체 기능 E2E 테스트 완료! (22개 Phase)')
 })
