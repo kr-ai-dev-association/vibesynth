@@ -160,7 +160,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       }).catch(() => {})
     }, 2000)
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current) }
-  }, [project.screens, project.designSystem, project.updatedAt]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [project.screens, project.designSystem, project.updatedAt, project.name]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const initialGenerationDone = useRef(false)
   const prevScreenCount = useRef(project.screens.length)
