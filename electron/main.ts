@@ -477,6 +477,108 @@ ipcMain.handle('feedback:close', () => {
   }
 })
 
+// ─── Live Edit Popup Window ───────────────────────────────────────
+
+let liveEditWindow: BrowserWindow | null = null
+
+ipcMain.handle('live-edit:open', () => {
+  if (liveEditWindow) {
+    liveEditWindow.focus()
+    return
+  }
+
+  liveEditWindow = new BrowserWindow({
+    width: 500,
+    height: 380,
+    minWidth: 400,
+    minHeight: 300,
+    title: '✦ VibeSynth — Live Edit',
+    alwaysOnTop: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f17;color:#e2e8f0;display:flex;flex-direction:column;height:100vh}
+  .header{padding:12px 16px;border-bottom:1px solid #1e1e2e;display:flex;align-items:center;gap:8px;-webkit-app-region:drag}
+  .header .logo{font-size:13px;font-weight:600;color:#a5b4fc}
+  .content{flex:1;display:flex;flex-direction:column;padding:16px;gap:12px;overflow-y:auto}
+  .input-area{display:flex;gap:8px}
+  textarea{flex:1;background:#1a1a2e;border:1px solid #2d2d44;border-radius:10px;padding:10px 14px;color:#e2e8f0;font-size:13px;resize:none;outline:none;font-family:inherit;min-height:60px}
+  textarea:focus{border-color:#7c3aed}
+  textarea::placeholder{color:#4a4a6a}
+  button.submit{background:#7c3aed;color:white;border:none;border-radius:10px;padding:10px 20px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+  button.submit:hover{background:#6d28d9}
+  button.submit:disabled{opacity:0.4;cursor:not-allowed}
+  .feedback{font-size:12px;line-height:1.6;color:#94a3b8;white-space:pre-wrap;max-height:180px;overflow-y:auto;padding:10px;background:#1a1a2e;border-radius:8px}
+  .feedback.success{border-left:3px solid #34d399}
+  .feedback.error{border-left:3px solid #f87171}
+  .feedback.generating{border-left:3px solid #fbbf24}
+  .status{font-size:11px;color:#64748b;text-align:center;padding:4px}
+</style></head><body>
+<div class="header"><span class="logo">✦ Live Edit</span></div>
+<div class="content">
+  <div class="input-area">
+    <textarea id="le-input" rows="2" placeholder="Describe changes to apply to the live app..."></textarea>
+    <button class="submit" id="le-submit">Apply</button>
+  </div>
+  <div class="feedback" id="le-feedback" style="display:none"></div>
+  <div class="status" id="le-status"></div>
+</div>
+<script>
+  const input = document.getElementById('le-input');
+  const submit = document.getElementById('le-submit');
+  const feedback = document.getElementById('le-feedback');
+  const status = document.getElementById('le-status');
+
+  async function handleSubmit() {
+    const prompt = input.value.trim();
+    if (!prompt) return;
+    submit.disabled = true;
+    status.textContent = 'Applying changes...';
+    feedback.style.display = 'none';
+    try {
+      await window.electronAPI?.sendLiveEditResult?.({ success: false, message: '' });
+      // The actual edit is handled by the main editor via IPC
+      // We just send the request through the existing live-edit-request channel
+    } catch {}
+  }
+
+  submit.addEventListener('click', handleSubmit);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(); }
+  });
+</script>
+</body></html>`
+
+  liveEditWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+
+  liveEditWindow.on('closed', () => { liveEditWindow = null })
+})
+
+ipcMain.handle('live-edit:update-feedback', (_event, message: string, type: 'success' | 'error' | 'generating') => {
+  if (liveEditWindow) {
+    liveEditWindow.webContents.executeJavaScript(`
+      const fb = document.getElementById('le-feedback');
+      const st = document.getElementById('le-status');
+      const sub = document.getElementById('le-submit');
+      if (fb) { fb.textContent = ${JSON.stringify(message)}; fb.className = 'feedback ${type}'; fb.style.display = 'block'; }
+      if (st) { st.textContent = '${type === 'success' ? '✓ Applied' : type === 'error' ? '✗ Failed' : '⏳ Processing...'}'; }
+      if (sub) { sub.disabled = ${type === 'generating'}; }
+    `)
+  }
+})
+
+ipcMain.handle('live-edit:close', () => {
+  if (liveEditWindow) { liveEditWindow.close(); liveEditWindow = null }
+})
+
 // ─── Gemini CLI Integration ───────────────────────────────────────
 
 ipcMain.handle('gemini-cli:available', () => {

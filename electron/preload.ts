@@ -48,6 +48,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('shell:open-vscode', folderPath) as Promise<{ success: boolean; error?: string }>,
   },
 
+  // Live Edit popup
+  liveEdit: {
+    open: () => ipcRenderer.invoke('live-edit:open'),
+    updateFeedback: (message: string, type: 'success' | 'error' | 'generating') =>
+      ipcRenderer.invoke('live-edit:update-feedback', message, type),
+    close: () => ipcRenderer.invoke('live-edit:close'),
+  },
+
   // Feedback popup (Designer/Developer mode)
   feedback: {
     show: (content: string, mode: 'designer' | 'developer') =>

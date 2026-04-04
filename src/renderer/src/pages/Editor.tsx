@@ -996,6 +996,8 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   const handleRun = async () => {
     if (isRunning) {
       window.electronAPI?.closeLiveWindow()
+      window.electronAPI?.liveEdit.close()
+      window.electronAPI?.feedback.close()
       await window.electronAPI?.project.stopDev()
       setIsRunning(false)
       setDevServerUrl(null)
@@ -1157,6 +1159,8 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           addLog(t('editor.log.filesUpdated'), 'success')
         }
         setIsRunning(true)
+        // Open Live Edit popup alongside Live App
+        window.electronAPI?.liveEdit.open()
       } catch (err: any) {
         addLog(t('editor.log.frontendFailed', { error: err.message }), 'error')
       } finally {
@@ -1168,6 +1172,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         : project.screens[0]
       window.electronAPI?.openLiveWindow(screen?.html, deviceType)
       setIsRunning(true)
+      window.electronAPI?.liveEdit.open()
     }
   }
 

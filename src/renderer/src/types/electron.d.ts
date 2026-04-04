@@ -49,6 +49,11 @@ interface ElectronAPI {
   sendLiveEditResult: (result: { success: boolean; message: string; devMarkdown?: string }) => Promise<void>
   pinterest: ElectronPinterestAPI
   project: ElectronProjectAPI
+  liveEdit: {
+    open: () => Promise<void>
+    updateFeedback: (message: string, type: 'success' | 'error' | 'generating') => Promise<void>
+    close: () => Promise<void>
+  }
   shell: ElectronShellAPI
   feedback: {
     show: (content: string, mode: 'designer' | 'developer') => Promise<void>
