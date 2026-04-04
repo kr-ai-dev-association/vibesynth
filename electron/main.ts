@@ -605,11 +605,16 @@ ipcMain.handle('live-edit:open', () => {
     status.textContent = 'Applying changes...';
     feedback.className = 'feedback generating visible';
     feedback.innerHTML = '<div style="display:flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="animation:spin 1s linear infinite"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" opacity="0.2"/><path d="M12 2a10 10 0 019.95 9" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg> Processing...</div>';
+    console.log('[LiveEdit] Sending edit request:', prompt);
     try {
-      // Send edit request via IPC — the main editor handles it
-      // The prompt and mode are sent together
-      await window.electronAPI?.sendLiveEditResult?.({ success: false, message: '', devMarkdown: '' });
-    } catch {}
+      // Send edit request to main process → forwarded to Editor
+      await window.electronAPI?.liveEdit?.sendRequest?.(prompt);
+    } catch (err) {
+      console.error('[LiveEdit] Send failed:', err);
+      feedback.textContent = 'Failed to send request';
+      feedback.className = 'feedback error visible';
+      submit.disabled = false;
+    }
   }
 
   submit.addEventListener('click', handleSubmit);
@@ -813,6 +818,7 @@ ipcMain.handle('pinterest:cancel', () => {
 })
 
 ipcMain.handle('live-edit-request', (_event, prompt: string, currentUrl: string) => {
+  console.log(`[VibeSynth] live-edit-request: prompt="${prompt?.slice(0, 50)}", mainWindow=${!!mainWindow}`)
   mainWindow?.webContents.send('live-edit-request', prompt, currentUrl)
 })
 

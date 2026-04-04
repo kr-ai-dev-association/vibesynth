@@ -53,6 +53,7 @@ interface ElectronAPI {
   project: ElectronProjectAPI
   liveEdit: {
     open: () => Promise<void>
+    sendRequest: (prompt: string) => Promise<void>
     updateFeedback: (message: string, type: 'success' | 'error' | 'generating', devMarkdown?: string) => Promise<void>
     close: () => Promise<void>
   }
