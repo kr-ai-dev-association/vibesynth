@@ -1871,13 +1871,29 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                 }
 
                 // Save stolen DS to recommended list
+                // Save to localStorage (designGuideDB)
                 designGuideDB.saveFromGeneration(
                   newDs.name,
                   `Stolen from Pinterest: ${imageUrl.substring(0, 60)}`,
                   newDs.guide || { overview: '', colorRules: '', typographyRules: '', elevationRules: '', componentRules: '', dosAndDonts: '' },
                   newDs
                 )
-                addLog(`"${newDs.name}" added to saved design systems`, 'info')
+
+                // Save to Electron DB for persistence
+                window.electronAPI?.db.saveGuide({
+                  id: `stolen-${Date.now()}`,
+                  name: newDs.name,
+                  keywords: ['pinterest', 'stolen'],
+                  mood: [],
+                  domains: [],
+                  guide: newDs.guide || {},
+                  designSystem: newDs,
+                  source: 'ai-generated',
+                  createdAt: new Date().toISOString(),
+                  userId: 'default',
+                })
+
+                addLog(`"${newDs.name}" saved to design systems`, 'success')
 
                 onProjectUpdate({
                   ...project,
