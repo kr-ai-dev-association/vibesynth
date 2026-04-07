@@ -219,6 +219,20 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     }
   }, [])
 
+  // Dev server health check — detect zombie/dead processes
+  useEffect(() => {
+    if (!isRunning) return
+    const interval = setInterval(async () => {
+      const status = await window.electronAPI?.project.getStatus()
+      if (status && !status.running) {
+        console.log('[VibeSynth] Dev server died — resetting state')
+        setIsRunning(false)
+        setDevServerUrl(null)
+      }
+    }, 10_000) // check every 10s
+    return () => clearInterval(interval)
+  }, [isRunning])
+
   // Sync current screen HTML to live window when screens update (only for single-screen data URL mode)
   useEffect(() => {
     if (!isRunning || devServerUrl) return
@@ -1112,14 +1126,22 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     return () => cleanup?.()
   }, [devServerUrl, project.id, project.screens, feedbackMode, locale]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const handleStop = async () => {
+    window.electronAPI?.closeLiveWindow()
+    window.electronAPI?.liveEdit.close()
+    window.electronAPI?.feedback.close()
+    await window.electronAPI?.project.stopDev()
+    setIsRunning(false)
+    setDevServerUrl(null)
+  }
+
   const handleRun = async () => {
     if (isRunning) {
-      window.electronAPI?.closeLiveWindow()
-      window.electronAPI?.liveEdit.close()
-      window.electronAPI?.feedback.close()
-      await window.electronAPI?.project.stopDev()
-      setIsRunning(false)
-      setDevServerUrl(null)
+      // Resume — re-open Live App + Live Edit windows
+      if (devServerUrl) {
+        await window.electronAPI?.openLiveWindowUrl(devServerUrl, deviceType)
+      }
+      window.electronAPI?.liveEdit.open()
       return
     }
 
@@ -1574,7 +1596,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                   buildingFrontend
                     ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 cursor-wait border-amber-200 dark:border-amber-700'
                     : isRunning
-                      ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-200 border-red-200 dark:border-red-700'
+                      ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-200 border-blue-200 dark:border-blue-700'
                       : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 hover:bg-emerald-200 border-emerald-200 dark:border-emerald-700'
                 }`}
               >
@@ -1583,7 +1605,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                     <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-20" /><path d="M12 2a10 10 0 019.95 9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" /></svg>
                     Building...
                   </span>
-                ) : isRunning ? t('editor.stop') : t('editor.run')}
+                ) : isRunning ? 'Resume' : t('editor.run')}
               </button>
               <button
                 onClick={() => setShowRunMenu(v => !v)}
@@ -1592,7 +1614,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                   buildingFrontend
                     ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 cursor-wait'
                     : isRunning
-                      ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-200'
+                      ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-200'
                       : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 hover:bg-emerald-200'
                 }`}
               >
@@ -1607,8 +1629,16 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                   onClick={() => { setShowRunMenu(false); handleRun() }}
                   className="w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2"
                 >
-                  {isRunning ? '⏹ Stop' : '▶ Run'}
+                  {isRunning ? '🔄 Resume' : '▶ Run'}
                 </button>
+                {isRunning && (
+                  <button
+                    onClick={() => { setShowRunMenu(false); handleStop() }}
+                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 text-red-600 dark:text-red-400"
+                  >
+                    ⏹ Stop
+                  </button>
+                )}
                 <button
                   onClick={handleRestartServer}
                   disabled={project.screens.length < 2}
@@ -1627,6 +1657,14 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
               </>
             )}
           </div>
+
+          {/* Running port indicator */}
+          {isRunning && devServerUrl && (
+            <span className="flex items-center gap-1 text-[10px] font-mono text-emerald-600 dark:text-emerald-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              {devServerUrl.replace('http://localhost:', ':')}
+            </span>
+          )}
 
           {/* §11.1 Designer / Developer mode toggle */}
           {isRunning && (

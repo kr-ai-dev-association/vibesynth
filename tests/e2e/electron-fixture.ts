@@ -75,5 +75,26 @@ export const test = base.extend<ElectronFixtures>({
     await use(win)
     const screenshot = await win.screenshot()
     await testInfo.attach('screenshot', { body: screenshot, contentType: 'image/png' })
+
+    // ─── Auto-cleanup: delete projects created during this test ───
+    try {
+      await win.evaluate(async () => {
+        const api = (window as any).electronAPI
+        if (!api?.db?.getAllProjects) return
+        const projects = await api.db.getAllProjects('default')
+        if (!projects?.length) return
+        for (const p of projects) {
+          // Skip example/curated projects
+          if (p.id.startsWith('ex-')) continue
+          try {
+            await api.project?.clean?.(p.id)  // delete workspace files
+            await api.db?.deleteProject?.(p.id) // delete from DB
+          } catch {}
+        }
+      })
+      console.log('[Fixture] Cleaned up test-generated projects')
+    } catch {
+      // Page may already be closed — ignore
+    }
   },
 })

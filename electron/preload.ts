@@ -33,6 +33,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('project:clean', projectId) as Promise<{ success: boolean }>,
     restartDev: (projectId: string) =>
       ipcRenderer.invoke('project:restart-dev', projectId) as Promise<{ success: boolean; url?: string; port?: number; error?: string }>,
+    getDevInfo: () =>
+      ipcRenderer.invoke('project:get-dev-info') as Promise<{
+        tracked: { pid: number; projectId: string; alive: boolean } | null
+        activePorts: { port: number; pid: number }[]
+      }>,
     scaffold: (projectId: string, files: Record<string, string>) =>
       ipcRenderer.invoke('project:scaffold', projectId, files),
     writeFile: (projectId: string, filePath: string, content: string) =>

@@ -433,9 +433,45 @@ ipcMain.handle('project:restart-dev', async (_event, projectId: string) => {
 })
 
 ipcMain.handle('project:get-status', () => {
+  // Check if tracked process is actually still alive
+  if (devServerProcess && devServerProcess.exitCode !== null) {
+    console.log('[VibeSynth] Dev server process died (exitCode:', devServerProcess.exitCode, ') — cleaning up')
+    devServerProcess = null
+    devServerProjectId = null
+  }
   return {
     running: devServerProcess !== null,
     projectId: devServerProjectId,
+  }
+})
+
+ipcMain.handle('project:get-dev-info', () => {
+  // Scan for all listening processes on Vite port range
+  let activePorts: { port: number; pid: number }[] = []
+  try {
+    const result = execSync(
+      `lsof -iTCP:5173-5299 -sTCP:LISTEN -P -n 2>/dev/null || true`,
+      { encoding: 'utf-8', timeout: 3000 }
+    ).trim()
+    if (result) {
+      for (const line of result.split('\n').slice(1)) { // skip header
+        const parts = line.split(/\s+/)
+        const pid = parseInt(parts[1])
+        const portMatch = parts[8]?.match(/:(\d+)$/)
+        if (pid && portMatch) {
+          activePorts.push({ port: parseInt(portMatch[1]), pid })
+        }
+      }
+    }
+  } catch {}
+
+  return {
+    tracked: devServerProcess ? {
+      pid: devServerProcess.pid,
+      projectId: devServerProjectId,
+      alive: devServerProcess.exitCode === null,
+    } : null,
+    activePorts,
   }
 })
 
@@ -1197,6 +1233,7 @@ function killZombieElectrons() {
 
 app.whenReady().then(() => {
   killZombieElectrons()
+  killZombieDevServers()
   createMainWindow()
 
   app.on('activate', () => {
@@ -1208,10 +1245,12 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   killDevServer()
+  killZombieDevServers()
 })
 
 app.on('window-all-closed', () => {
   killDevServer()
+  killZombieDevServers()
   if (process.platform !== 'darwin') {
     app.quit()
   }

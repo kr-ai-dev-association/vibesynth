@@ -151,6 +151,80 @@ function formatDesignSystemTokens(ds: DesignSystem): string {
   return lines.join('\n')
 }
 
+/**
+ * Export full design system as a Markdown document.
+ * Used for: Gemini context in Live App builds, project export, display.
+ */
+export function designSystemToMarkdown(ds: DesignSystem): string {
+  const lines: string[] = [
+    `# Design System: ${ds.name}`,
+    '',
+    `**Color Scheme:** ${ds.colorScheme || 'auto'}`,
+    '',
+    '## Colors',
+    '',
+  ]
+
+  const roles = ['primary', 'secondary', 'tertiary', 'neutral'] as const
+  for (const role of roles) {
+    const c = ds.colors[role]
+    if (!c) continue
+    lines.push(`### ${role.charAt(0).toUpperCase() + role.slice(1)}`)
+    lines.push(`- **Base:** \`${c.base}\``)
+    if (c.tones?.length) {
+      const toneLabels = ['T0', 'T10', 'T20', 'T30', 'T40', 'T50', 'T60', 'T70', 'T80', 'T90', 'T95', 'T100']
+      const toneStr = c.tones.map((t, i) => `${toneLabels[i] || `T${i}`}: \`${t}\``).join(', ')
+      lines.push(`- **Tones:** ${toneStr}`)
+    }
+    lines.push('')
+  }
+
+  lines.push('## Typography', '')
+  const typoLevels = ['headline', 'body', 'label'] as const
+  for (const level of typoLevels) {
+    const t = ds.typography[level]
+    if (!t) continue
+    lines.push(`### ${level.charAt(0).toUpperCase() + level.slice(1)}`)
+    lines.push(`- **Font:** \`${t.family}\``)
+    if (t.size) lines.push(`- **Size:** ${t.size}`)
+    if (t.weight) lines.push(`- **Weight:** ${t.weight}`)
+    if (t.lineHeight) lines.push(`- **Line Height:** ${t.lineHeight}`)
+    lines.push('')
+  }
+
+  if (ds.components) {
+    lines.push('## Components', '')
+    lines.push(`| Token | Value |`)
+    lines.push(`|-------|-------|`)
+    for (const [key, val] of Object.entries(ds.components)) {
+      lines.push(`| ${key} | \`${val}\` |`)
+    }
+    lines.push('')
+  }
+
+  if (ds.guide) {
+    lines.push('## Design Guide', '')
+    const sections: { key: keyof typeof ds.guide; title: string }[] = [
+      { key: 'overview', title: 'Overview' },
+      { key: 'colorRules', title: 'Color Rules' },
+      { key: 'typographyRules', title: 'Typography Rules' },
+      { key: 'elevationRules', title: 'Elevation & Shadows' },
+      { key: 'componentRules', title: 'Component Rules' },
+      { key: 'dosAndDonts', title: "Do's & Don'ts" },
+    ]
+    for (const { key, title } of sections) {
+      const content = ds.guide[key]
+      if (content) {
+        lines.push(`### ${title}`)
+        lines.push(content)
+        lines.push('')
+      }
+    }
+  }
+
+  return lines.join('\n')
+}
+
 // ─── Image Placeholder Replacement ──────────────────────────────
 
 function replaceImagePlaceholders(html: string, images: Map<string, string>): string {
@@ -600,7 +674,24 @@ Return ONLY the JSON, no other text.`,
   else if (json.startsWith('```')) json = json.slice(3)
   if (json.endsWith('```')) json = json.slice(0, -3)
 
-  return JSON.parse(json.trim())
+  let parsed: any
+  try {
+    parsed = JSON.parse(json.trim())
+  } catch (e) {
+    console.error('[VibeSynth] DS extraction JSON parse failed:', json.slice(0, 200))
+    throw new Error('Design system extraction failed — invalid JSON from AI')
+  }
+
+  // Ensure guide exists with all required fields
+  if (!parsed.guide || typeof parsed.guide !== 'object') {
+    parsed.guide = {}
+  }
+  const guideDefaults = ['overview', 'colorRules', 'typographyRules', 'elevationRules', 'componentRules', 'dosAndDonts']
+  for (const key of guideDefaults) {
+    if (!parsed.guide[key]) parsed.guide[key] = ''
+  }
+
+  return parsed
 }
 
 /**
@@ -635,8 +726,13 @@ Example: [{"cssPath":"body > header > nav","tagName":"nav","label":"Main Navigat
   else if (json.startsWith('```')) json = json.slice(3)
   if (json.endsWith('```')) json = json.slice(0, -3)
 
-  const zones = JSON.parse(json.trim())
-  return Array.isArray(zones) ? zones : []
+  try {
+    const zones = JSON.parse(json.trim())
+    return Array.isArray(zones) ? zones : []
+  } catch {
+    console.error('[VibeSynth] Heatmap JSON parse failed:', json.slice(0, 200))
+    return []
+  }
 }
 
 /**
@@ -750,47 +846,68 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
   files['src/vite-env.d.ts'] = `/// <reference types="vite/client" />`
 
+  // Export design system as MD file in the project
+  if (designSystem) {
+    files['DESIGN_SYSTEM.md'] = designSystemToMarkdown(designSystem)
+  }
+
   // ─── Step 2: Extract images from HTML → public/images/ and copy reference files ───
   let imageCounter = 0
   const imageMap = new Map<string, string>() // dataUrl → /images/filename
 
   for (const screen of screens) {
     const component = screen.name.replace(/[^a-zA-Z0-9]/g, '')
-    // Extract base64/SVG data URLs from img src and background-image
-    const dataUrlRegex = /(?:src|url\()=?"?(data:image\/([a-zA-Z+]+);base64,[A-Za-z0-9+/=]+)"?/g
-    let match: RegExpExecArray | null
     let processedHtml = screen.html
-    while ((match = dataUrlRegex.exec(screen.html)) !== null) {
-      const dataUrl = match[1]
-      if (imageMap.has(dataUrl)) continue
-      const ext = match[2] === 'svg+xml' ? 'svg' : match[2] === 'jpeg' ? 'jpg' : (match[2] || 'png')
-      const filename = `img-${++imageCounter}.${ext}`
-      const publicPath = `/images/${filename}`
-      imageMap.set(dataUrl, publicPath)
 
-      // Decode base64 to binary and save to public/images/
-      const base64Part = dataUrl.split(',')[1]
-      if (base64Part) {
-        // Store as base64 string — will be decoded when writing to disk
-        files[`public/images/${filename}`] = `__BASE64__${base64Part}`
+    try {
+      // Extract base64 data URLs by finding src="data:image/..." patterns
+      // Use indexOf-based extraction to avoid catastrophic regex backtracking on large base64
+      let searchFrom = 0
+      while (searchFrom < processedHtml.length) {
+        const dataIdx = processedHtml.indexOf('data:image/', searchFrom)
+        if (dataIdx === -1) break
+
+        // Find the enclosing quote or parenthesis
+        const prevChar = processedHtml[dataIdx - 1]
+        const endChar = prevChar === '"' ? '"' : prevChar === "'" ? "'" : prevChar === '(' ? ')' : '"'
+        const endIdx = processedHtml.indexOf(endChar, dataIdx)
+        if (endIdx === -1 || endIdx - dataIdx > 5_000_000) { searchFrom = dataIdx + 1; continue }
+
+        const dataUrl = processedHtml.substring(dataIdx, endIdx)
+        if (imageMap.has(dataUrl)) { searchFrom = endIdx; continue }
+
+        // Determine type
+        const isBase64 = dataUrl.includes(';base64,')
+        const isSvgEncoded = dataUrl.startsWith('data:image/svg+xml,')
+
+        if (isBase64) {
+          const mimeMatch = dataUrl.match(/data:image\/([a-zA-Z+]+);base64,/)
+          const mime = mimeMatch?.[1] || 'png'
+          const ext = mime === 'svg+xml' ? 'svg' : mime === 'jpeg' ? 'jpg' : mime
+          const filename = `img-${++imageCounter}.${ext}`
+          const publicPath = `/images/${filename}`
+          imageMap.set(dataUrl, publicPath)
+          const base64Part = dataUrl.split(',')[1]
+          if (base64Part) files[`public/images/${filename}`] = `__BASE64__${base64Part}`
+        } else if (isSvgEncoded) {
+          const filename = `img-${++imageCounter}.svg`
+          const publicPath = `/images/${filename}`
+          imageMap.set(dataUrl, publicPath)
+          const svgContent = decodeURIComponent(dataUrl.replace('data:image/svg+xml,', ''))
+          files[`public/images/${filename}`] = svgContent
+        }
+
+        searchFrom = endIdx
       }
-    }
-    // Also extract data:image/svg+xml,<encoded> (non-base64 SVGs)
-    const svgUrlRegex = /(?:src|url\()=?"?(data:image\/svg\+xml,[^"'\s)]+)"?/g
-    while ((match = svgUrlRegex.exec(screen.html)) !== null) {
-      const dataUrl = match[1]
-      if (imageMap.has(dataUrl)) continue
-      const filename = `img-${++imageCounter}.svg`
-      const publicPath = `/images/${filename}`
-      imageMap.set(dataUrl, publicPath)
-      const svgContent = decodeURIComponent(dataUrl.replace('data:image/svg+xml,', ''))
-      files[`public/images/${filename}`] = svgContent
+
+      // Replace data URLs in HTML with public paths for reference
+      for (const [dataUrl, publicPath] of imageMap) {
+        processedHtml = processedHtml.split(dataUrl).join(publicPath)
+      }
+    } catch (e) {
+      console.error('[VibeSynth] Image extraction error:', e)
     }
 
-    // Replace data URLs in HTML with public paths for reference
-    for (const [dataUrl, publicPath] of imageMap) {
-      processedHtml = processedHtml.split(dataUrl).join(publicPath)
-    }
     files[`src/pages/${component}.ref.html`] = processedHtml
   }
 
@@ -810,22 +927,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
   const prdContext = prd ? `\n\nPRD (Product Requirements):\n${prd.slice(0, 3000)}` : ''
 
-  // Build design system context for Gemini
+  // Build design system context for Gemini — full MD with all tokens, tones, guide
   let dsContext = ''
   if (designSystem) {
-    const colors = designSystem.colors
-    const typo = designSystem.typography
-    dsContext = `\n\nDESIGN SYSTEM "${designSystem.name}" (MUST follow these tokens):
-Colors:
-  Primary: ${colors?.primary?.base || 'auto'}
-  Secondary: ${colors?.secondary?.base || 'auto'}
-  Tertiary: ${colors?.tertiary?.base || 'auto'}
-  Neutral: ${colors?.neutral?.base || 'auto'}
-Typography:
-  Headline: ${typo?.headline?.family || 'auto'} ${typo?.headline?.size || ''} ${typo?.headline?.weight || ''}
-  Body: ${typo?.body?.family || 'auto'} ${typo?.body?.size || ''} ${typo?.body?.weight || ''}
-  Label: ${typo?.label?.family || 'auto'} ${typo?.label?.size || ''} ${typo?.label?.weight || ''}
-${designSystem.components ? `Components: ${JSON.stringify(designSystem.components)}` : ''}`
+    const dsMd = designSystemToMarkdown(designSystem)
+    dsContext = `\n\n${dsMd}\n\nIMPORTANT: Follow the design system above exactly — use the specified colors, fonts, and component styles.`
   }
 
   const result = await model.generateContent([
