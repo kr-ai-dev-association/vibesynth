@@ -91,15 +91,17 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
 
   return (
     <div className="h-screen flex flex-col">
-      {/* Header */}
-      <header className="h-13 flex items-center justify-between px-4 border-b border-neutral-200 dark:border-neutral-700 shrink-0 draggable">
-        <div className="flex items-center gap-2 no-drag">
+      {/* Window drag bar */}
+      <div className="h-3 shrink-0 draggable bg-white dark:bg-neutral-800" />
+      {/* Header toolbar */}
+      <header className="h-10 flex items-center justify-between px-4 border-b border-neutral-200 dark:border-neutral-700 shrink-0">
+        <div className="flex items-center gap-2">
           <span className="text-xl font-bold tracking-tight">{t('common.appName')}</span>
           <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md border border-neutral-300 dark:border-neutral-600 text-neutral-500">
             {t('common.beta')}
           </span>
         </div>
-        <div className="flex items-center gap-1 no-drag">
+        <div className="flex items-center gap-1">
           <button
             onClick={() => setLocale(locale === 'en' ? 'ko' : 'en')}
             className="px-2 py-1 text-[11px] font-semibold rounded-lg border border-neutral-200 dark:border-neutral-600 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"

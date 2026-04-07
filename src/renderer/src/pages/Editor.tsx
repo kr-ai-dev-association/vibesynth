@@ -1435,9 +1435,11 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
 
   return (
     <div className="h-screen flex flex-col bg-neutral-50 dark:bg-neutral-900">
-      {/* Header */}
-      <header className="h-12 flex items-center justify-between px-3 bg-white dark:bg-neutral-800 border-b border-neutral-200 dark:border-neutral-700 shrink-0 draggable">
-        <div className="flex items-center gap-2 no-drag">
+      {/* Window drag bar — separate from toolbar so buttons remain clickable */}
+      <div className="h-3 shrink-0 draggable bg-white dark:bg-neutral-800" />
+      {/* Header toolbar */}
+      <header className="h-10 flex items-center justify-between px-3 bg-white dark:bg-neutral-800 border-b border-neutral-200 dark:border-neutral-700 shrink-0">
+        <div className="flex items-center gap-2">
           {/* Hamburger */}
           <div className="relative">
             <button
@@ -1496,12 +1498,12 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                 if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
                 if (e.key === 'Escape') { setProjectNameValue(project.name); setEditingProjectName(false) }
               }}
-              className="text-sm font-medium bg-transparent border-b border-blue-400 outline-none w-48 no-drag"
+              className="text-sm font-medium bg-transparent border-b border-blue-400 outline-none w-48"
             />
           ) : (
             <button
               onClick={() => { setEditingProjectName(true); setProjectNameValue(project.name) }}
-              className="text-sm font-medium hover:text-blue-500 transition-colors no-drag"
+              className="text-sm font-medium hover:text-blue-500 transition-colors"
               title="Click to rename project"
             >
               {project.name}
@@ -1534,7 +1536,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           )}
         </div>
 
-        <div className="flex items-center gap-2 no-drag">
+        <div className="flex items-center gap-2">
           {/* Run/Stop + Rebuild dropdown */}
           <div className="relative">
             <div className="flex">
@@ -1805,6 +1807,13 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                       onElementSelect={(info) => {
                         setSelectedElement(info)
                         addLog(t('editor.log.selectedElement', { tag: info.tagName, text: info.textPreview.slice(0, 40) }), 'info')
+                      }}
+                      onTextEdit={(screenId, newHtml, editInfo) => {
+                        const updatedScreens = project.screens.map(s =>
+                          s.id === screenId ? { ...s, html: newHtml } : s
+                        )
+                        onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
+                        addLog(`Text edited: "${editInfo.oldText.slice(0, 30)}" → "${editInfo.newText.slice(0, 30)}"`, 'success')
                       }}
                       onHeatmapZoneClick={(zone, x, y) => {
                         setHeatmapActionMenu({ zone, screenName: screen.name, x, y })
@@ -2162,6 +2171,7 @@ const EDIT_MODE_SCRIPT = `
 <script>
 (function() {
   let hoverEl = null;
+  let editingEl = null;
   const overlay = document.createElement('div');
   overlay.id = '__vs_overlay';
   overlay.style.cssText = 'position:fixed;pointer-events:none;border:2px solid #3b82f6;background:rgba(59,130,246,0.08);z-index:99999;transition:all 0.1s;display:none;border-radius:4px;';
@@ -2172,11 +2182,13 @@ const EDIT_MODE_SCRIPT = `
   label.style.cssText = 'position:fixed;z-index:100000;background:#3b82f6;color:#fff;font:500 11px/1.3 system-ui;padding:2px 6px;border-radius:4px;pointer-events:none;display:none;white-space:nowrap;';
   document.body.appendChild(label);
 
+  function isVsEl(el) { return el && (el.id === '__vs_overlay' || el.id === '__vs_label' || el.id === '__vs_edit_hint'); }
+
   function cssPath(el) {
     const parts = [];
     while (el && el.nodeType === 1 && el.tagName !== 'HTML') {
       let sel = el.tagName.toLowerCase();
-      if (el.id) { sel += '#' + el.id; parts.unshift(sel); break; }
+      if (el.id && !el.id.startsWith('__vs_')) { sel += '#' + el.id; parts.unshift(sel); break; }
       const sib = el.parentNode ? Array.from(el.parentNode.children) : [];
       const same = sib.filter(s => s.tagName === el.tagName);
       if (same.length > 1) sel += ':nth-of-type(' + (same.indexOf(el) + 1) + ')';
@@ -2186,9 +2198,23 @@ const EDIT_MODE_SCRIPT = `
     return parts.join(' > ');
   }
 
+  // Check if element is a text-editable leaf node
+  function isTextElement(el) {
+    const tag = el.tagName;
+    if (['IMG','SVG','VIDEO','IFRAME','CANVAS','INPUT','TEXTAREA','SELECT','BUTTON'].includes(tag)) return false;
+    // Has text content but no complex child elements (only text/inline nodes)
+    const hasText = el.textContent && el.textContent.trim().length > 0;
+    const hasBlockChildren = Array.from(el.children).some(c => {
+      const d = window.getComputedStyle(c).display;
+      return d === 'block' || d === 'flex' || d === 'grid';
+    });
+    return hasText && !hasBlockChildren;
+  }
+
   document.addEventListener('mousemove', function(e) {
+    if (editingEl) return;
     const t = e.target;
-    if (t === overlay || t === label || t.id === '__vs_overlay' || t.id === '__vs_label') return;
+    if (isVsEl(t)) return;
     if (t === hoverEl) return;
     hoverEl = t;
     const r = t.getBoundingClientRect();
@@ -2199,23 +2225,27 @@ const EDIT_MODE_SCRIPT = `
     overlay.style.height = r.height + 'px';
     const tag = t.tagName.toLowerCase();
     const cls = t.className && typeof t.className === 'string' ? '.' + t.className.trim().split(/\\s+/).slice(0,2).join('.') : '';
-    label.textContent = tag + cls;
+    const hint = isTextElement(t) ? ' ✎' : '';
+    label.textContent = tag + cls + hint;
     label.style.display = 'block';
     label.style.left = r.left + 'px';
     label.style.top = Math.max(0, r.top - 22) + 'px';
   });
 
   document.addEventListener('mouseleave', function() {
+    if (editingEl) return;
     overlay.style.display = 'none';
     label.style.display = 'none';
     hoverEl = null;
   });
 
+  // Single click: select element (send info to parent)
   document.addEventListener('click', function(e) {
+    if (editingEl) return;
+    const t = e.target;
+    if (isVsEl(t)) return;
     e.preventDefault();
     e.stopPropagation();
-    const t = e.target;
-    if (t.id === '__vs_overlay' || t.id === '__vs_label') return;
     const path = cssPath(t);
     const text = (t.textContent || '').trim().slice(0, 80);
     const outer = t.outerHTML.slice(0, 500);
@@ -2226,6 +2256,82 @@ const EDIT_MODE_SCRIPT = `
       textPreview: text,
       outerHtml: outer,
     }, '*');
+
+    // Visual feedback: flash green border
+    overlay.style.borderColor = '#22c55e';
+    overlay.style.background = 'rgba(34,197,94,0.1)';
+    setTimeout(function() {
+      overlay.style.borderColor = '#3b82f6';
+      overlay.style.background = 'rgba(59,130,246,0.08)';
+    }, 400);
+  }, true);
+
+  // Double click: enable inline text editing
+  document.addEventListener('dblclick', function(e) {
+    const t = e.target;
+    if (isVsEl(t)) return;
+    if (!isTextElement(t)) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Save original for diff
+    var originalText = t.textContent;
+    var originalPath = cssPath(t);
+
+    // Enter edit mode
+    editingEl = t;
+    t.contentEditable = 'true';
+    t.focus();
+    t.style.outline = '2px solid #7c3aed';
+    t.style.outlineOffset = '2px';
+    t.style.borderRadius = '4px';
+    overlay.style.display = 'none';
+    label.style.display = 'none';
+
+    // Select all text for easy replacement
+    var range = document.createRange();
+    range.selectNodeContents(t);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    function finishEdit() {
+      t.contentEditable = 'false';
+      t.style.outline = '';
+      t.style.outlineOffset = '';
+      editingEl = null;
+      t.removeEventListener('blur', onBlur);
+      t.removeEventListener('keydown', onKey);
+
+      var newText = t.textContent;
+      if (newText !== originalText) {
+        // Get full updated HTML of the document
+        // Remove our injected VS elements before capturing
+        var vsEls = document.querySelectorAll('[id^=__vs_]');
+        vsEls.forEach(function(el) { el.style.display = 'none'; });
+        var scripts = document.querySelectorAll('script');
+        scripts.forEach(function(s) { s.remove(); });
+        var fullHtml = document.documentElement.outerHTML;
+        vsEls.forEach(function(el) { el.style.display = ''; });
+
+        window.parent.postMessage({
+          type: '__vs_text_edited',
+          cssPath: originalPath,
+          oldText: originalText,
+          newText: newText,
+          fullHtml: '<!DOCTYPE html>' + fullHtml,
+        }, '*');
+      }
+    }
+
+    function onBlur() { setTimeout(finishEdit, 100); }
+    function onKey(e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finishEdit(); }
+      if (e.key === 'Escape') { t.textContent = originalText; finishEdit(); }
+    }
+
+    t.addEventListener('blur', onBlur);
+    t.addEventListener('keydown', onKey);
   }, true);
 })();
 </script>`;
@@ -2275,12 +2381,13 @@ function intensityBorder(intensity: number): string {
 
 function ScreenCard({
   screen, width, minHeight, isSelected, isMultiSelected, deviceType, editMode, heatmapMode, heatmapZones,
-  onClick, onContextMenu, onElementSelect, onHeatmapZoneClick, onHeightMeasured, onResize,
+  onClick, onContextMenu, onElementSelect, onTextEdit, onHeatmapZoneClick, onHeightMeasured, onResize,
 }: {
   screen: Screen; width: number; minHeight: number; deviceType: 'app' | 'web' | 'tablet'
   isSelected?: boolean; isMultiSelected?: boolean; editMode?: boolean; heatmapMode?: boolean; heatmapZones?: HeatmapZone[]
   onClick?: () => void; onContextMenu?: (e: React.MouseEvent) => void
   onElementSelect?: (info: { cssPath: string; tagName: string; textPreview: string; outerHtml: string }) => void
+  onTextEdit?: (screenId: string, newHtml: string, editInfo: { cssPath: string; oldText: string; newText: string }) => void
   onHeatmapZoneClick?: (zone: HeatmapZone, x: number, y: number) => void
   onHeightMeasured?: (screenId: string, height: number) => void
   onResize?: (screenId: string, newWidth: number, newHeight: number) => void
@@ -2400,11 +2507,11 @@ function ScreenCard({
   const isEditable = isSelected && editMode
   const showHeatmap = isSelected && heatmapMode && heatmapZones && heatmapZones.length > 0
 
-  // Inject edit mode script and listen for element selection messages
+  // Inject edit mode script and listen for element selection + text edit messages
   useEffect(() => {
-    if (!isEditable || !onElementSelect) return
+    if (!isEditable) return
     const handler = (e: MessageEvent) => {
-      if (e.data?.type === '__vs_element_selected') {
+      if (e.data?.type === '__vs_element_selected' && onElementSelect) {
         onElementSelect({
           cssPath: e.data.cssPath,
           tagName: e.data.tagName,
@@ -2412,10 +2519,17 @@ function ScreenCard({
           outerHtml: e.data.outerHtml,
         })
       }
+      if (e.data?.type === '__vs_text_edited' && onTextEdit) {
+        onTextEdit(screen.id, e.data.fullHtml, {
+          cssPath: e.data.cssPath,
+          oldText: e.data.oldText,
+          newText: e.data.newText,
+        })
+      }
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [isEditable, onElementSelect])
+  }, [isEditable, onElementSelect, onTextEdit, screen.id])
 
   // Resolve heatmap zone rects via iframe postMessage
   const [resolvedZones, setResolvedZones] = useState<HeatmapZone[]>([])
@@ -2605,7 +2719,7 @@ body>*{min-height:0!important;}
           ref={iframeRefCallback}
           srcDoc={iframeHtml}
           title={screen.name}
-          sandbox={isFixedHeight ? 'allow-scripts' : 'allow-scripts allow-same-origin'}
+          sandbox={isFixedHeight && !isEditable ? 'allow-scripts' : 'allow-scripts allow-same-origin'}
           className={isEditable ? '' : 'pointer-events-none'}
           style={{
             width: effectiveWidth,

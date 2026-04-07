@@ -9,9 +9,11 @@ export function Settings({ onBack }: SettingsProps) {
 
   return (
     <div className="h-screen bg-neutral-50 dark:bg-neutral-900 flex flex-col">
-      {/* Header */}
-      <header className="h-13 flex items-center px-4 border-b border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 shrink-0 draggable">
-        <div className="flex items-center no-drag">
+      {/* Window drag bar */}
+      <div className="h-3 shrink-0 draggable bg-white dark:bg-neutral-800" />
+      {/* Header toolbar */}
+      <header className="h-10 flex items-center px-4 border-b border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 shrink-0">
+        <div className="flex items-center">
           <button
             onClick={onBack}
             className="p-1.5 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 mr-3"

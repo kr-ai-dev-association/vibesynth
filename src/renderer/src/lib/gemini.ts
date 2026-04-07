@@ -750,10 +750,48 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
   files['src/vite-env.d.ts'] = `/// <reference types="vite/client" />`
 
-  // ─── Step 2: Copy HTML screens as reference files ───
+  // ─── Step 2: Extract images from HTML → public/images/ and copy reference files ───
+  let imageCounter = 0
+  const imageMap = new Map<string, string>() // dataUrl → /images/filename
+
   for (const screen of screens) {
     const component = screen.name.replace(/[^a-zA-Z0-9]/g, '')
-    files[`src/pages/${component}.ref.html`] = screen.html
+    // Extract base64/SVG data URLs from img src and background-image
+    const dataUrlRegex = /(?:src|url\()=?"?(data:image\/([a-zA-Z+]+);base64,[A-Za-z0-9+/=]+)"?/g
+    let match: RegExpExecArray | null
+    let processedHtml = screen.html
+    while ((match = dataUrlRegex.exec(screen.html)) !== null) {
+      const dataUrl = match[1]
+      if (imageMap.has(dataUrl)) continue
+      const ext = match[2] === 'svg+xml' ? 'svg' : match[2] === 'jpeg' ? 'jpg' : (match[2] || 'png')
+      const filename = `img-${++imageCounter}.${ext}`
+      const publicPath = `/images/${filename}`
+      imageMap.set(dataUrl, publicPath)
+
+      // Decode base64 to binary and save to public/images/
+      const base64Part = dataUrl.split(',')[1]
+      if (base64Part) {
+        // Store as base64 string — will be decoded when writing to disk
+        files[`public/images/${filename}`] = `__BASE64__${base64Part}`
+      }
+    }
+    // Also extract data:image/svg+xml,<encoded> (non-base64 SVGs)
+    const svgUrlRegex = /(?:src|url\()=?"?(data:image\/svg\+xml,[^"'\s)]+)"?/g
+    while ((match = svgUrlRegex.exec(screen.html)) !== null) {
+      const dataUrl = match[1]
+      if (imageMap.has(dataUrl)) continue
+      const filename = `img-${++imageCounter}.svg`
+      const publicPath = `/images/${filename}`
+      imageMap.set(dataUrl, publicPath)
+      const svgContent = decodeURIComponent(dataUrl.replace('data:image/svg+xml,', ''))
+      files[`public/images/${filename}`] = svgContent
+    }
+
+    // Replace data URLs in HTML with public paths for reference
+    for (const [dataUrl, publicPath] of imageMap) {
+      processedHtml = processedHtml.split(dataUrl).join(publicPath)
+    }
+    files[`src/pages/${component}.ref.html`] = processedHtml
   }
 
   // ─── Step 3: Gemini converts HTML→TSX pages + App.tsx + index.css ───
@@ -762,7 +800,10 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
 
   const screenSummaries = screens.map((s, i) => {
-    const stripped = stripHeavyContent(s.html)
+    // Use processed HTML with /images/ paths instead of raw data URLs
+    const component = s.name.replace(/[^a-zA-Z0-9]/g, '')
+    const refHtml = files[`src/pages/${component}.ref.html`] || s.html
+    const stripped = stripHeavyContent(refHtml)
     const truncated = stripped.length > 12000 ? stripped.slice(0, 12000) + '\n<!-- truncated -->' : stripped
     return `Screen ${i + 1}: "${s.name}" (route: ${routes[i].route}, component: ${routes[i].component})\n<html>\n${truncated}\n</html>`
   }).join('\n\n')
@@ -807,7 +848,7 @@ RULES:
 - Keep ALL visual design: colors, fonts, spacing, shadows, gradients, border-radius
 - Use Tailwind CSS utility classes where possible, inline styles for complex values
 - Wire navigation elements to React Router <Link> or useNavigate()
-- Replace data:image/... base64 URLs with gradient placeholder divs
+- Images are already extracted to /images/ folder. Use the /images/img-N.ext paths from the reference HTML as <img src="/images/img-N.ext" />. Do NOT use data: URLs or gradient placeholders for images that have /images/ paths.
 - src/index.css MUST start with: @import "tailwindcss";
 - Include Google Fonts @import in index.css if the HTML uses custom fonts
 - Each page component: export default function ComponentName() { return (...) }

@@ -76,7 +76,7 @@ function createMainWindow() {
     minWidth: 900,
     minHeight: 600,
     titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 15, y: 15 },
+    trafficLightPosition: { x: 12, y: 10 },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -287,8 +287,14 @@ ipcMain.handle('project:scaffold', (_event, projectId: string, files: Record<str
   for (const [filePath, content] of Object.entries(files)) {
     const fullPath = path.join(projectDir, filePath)
     ensureDir(path.dirname(fullPath))
-    const data = typeof content === 'string' ? content : JSON.stringify(content, null, 2)
-    fs.writeFileSync(fullPath, data, 'utf-8')
+    if (typeof content === 'string' && content.startsWith('__BASE64__')) {
+      // Decode base64 image data to binary file
+      const base64Data = content.slice('__BASE64__'.length)
+      fs.writeFileSync(fullPath, Buffer.from(base64Data, 'base64'))
+    } else {
+      const data = typeof content === 'string' ? content : JSON.stringify(content, null, 2)
+      fs.writeFileSync(fullPath, data, 'utf-8')
+    }
   }
   return projectDir
 })
