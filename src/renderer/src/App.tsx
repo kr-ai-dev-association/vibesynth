@@ -1,9 +1,34 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Component, type ReactNode } from 'react'
 import { Dashboard } from './pages/Dashboard'
 import { Editor } from './pages/Editor'
 import { Settings } from './pages/Settings'
 import { designGuideDB } from './lib/design-guide-db'
 import { I18nProvider } from './lib/i18n'
+
+// Error Boundary to prevent full blackout on render errors
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null }
+  static getDerivedStateFromError(error: Error) { return { error } }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 40, fontFamily: 'system-ui', background: '#0f0f17', color: '#e2e8f0', height: '100vh' }}>
+          <h2 style={{ color: '#f87171', marginBottom: 12 }}>Something went wrong</h2>
+          <pre style={{ background: '#1a1a2e', padding: 16, borderRadius: 8, fontSize: 12, overflow: 'auto', maxHeight: 200 }}>
+            {this.state.error.message}
+          </pre>
+          <button
+            onClick={() => this.setState({ error: null })}
+            style={{ marginTop: 16, padding: '8px 20px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14 }}
+          >
+            Retry
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 export type AppView = 'dashboard' | 'editor' | 'settings'
 
@@ -96,9 +121,11 @@ export interface DesignSystem {
 
 export default function App() {
   return (
-    <I18nProvider>
-      <AppInner />
-    </I18nProvider>
+    <ErrorBoundary>
+      <I18nProvider>
+        <AppInner />
+      </I18nProvider>
+    </ErrorBoundary>
   )
 }
 

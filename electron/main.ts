@@ -74,7 +74,7 @@ function killZombieDevServers() {
   try {
     // Find and kill any node/vite processes listening on ports 5173-5299
     const result = execSync(
-      `lsof -iTCP:5173-5299 -sTCP:LISTEN -t 2>/dev/null || true`,
+      `lsof -iTCP:5173-5189,5200-5299 -sTCP:LISTEN -t 2>/dev/null || true`,
       { encoding: 'utf-8', timeout: 5000 }
     ).trim()
     if (result) {
@@ -450,7 +450,7 @@ ipcMain.handle('project:get-dev-info', () => {
   let activePorts: { port: number; pid: number }[] = []
   try {
     const result = execSync(
-      `lsof -iTCP:5173-5299 -sTCP:LISTEN -P -n 2>/dev/null || true`,
+      `lsof -iTCP:5173-5189,5200-5299 -sTCP:LISTEN -P -n 2>/dev/null || true`,
       { encoding: 'utf-8', timeout: 3000 }
     ).trim()
     if (result) {

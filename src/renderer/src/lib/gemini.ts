@@ -934,6 +934,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     dsContext = `\n\n${dsMd}\n\nIMPORTANT: Follow the design system above exactly — use the specified colors, fonts, and component styles.`
   }
 
+  // Build explicit image manifest for Gemini
+  const imageFiles = Object.keys(files).filter(f => f.startsWith('public/images/'))
+  const imageManifest = imageFiles.length > 0
+    ? `\n\nIMAGE FILES available in /images/ folder (MUST use these exact paths):\n${imageFiles.map(f => `- /${f.replace('public/', '')}`).join('\n')}\nFor every <img> in the reference HTML that uses /images/img-N.ext, the TSX MUST include <img src="/images/img-N.ext" /> with the same path.`
+    : ''
+
   const result = await model.generateContent([
     `You are converting ${screens.length} HTML design screens into React TSX page components for a Vite + React Router + Tailwind CSS project.
 
@@ -946,7 +952,7 @@ You only need to generate:
 3. One src/pages/{ComponentName}.tsx per screen
 
 Routes: ${JSON.stringify(routes)}
-Device type: ${deviceType}${prdContext}${dsContext}
+Device type: ${deviceType}${prdContext}${dsContext}${imageManifest}
 
 RULES:
 - CRITICAL: App.tsx must NOT import or use BrowserRouter/Router. Only use <Routes> and <Route>.
@@ -954,7 +960,7 @@ RULES:
 - Keep ALL visual design: colors, fonts, spacing, shadows, gradients, border-radius
 - Use Tailwind CSS utility classes where possible, inline styles for complex values
 - Wire navigation elements to React Router <Link> or useNavigate()
-- Images are already extracted to /images/ folder. Use the /images/img-N.ext paths from the reference HTML as <img src="/images/img-N.ext" />. Do NOT use data: URLs or gradient placeholders for images that have /images/ paths.
+- CRITICAL: Every <img> tag in the reference HTML that uses /images/img-N.ext MUST be preserved as <img src="/images/img-N.ext" /> in the TSX. Do NOT replace images with gradient divs, placeholders, or emoji. Keep the exact /images/ paths.
 - src/index.css MUST start with: @import "tailwindcss";
 - Include Google Fonts @import in index.css if the HTML uses custom fonts
 - Each page component: export default function ComponentName() { return (...) }
@@ -990,6 +996,48 @@ ${screenSummaries}`,
   for (const [key, value] of Object.entries(parsed)) {
     files[key] = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
   }
+
+  // Post-processing: ensure image references are preserved in TSX
+  // Gemini sometimes replaces /images/ paths with gradient divs or removes them entirely
+  if (imageFiles.length > 0) {
+    for (const screen of screens) {
+      const component = screen.name.replace(/[^a-zA-Z0-9]/g, '')
+      const tsxPath = `src/pages/${component}.tsx`
+      const refPath = `src/pages/${component}.ref.html`
+      const tsxContent = files[tsxPath]
+      const refContent = files[refPath]
+
+      if (tsxContent && refContent) {
+        // Find image paths used in the reference HTML
+        const imgPaths = [...refContent.matchAll(/\/images\/img-\d+\.\w+/g)].map(m => m[0])
+        const uniquePaths = [...new Set(imgPaths)]
+
+        // Check which images are missing from TSX
+        const missing = uniquePaths.filter(p => !tsxContent.includes(p))
+        if (missing.length > 0) {
+          console.log(`[VibeSynth] ${component}: ${missing.length} images missing from TSX, injecting...`)
+          // Inject missing images by replacing gradient placeholder divs or adding them
+          let fixed = tsxContent
+          for (const imgPath of missing) {
+            // Find the img tag context from ref HTML
+            const imgMatch = refContent.match(new RegExp(`<img[^>]*src=["']${imgPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'][^>]*>`, 'i'))
+            const altMatch = imgMatch?.[0]?.match(/alt=["']([^"']*)["']/)?.[1] || 'Image'
+
+            // Try to replace a gradient placeholder div with the actual image
+            const gradientDivPattern = /(<div[^>]*className=["'][^"']*(?:bg-gradient|from-|to-)[^"']*["'][^>]*(?:\/>|>[^<]*<\/div>))/
+            const match = fixed.match(gradientDivPattern)
+            if (match) {
+              fixed = fixed.replace(match[0], `<img src="${imgPath}" alt="${altMatch}" className="w-full h-full object-cover rounded-lg" />`)
+            }
+          }
+          if (fixed !== tsxContent) {
+            files[tsxPath] = fixed
+          }
+        }
+      }
+    }
+  }
+
   return files
 }
 
