@@ -69,6 +69,24 @@ function killDevServer() {
   }
 }
 
+/** Kill any zombie dev server processes on common Vite ports (5173-5299) */
+function killZombieDevServers() {
+  try {
+    // Find and kill any node/vite processes listening on ports 5173-5299
+    const result = execSync(
+      `lsof -iTCP:5173-5299 -sTCP:LISTEN -t 2>/dev/null || true`,
+      { encoding: 'utf-8', timeout: 5000 }
+    ).trim()
+    if (result) {
+      const pids = result.split('\n').filter(Boolean)
+      console.log(`[VibeSynth] Killing ${pids.length} zombie dev server(s): ${pids.join(', ')}`)
+      for (const pid of pids) {
+        try { process.kill(parseInt(pid), 'SIGKILL') } catch {}
+      }
+    }
+  } catch {}
+}
+
 function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -324,6 +342,7 @@ ipcMain.handle('project:install', async (_event, projectId: string) => {
 
 ipcMain.handle('project:start-dev', async (_event, projectId: string, port: number) => {
   killDevServer()
+  killZombieDevServers()
   const projectDir = getProjectDir(projectId)
 
   return new Promise<{ success: boolean; url?: string; error?: string }>((resolve) => {
@@ -378,7 +397,39 @@ ipcMain.handle('project:start-dev', async (_event, projectId: string, port: numb
 
 ipcMain.handle('project:stop-dev', () => {
   killDevServer()
+  killZombieDevServers()
   return true
+})
+
+ipcMain.handle('project:restart-dev', async (_event, projectId: string) => {
+  killDevServer()
+  killZombieDevServers()
+  const projectDir = getProjectDir(projectId)
+  if (!fs.existsSync(path.join(projectDir, 'package.json'))) {
+    return { success: false, error: 'Project not built yet' }
+  }
+  const port = 5173 + Math.floor(Math.random() * 100)
+  return new Promise<{ success: boolean; url?: string; port?: number; error?: string }>((resolve) => {
+    const child = spawn('npx', ['vite', '--port', String(port), '--host'], {
+      cwd: projectDir, stdio: ['pipe', 'pipe', 'pipe'], shell: true,
+    })
+    devServerProcess = child
+    devServerProjectId = projectId
+    let resolved = false
+    const onData = (chunk: Buffer) => {
+      const text = chunk.toString()
+      const match = text.match(/Local:\s+(https?:\/\/[^\s]+)/)
+      if (match && !resolved) { resolved = true; resolve({ success: true, url: match[1], port }) }
+    }
+    child.stdout?.on('data', onData)
+    child.stderr?.on('data', onData)
+    child.on('error', (err) => { if (!resolved) { resolved = true; resolve({ success: false, error: err.message }) } })
+    child.on('exit', (code) => {
+      if (!resolved) { resolved = true; resolve({ success: false, error: `Exited ${code}` }) }
+      if (devServerProcess === child) { devServerProcess = null; devServerProjectId = null }
+    })
+    setTimeout(() => { if (!resolved) { resolved = true; resolve({ success: false, error: 'Timeout starting dev server' }) } }, 30000)
+  })
 })
 
 ipcMain.handle('project:get-status', () => {

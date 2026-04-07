@@ -1413,6 +1413,33 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     }
   }
 
+  const handleRestartServer = async () => {
+    setShowRunMenu(false)
+    addLog('🔄 Restarting dev server — killing zombie processes...', 'info')
+    setAgentLogOpen(true)
+
+    // Stop current
+    if (isRunning) {
+      window.electronAPI?.closeLiveWindow()
+      window.electronAPI?.liveEdit.close()
+      window.electronAPI?.feedback.close()
+      setIsRunning(false)
+      setDevServerUrl(null)
+    }
+
+    const result = await window.electronAPI?.project.restartDev(project.id)
+    if (result?.success) {
+      const url = result.url || `http://localhost:${result.port}`
+      setDevServerUrl(url)
+      addLog(t('editor.log.devServerRunning', { url }), 'success')
+      await window.electronAPI?.openLiveWindowUrl(url, deviceType)
+      setIsRunning(true)
+      window.electronAPI?.liveEdit.open()
+    } else {
+      addLog(`Server restart failed: ${result?.error || 'Unknown'}`, 'error')
+    }
+  }
+
   const screenWidth = deviceType === 'app' ? 390 : deviceType === 'tablet' ? 1024 : 1280
   const screenMinHeight = deviceType === 'app' ? 844 : deviceType === 'tablet' ? 1366 : 900
   const selectedScreenObj = selectedScreen ? project.screens.find((s) => s.name === selectedScreen) : null
@@ -1581,6 +1608,13 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                   className="w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2"
                 >
                   {isRunning ? '⏹ Stop' : '▶ Run'}
+                </button>
+                <button
+                  onClick={handleRestartServer}
+                  disabled={project.screens.length < 2}
+                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  🔃 Restart Server
                 </button>
                 <button
                   onClick={handleRebuild}

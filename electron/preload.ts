@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   project: {
     clean: (projectId: string) =>
       ipcRenderer.invoke('project:clean', projectId) as Promise<{ success: boolean }>,
+    restartDev: (projectId: string) =>
+      ipcRenderer.invoke('project:restart-dev', projectId) as Promise<{ success: boolean; url?: string; port?: number; error?: string }>,
     scaffold: (projectId: string, files: Record<string, string>) =>
       ipcRenderer.invoke('project:scaffold', projectId, files),
     writeFile: (projectId: string, filePath: string, content: string) =>

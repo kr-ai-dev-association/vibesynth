@@ -13,6 +13,7 @@ interface ElectronDBAPI {
 
 interface ElectronProjectAPI {
   clean: (projectId: string) => Promise<{ success: boolean }>
+  restartDev: (projectId: string) => Promise<{ success: boolean; url?: string; port?: number; error?: string }>
   scaffold: (projectId: string, files: Record<string, string>) => Promise<string>
   writeFile: (projectId: string, filePath: string, content: string) => Promise<boolean>
   readFile: (projectId: string, filePath: string) => Promise<string | null>
