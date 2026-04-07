@@ -169,8 +169,11 @@ function AppInner() {
   return (
     <Dashboard
       onOpenProject={handleOpenProject}
-      onCreateProject={(prompt, deviceType, designSystem) => {
+      onCreateProject={(prompt, deviceType, designSystem, colorScheme) => {
         const name = prompt.length > 50 ? prompt.slice(0, 50) + '...' : prompt
+        const ds = designSystem
+          ? { ...designSystem, colorScheme: colorScheme || designSystem.colorScheme || 'auto' }
+          : undefined
         const project: Project = {
           id: crypto.randomUUID(),
           name,
@@ -178,7 +181,7 @@ function AppInner() {
           updatedAt: new Date().toLocaleDateString(),
           screens: [],
           deviceType,
-          designSystem,
+          designSystem: ds,
         }
         handleOpenProject(project)
       }}

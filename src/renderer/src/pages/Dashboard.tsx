@@ -9,7 +9,7 @@ import { MarkdownRenderer } from '../components/common/MarkdownRenderer'
 
 interface DashboardProps {
   onOpenProject: (project: Project) => void
-  onCreateProject: (name: string, deviceType: 'app' | 'web' | 'tablet', designSystem?: DesignSystem) => void
+  onCreateProject: (name: string, deviceType: 'app' | 'web' | 'tablet', designSystem?: DesignSystem, colorScheme?: 'light' | 'dark' | 'auto') => void
   onOpenSettings?: () => void
 }
 
@@ -43,6 +43,20 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
   const [colorScheme, setColorScheme] = useState<'light' | 'dark' | 'auto'>('auto')
   const [selectedDesignId, setSelectedDesignId] = useState<string | null>(null)
   const [sidebarTab, setSidebarTab] = useState<'my' | 'shared'>('my')
+  const [sidebarWidth, setSidebarWidth] = useState(256)
+  const sidebarResizing = useRef(false)
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!sidebarResizing.current) return
+      const w = Math.max(180, Math.min(480, e.clientX))
+      setSidebarWidth(w)
+    }
+    const onUp = () => { sidebarResizing.current = false; document.body.style.cursor = '' }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    return () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
+  }, [])
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [prdModal, setPrdModal] = useState<ExampleProject | null>(null)
   const [prdDesignId, setPrdDesignId] = useState<string | null>(null)
@@ -84,7 +98,8 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
     const ds = prdDesignId
       ? PINTEREST_DESIGNS.find(d => d.id === prdDesignId)?.designSystem
       : undefined
-    const project = ds ? { ...prdModal.project, designSystem: ds } : prdModal.project
+    const finalDs = ds ? { ...ds, colorScheme } : undefined
+    const project = finalDs ? { ...prdModal.project, designSystem: finalDs } : prdModal.project
     setPrdModal(null)
     onOpenProject(project)
   }
@@ -135,7 +150,7 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left Sidebar */}
-        <aside className="w-64 border-r border-neutral-200 dark:border-neutral-700 flex flex-col overflow-y-auto shrink-0">
+        <aside className="border-r border-neutral-200 dark:border-neutral-700 flex flex-col overflow-y-auto shrink-0 relative" style={{ width: sidebarWidth }}>
           <div className="p-3">
             <div className="flex gap-0 mb-3 rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden">
               <button
@@ -232,6 +247,11 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
               <p className="text-sm text-neutral-400">{t('dashboard.noShared')}</p>
             </div>
           )}
+          {/* Resize handle */}
+          <div
+            className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/30 active:bg-blue-500/50 transition-colors z-10"
+            onMouseDown={(e) => { e.preventDefault(); sidebarResizing.current = true; document.body.style.cursor = 'col-resize' }}
+          />
         </aside>
 
         {/* Main Content */}
@@ -293,7 +313,7 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
               onDeviceTypeChange={setDeviceType}
               colorScheme={colorScheme}
               onColorSchemeChange={setColorScheme}
-              onSubmit={(prompt) => onCreateProject(prompt, deviceType, selectedDesignSystem)}
+              onSubmit={(prompt) => onCreateProject(prompt, deviceType, selectedDesignSystem, colorScheme)}
             />
           </div>
         </main>
@@ -305,6 +325,8 @@ export function Dashboard({ onOpenProject, onCreateProject, onOpenSettings }: Da
           example={prdModal}
           selectedDesignId={prdDesignId}
           onSelectDesign={setPrdDesignId}
+          colorScheme={colorScheme}
+          onColorSchemeChange={setColorScheme}
           onGenerate={handleGenerateFromPrd}
           onClose={() => setPrdModal(null)}
         />
@@ -319,12 +341,16 @@ function PrdModal({
   example,
   selectedDesignId,
   onSelectDesign,
+  colorScheme,
+  onColorSchemeChange,
   onGenerate,
   onClose,
 }: {
   example: ExampleProject
   selectedDesignId: string | null
   onSelectDesign: (id: string | null) => void
+  colorScheme: 'light' | 'dark' | 'auto'
+  onColorSchemeChange: (scheme: 'light' | 'dark' | 'auto') => void
   onGenerate: () => void
   onClose: () => void
 }) {
@@ -390,6 +416,27 @@ function PrdModal({
                       <div className="flex-1" style={{ backgroundColor: d.designSystem.colors.tertiary.base }} />
                     </div>
                     <div className="text-[7px] text-neutral-400 mt-0.5 truncate text-center">{d.name}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Color Scheme */}
+            <div className="shrink-0">
+              <p className="text-xs text-neutral-400 mb-2">Theme</p>
+              <div className="flex items-center rounded-lg border border-neutral-200 dark:border-neutral-600 overflow-hidden">
+                {(['light', 'auto', 'dark'] as const).map((scheme) => (
+                  <button
+                    key={scheme}
+                    onClick={() => onColorSchemeChange(scheme)}
+                    className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                      colorScheme === scheme
+                        ? 'bg-neutral-900 text-white dark:bg-white dark:text-neutral-900'
+                        : 'hover:bg-neutral-50 dark:hover:bg-neutral-700'
+                    }`}
+                  >
+                    {scheme === 'light' ? '☀️' : scheme === 'dark' ? '🌙' : '🔄'}
+                    <span>{scheme === 'light' ? 'Light' : scheme === 'dark' ? 'Dark' : 'Auto'}</span>
                   </button>
                 ))}
               </div>
