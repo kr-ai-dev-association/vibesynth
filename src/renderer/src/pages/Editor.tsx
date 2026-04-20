@@ -1239,6 +1239,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           }
 
           files = await generateIncrementalFrontend(
+            project.id,
             newOrChanged,
             allScreensData,
             existingFiles,
@@ -1252,7 +1253,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         } else {
           // ─── Full build: all screens are new ───
           const logId = addLog(t('editor.log.generatingFrontend'), 'generating')
-          files = await generateFrontendApp(allScreensData, deviceType, project.prompt, project.designSystem || undefined)
+          files = await generateFrontendApp(project.id, allScreensData, deviceType, project.prompt, project.designSystem || undefined)
           updateLog(logId, t('editor.log.generatedFiles', { count: Object.keys(files).length }), 'generating')
         }
 
@@ -1312,7 +1313,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                   }
                 }
 
-                const fixedFiles = await fixBuildErrors(lastError, filesToFix)
+                const fixedFiles = await fixBuildErrors(project.id, lastError, filesToFix)
                 const fixedCount = Object.keys(fixedFiles).length
                 addLog(t('editor.log.aiFixed', { count: fixedCount, files: Object.keys(fixedFiles).join(', ') }), 'info')
 
@@ -1390,7 +1391,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       }
 
       const logId = addLog(t('editor.log.generatingFrontend'), 'generating')
-      const files = await generateFrontendApp(allScreensData, deviceType, project.prompt, project.designSystem || undefined)
+      const files = await generateFrontendApp(project.id, allScreensData, deviceType, project.prompt, project.designSystem || undefined)
       updateLog(logId, t('editor.log.generatedFiles', { count: Object.keys(files).length }), 'generating')
 
       await window.electronAPI?.project.scaffold(project.id, files)

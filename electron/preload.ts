@@ -58,23 +58,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('project:export-to-folder', projectId, destPath) as Promise<{ success: boolean; path?: string; error?: string }>,
   },
 
-  // Banya CLI (codegen backend for frontend builds)
+  // Banya CLI (codegen backend — runs banya in agent mode with project workspace)
   banya: {
-    run: (opts: {
+    codegen: (opts: {
+      projectId: string
       prompt: string
-      projectId?: string
-      promptType?: 'ask' | 'code' | 'plan' | 'agent'
+      preScaffold?: Record<string, string>
       timeoutMs?: number
       streamEventName?: string
+      eventChannelName?: string
     }) =>
-      ipcRenderer.invoke('banya:run', opts) as Promise<{
+      ipcRenderer.invoke('banya:codegen', opts) as Promise<{
         success: boolean
-        content: string
+        files: Record<string, string>
         exitCode: number | null
+        content: string
         error?: string
       }>,
     onStream: (channel: string, callback: (chunk: string) => void) => {
       const handler = (_e: any, chunk: string) => callback(chunk)
+      ipcRenderer.on(channel, handler)
+      return () => ipcRenderer.removeListener(channel, handler)
+    },
+    onEvent: (channel: string, callback: (event: { type: string; data: any }) => void) => {
+      const handler = (_e: any, evt: { type: string; data: any }) => callback(evt)
       ipcRenderer.on(channel, handler)
       return () => ipcRenderer.removeListener(channel, handler)
     },

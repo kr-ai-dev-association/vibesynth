@@ -5,7 +5,7 @@ import { execSync, spawn, ChildProcess } from 'child_process'
 import os from 'os'
 import { db } from './database'
 import { isGeminiCliAvailable, runGeminiCli } from './gemini-cli'
-import { isBanyaCliAvailable, runBanya } from './banya-cli'
+import { isBanyaCliAvailable, runBanyaCodegen } from './banya-cli'
 
 let mainWindow: BrowserWindow | null = null
 let liveAppWindow: BrowserWindow | null = null
@@ -74,8 +74,9 @@ function killDevServer() {
 function killZombieDevServers() {
   try {
     // Find and kill any node/vite processes listening on ports 5173-5299
+    // Skip 5173 — that's the Electron renderer's own Vite dev server.
     const result = execSync(
-      `lsof -iTCP:5173-5189,5200-5299 -sTCP:LISTEN -t 2>/dev/null || true`,
+      `lsof -iTCP:5174-5189,5200-5299 -sTCP:LISTEN -t 2>/dev/null || true`,
       { encoding: 'utf-8', timeout: 5000 }
     ).trim()
     if (result) {
@@ -301,37 +302,41 @@ ipcMain.handle('project:clean', async (_event, projectId: string) => {
 })
 
 ipcMain.handle(
-  'banya:run',
+  'banya:codegen',
   async (
     event,
     opts: {
+      projectId: string
       prompt: string
-      projectId?: string
-      promptType?: 'ask' | 'code' | 'plan' | 'agent'
+      preScaffold?: Record<string, string>
       timeoutMs?: number
       streamEventName?: string
+      eventChannelName?: string
     },
   ) => {
     if (!isBanyaCliAvailable()) {
       return {
         success: false,
-        content: '',
+        files: {},
         exitCode: null,
+        content: '',
         error: 'banya CLI not found in PATH — install banya-cli or check $PATH',
       }
     }
-    let workspace: string | undefined
-    if (opts.projectId) {
-      workspace = getProjectDir(opts.projectId)
-      ensureDir(workspace)
-    }
+    const workspace = getProjectDir(opts.projectId)
     const streamChannel = opts.streamEventName
-    return await runBanya(opts.prompt, {
-      promptType: opts.promptType,
+    const eventChannel = opts.eventChannelName
+    return await runBanyaCodegen({
+      projectId: opts.projectId,
       workspace,
+      prompt: opts.prompt,
+      preScaffold: opts.preScaffold,
       timeoutMs: opts.timeoutMs,
       onContentDelta: streamChannel
         ? (chunk) => event.sender.send(streamChannel, chunk)
+        : undefined,
+      onEvent: eventChannel
+        ? (type, data) => event.sender.send(eventChannel, { type, data })
         : undefined,
     })
   },

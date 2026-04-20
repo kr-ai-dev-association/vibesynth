@@ -31,14 +31,22 @@ interface ElectronShellAPI {
 }
 
 interface ElectronBanyaAPI {
-  run: (opts: {
+  codegen: (opts: {
+    projectId: string
     prompt: string
-    projectId?: string
-    promptType?: 'ask' | 'code' | 'plan' | 'agent'
+    preScaffold?: Record<string, string>
     timeoutMs?: number
     streamEventName?: string
-  }) => Promise<{ success: boolean; content: string; exitCode: number | null; error?: string }>
+    eventChannelName?: string
+  }) => Promise<{
+    success: boolean
+    files: Record<string, string>
+    exitCode: number | null
+    content: string
+    error?: string
+  }>
   onStream: (channel: string, callback: (chunk: string) => void) => () => void
+  onEvent: (channel: string, callback: (event: { type: string; data: any }) => void) => () => void
 }
 
 interface ElectronPinterestAPI {

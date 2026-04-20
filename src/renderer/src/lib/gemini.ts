@@ -14,34 +14,6 @@ if (!API_KEY) {
 
 const genAI = new GoogleGenerativeAI(API_KEY || '')
 
-/**
- * Route a code-generation prompt through banya-cli (banya run --prompt-type=ask
- * --llm-backend=gemini). Returns the LLM's accumulated text response so existing
- * JSON-extraction logic in codegen callers keeps working unchanged.
- *
- * Only used for the 3 large codegen tasks (generateFrontendApp,
- * generateIncrementalFrontend, fixBuildErrors). All other Gemini calls
- * (design generation, image analysis, heatmaps, design systems) stay on the
- * direct SDK path since banya-cli doesn't expose vision / structured calls yet.
- */
-async function callCodeLLM(
-  prompt: string,
-  opts?: { projectId?: string; timeoutMs?: number },
-): Promise<string> {
-  const banya = window.electronAPI?.banya
-  if (!banya) throw new Error('banya IPC not available (electronAPI.banya missing)')
-  const result = await banya.run({
-    prompt,
-    promptType: 'ask',
-    projectId: opts?.projectId,
-    timeoutMs: opts?.timeoutMs,
-  })
-  if (!result.success) {
-    throw new Error(result.error || `banya run failed (exit ${result.exitCode})`)
-  }
-  return result.content
-}
-
 // ─── Stitch-Quality System Prompt ───────────────────────────────
 
 const SYSTEM_PROMPT = `You are VibeSynth, a premium AI design tool that generates production-quality mobile and web app UI designs as self-contained HTML+CSS.
@@ -777,6 +749,7 @@ Example: [{"cssPath":"body > header > nav","tagName":"nav","label":"Main Navigat
  * 4. Caller (Editor) then: scaffold → npm install → vite dev → browser popup
  */
 export async function generateFrontendApp(
+  projectId: string,
   screens: { name: string; html: string }[],
   deviceType: 'app' | 'web' | 'tablet' = 'web',
   prd?: string,
@@ -874,6 +847,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
   files['src/vite-env.d.ts'] = `/// <reference types="vite/client" />`
 
+  // Seed src/index.css so src/main.tsx can always import it. banya may
+  // overwrite this with Google Fonts / custom styles; if banya skips it,
+  // this fallback keeps the build green.
+  files['src/index.css'] = `@import "tailwindcss";\n\nbody { margin: 0; }\n`
+
   // Export design system as MD file in the project
   if (designSystem) {
     files['DESIGN_SYSTEM.md'] = designSystemToMarkdown(designSystem)
@@ -966,103 +944,103 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     ? `\n\nIMAGE FILES available in /images/ folder (MUST use these exact paths):\n${imageFiles.map(f => `- /${f.replace('public/', '')}`).join('\n')}\nFor every <img> in the reference HTML that uses /images/img-N.ext, the TSX MUST include <img src="/images/img-N.ext" /> with the same path.`
     : ''
 
-  const frontendAppPrompt = `You are converting ${screens.length} HTML design screens into React TSX page components for a Vite + React Router + Tailwind CSS project.
+  // ─── Step 3: banya agent — build a cohesive React app from per-page HTML.
+  // banya handles its own tool/skill selection; we only describe the goal.
+  const frontendAppPrompt = `이 워크스페이스의 per-page 디자인 HTML 들을 **하나의 유기적인 React + Vite + React Router + Tailwind 애플리케이션** 으로 빌드해주세요.
 
-The project scaffolding (package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx) is ALREADY created.
-IMPORTANT: src/main.tsx ALREADY wraps the app in <BrowserRouter>. Do NOT add another Router in App.tsx.
+프로젝트 scaffolding (package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx) 은 이미 작성돼 있습니다. 각 스크린의 원본 HTML 은 \`src/pages/{Component}.ref.html\` 에 있습니다. main.tsx 가 이미 <BrowserRouter> 로 감싸고 있으므로 App.tsx 에 Router 를 또 넣지 마세요.
 
-You only need to generate:
-1. src/App.tsx — React Router <Routes> wiring all pages (NO <BrowserRouter> — it's in main.tsx)
-2. src/index.css — Tailwind CSS import + shared styles + Google Font imports
-3. One src/pages/{ComponentName}.tsx per screen
+## 목표
+단순히 HTML 을 TSX 로 1:1 번역하지 말고, 실제 돌아가는 앱처럼 만듭니다:
+- 여러 스크린에 공통으로 나타나는 chrome (사이드바/헤더/푸터) 은 공유 Layout 컴포넌트로 추출
+- 반복되는 UI 단위 (스탯 카드, 리스트 행, 차트 타일 등) 는 재사용 컴포넌트로 추출
+- HTML <script> 안에 하드코딩된 mock data 는 \`src/data/*.ts\` 로 빼서 페이지들이 공유
+- HTML 내부 \`<a href="/...">\` 같은 네비게이션은 React Router 의 \`<Link>\` 와 \`useNavigate()\` 로 교체 (full page reload 금지)
+- inline <script> 로 구현된 interactivity (차트 등) 는 \`useEffect\` + \`useRef\` 로 이식. 새 npm 패키지는 추가하지 말고 package.json 에 이미 있는 것만 사용
+- \`<img src="/images/img-N.ext">\` 경로는 원본 그대로 유지 (public/images/ 에 실제 파일 존재)
 
-Routes: ${JSON.stringify(routes)}
-Device type: ${deviceType}${prdContext}${dsContext}${imageManifest}
+## 라우트 와이어링 (src/App.tsx 가 이 라우트들을 모두 렌더링해야 함)
+${JSON.stringify(routes, null, 2)}
 
-RULES:
-- CRITICAL: App.tsx must NOT import or use BrowserRouter/Router. Only use <Routes> and <Route>.
-- Convert HTML to React TSX: class→className, inline style strings→React style objects or Tailwind classes
-- Keep ALL visual design: colors, fonts, spacing, shadows, gradients, border-radius
-- Use Tailwind CSS utility classes where possible, inline styles for complex values
-- Wire navigation elements to React Router <Link> or useNavigate()
-- CRITICAL: Every <img> tag in the reference HTML that uses /images/img-N.ext MUST be preserved as <img src="/images/img-N.ext" /> in the TSX. Do NOT replace images with gradient divs, placeholders, or emoji. Keep the exact /images/ paths.
-- src/index.css MUST start with: @import "tailwindcss";
-- Include Google Fonts @import in index.css if the HTML uses custom fonts
-- Each page component: export default function ComponentName() { return (...) }
-- Do NOT generate package.json, vite.config.ts, tsconfig.json, index.html, or main.tsx
+## 스타일링
+src/index.css 는 \`@import "tailwindcss";\` 로 시작. HTML 이 Google Fonts 를 쓰면 @import 추가.
 
-Return a JSON object: { "src/App.tsx": "...", "src/index.css": "...", "src/pages/ComponentName.tsx": "...", ... }
-Return ONLY the JSON, no explanation.
+## 건드리지 말 것
+package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx, 모든 \`.ref.html\`.
+
+## Device type
+${deviceType}
+${prdContext}${dsContext}${imageManifest}
 
 ${screenSummaries}`
 
-  let json = (await callCodeLLM(frontendAppPrompt)).trim()
-  if (json.startsWith('```json')) json = json.slice(7)
-  else if (json.startsWith('```')) json = json.slice(3)
-  if (json.endsWith('```')) json = json.slice(0, -3)
-  json = json.trim()
-
-  let parsed: Record<string, unknown>
-  try {
-    parsed = JSON.parse(json)
-  } catch {
-    const braceStart = json.indexOf('{')
-    const braceEnd = json.lastIndexOf('}')
-    if (braceStart !== -1 && braceEnd > braceStart) {
-      parsed = JSON.parse(json.slice(braceStart, braceEnd + 1))
-    } else {
-      console.error('[VibeSynth] Failed to parse frontend JSON. Response preview:', json.slice(0, 500))
-      throw new Error(`Failed to parse generated project JSON. Response starts with: ${json.slice(0, 200)}`)
-    }
+  const banya = window.electronAPI?.banya
+  if (!banya) throw new Error('banya IPC not available (electronAPI.banya missing)')
+  const result = await banya.codegen({
+    projectId,
+    prompt: frontendAppPrompt,
+    preScaffold: files,
+    timeoutMs: 20 * 60 * 1000,
+  })
+  if (!result.success) {
+    throw new Error(result.error || `banya codegen failed (exit ${result.exitCode})`)
   }
 
-  // Merge banya output into scaffolding files
-  for (const [key, value] of Object.entries(parsed)) {
-    files[key] = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
-  }
-
-  // Post-processing: ensure image references are preserved in TSX
-  // Gemini sometimes replaces /images/ paths with gradient divs or removes them entirely
-  if (imageFiles.length > 0) {
-    for (const screen of screens) {
-      const component = screen.name.replace(/[^a-zA-Z0-9]/g, '')
-      const tsxPath = `src/pages/${component}.tsx`
-      const refPath = `src/pages/${component}.ref.html`
-      const tsxContent = files[tsxPath]
-      const refContent = files[refPath]
-
-      if (tsxContent && refContent) {
-        // Find image paths used in the reference HTML
-        const imgPaths = [...refContent.matchAll(/\/images\/img-\d+\.\w+/g)].map(m => m[0])
-        const uniquePaths = [...new Set(imgPaths)]
-
-        // Check which images are missing from TSX
-        const missing = uniquePaths.filter(p => !tsxContent.includes(p))
-        if (missing.length > 0) {
-          console.log(`[VibeSynth] ${component}: ${missing.length} images missing from TSX, injecting...`)
-          // Inject missing images by replacing gradient placeholder divs or adding them
-          let fixed = tsxContent
-          for (const imgPath of missing) {
-            // Find the img tag context from ref HTML
-            const imgMatch = refContent.match(new RegExp(`<img[^>]*src=["']${imgPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'][^>]*>`, 'i'))
-            const altMatch = imgMatch?.[0]?.match(/alt=["']([^"']*)["']/)?.[1] || 'Image'
-
-            // Try to replace a gradient placeholder div with the actual image
-            const gradientDivPattern = /(<div[^>]*className=["'][^"']*(?:bg-gradient|from-|to-)[^"']*["'][^>]*(?:\/>|>[^<]*<\/div>))/
-            const match = fixed.match(gradientDivPattern)
-            if (match) {
-              fixed = fixed.replace(match[0], `<img src="${imgPath}" alt="${altMatch}" className="w-full h-full object-cover rounded-lg" />`)
-            }
-          }
-          if (fixed !== tsxContent) {
-            files[tsxPath] = fixed
-          }
-        }
-      }
-    }
+  // Overwrite our in-memory scaffolding map with the post-banya workspace snapshot.
+  for (const [key, value] of Object.entries(result.files)) {
+    files[key] = value
   }
 
   return files
+}
+
+function extractBodyInnerHtml(html: string): string {
+  const m = html.match(/<body[^>]*>([\s\S]*)<\/body>/i)
+  return m ? m[1] : html
+}
+
+function escapeForTemplateLiteral(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${')
+}
+
+function buildPageComponent(componentName: string, bodyHtml: string): string {
+  return `import { useEffect, useRef } from 'react'
+
+const HTML = \`${escapeForTemplateLiteral(bodyHtml)}\`
+
+export default function ${componentName}() {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!ref.current) return
+    // Re-execute any inline <script> from the source HTML so interactive
+    // designs (chart rendering, tab switching, etc.) come alive after React
+    // injects the markup.
+    ref.current.querySelectorAll('script').forEach((old) => {
+      const s = document.createElement('script')
+      for (const a of Array.from(old.attributes)) s.setAttribute(a.name, a.value)
+      s.textContent = old.textContent
+      old.replaceWith(s)
+    })
+  }, [])
+  return <div ref={ref} dangerouslySetInnerHTML={{ __html: HTML }} />
+}
+`
+}
+
+function buildAppTsx(routes: { name: string; component: string; route: string }[]): string {
+  const imports = routes.map((r) => `import ${r.component} from './pages/${r.component}'`).join('\n')
+  const routeEls = routes.map((r) => `      <Route path="${r.route}" element={<${r.component} />} />`).join('\n')
+  return `import { Routes, Route } from 'react-router-dom'
+${imports}
+
+export default function App() {
+  return (
+    <Routes>
+${routeEls}
+    </Routes>
+  )
+}
+`
 }
 
 /**
@@ -1121,10 +1099,11 @@ Rules:
  * @param deviceType - device type
  */
 export async function generateIncrementalFrontend(
+  projectId: string,
   newScreens: { name: string; html: string }[],
   allScreens: { name: string; html: string }[],
   existingFiles: Record<string, string>,
-  deviceType: 'app' | 'web' | 'tablet' = 'web',
+  _deviceType: 'app' | 'web' | 'tablet' = 'web',
 ): Promise<Record<string, string>> {
   const allRoutes = allScreens.map((s, i) => ({
     name: s.name,
@@ -1132,78 +1111,62 @@ export async function generateIncrementalFrontend(
     route: i === 0 ? '/' : `/${slugify(s.name)}`,
   }))
 
-  const newScreenSummaries = newScreens.map((s) => {
-    const route = allRoutes.find(r => r.name === s.name)!
-    const stripped = stripHeavyContent(s.html)
-    const truncated = stripped.length > 8000 ? stripped.slice(0, 8000) + '\n<!-- truncated -->' : stripped
-    return `NEW Screen: "${s.name}" (route: ${route.route}, component: ${route.component})\n<html>\n${truncated}\n</html>`
-  }).join('\n\n')
+  const newPageTargets = newScreens.map((s) => {
+    const r = allRoutes.find((x) => x.name === s.name)!
+    return `  - src/pages/${r.component}.tsx  (route "${r.route}")`
+  }).join('\n')
 
-  const existingScreenNames = allScreens
-    .filter(s => !newScreens.some(ns => ns.name === s.name))
-    .map(s => {
-      const route = allRoutes.find(r => r.name === s.name)!
-      return `"${s.name}" (route: ${route.route}, component: ${route.component}) — ALREADY BUILT, DO NOT regenerate`
-    }).join('\n')
+  const existingScreenSummary = allScreens
+    .filter((s) => !newScreens.some((n) => n.name === s.name))
+    .map((s) => {
+      const r = allRoutes.find((x) => x.name === s.name)!
+      return `  - ${r.component} (route "${r.route}") — existing, do NOT rewrite`
+    })
+    .join('\n')
 
-  const existingAppTsx = existingFiles['src/App.tsx'] || ''
-  const existingIndexCss = existingFiles['src/index.css'] || ''
+  const newScreenSummaries = newScreens
+    .map((s, i) => {
+      const r = allRoutes.find((x) => x.name === s.name)!
+      const stripped = stripHeavyContent(s.html)
+      const truncated = stripped.length > 8000 ? stripped.slice(0, 8000) + '\n<!-- truncated -->' : stripped
+      return `### NEW Screen ${i + 1}: "${s.name}" → ${r.component} @ ${r.route}\n<html>\n${truncated}\n</html>`
+    })
+    .join('\n\n')
 
-  const incrementalPrompt = `You are doing an INCREMENTAL BUILD for a React+Vite+ReactRouter project.
+  const incrementalPrompt = `이미 빌드된 React + Vite + React Router + Tailwind 앱에 **새 스크린들을 추가** 해주세요. 워크스페이스의 기존 공유 조각들 (Layout, data 모듈, 공용 컴포넌트) 을 그대로 재사용해야 앱이 일관됩니다.
 
-Some screens have already been built. You only need to generate files for NEW screens and update App.tsx to include all routes.
+## 기존 페이지 (건드리지 말 것)
+${existingScreenSummary || '  (없음)'}
 
-ALL routes (existing + new): ${JSON.stringify(allRoutes)}
+## 새로 만들 페이지
+${newPageTargets}
 
-ALREADY BUILT screens (do NOT regenerate these page files):
-${existingScreenNames || '(none)'}
+## 빌드 후 전체 라우트 (src/App.tsx 가 이 전부를 렌더)
+${JSON.stringify(allRoutes, null, 2)}
 
-Existing App.tsx for reference:
-${existingAppTsx.slice(0, 2000)}
+## 건드리지 말 것
+package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx, 기존 src/pages/*.tsx, \`.ref.html\`.
 
-Existing index.css for reference:
-${existingIndexCss.slice(0, 1000)}
+App.tsx 는 새 라우트 포함해 갱신해도 됩니다. index.css 는 새 스크린이 새 폰트를 쓸 때만 갱신. 새 페이지들은 기존 Layout 과 data 모듈을 import 해서 사용하세요.
 
-NEW screens to generate:
-${newScreenSummaries}
+${newScreenSummaries}`
 
-RULES:
-- Generate ONLY: src/pages/{Component}.tsx for each NEW screen, and an updated src/App.tsx with ALL routes
-- Convert class→className, inline style strings→React style objects
-- Wire navigation elements to React Router <Link> or useNavigate()
-- Keep all colors, fonts, layout from original HTML
-- Replace data:image URLs with placeholder divs using background colors
-- The updated App.tsx must import ALL page components (existing + new) and define Routes for all of them
-- Do NOT regenerate package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx, or existing page files
-- If new screens need additional CSS (font imports etc), include an src/index.css with the FULL updated content
-
-Return a JSON object: { "filepath": "file content string", ... }
-Only include files that need to be created or updated.`
-
-  let json = (await callCodeLLM(incrementalPrompt)).trim()
-  if (json.startsWith('```json')) json = json.slice(7)
-  else if (json.startsWith('```')) json = json.slice(3)
-  if (json.endsWith('```')) json = json.slice(0, -3)
-  json = json.trim()
-
-  let parsed: Record<string, unknown>
-  try {
-    parsed = JSON.parse(json)
-  } catch {
-    const braceStart = json.indexOf('{')
-    const braceEnd = json.lastIndexOf('}')
-    if (braceStart !== -1 && braceEnd > braceStart) {
-      parsed = JSON.parse(json.slice(braceStart, braceEnd + 1))
-    } else {
-      throw new Error('Failed to parse incremental build JSON')
-    }
+  const banya = window.electronAPI?.banya
+  if (!banya) throw new Error('banya IPC not available (electronAPI.banya missing)')
+  const result = await banya.codegen({
+    projectId,
+    prompt: incrementalPrompt,
+    timeoutMs: 10 * 60 * 1000,
+  })
+  if (!result.success) {
+    throw new Error(result.error || `banya codegen failed (exit ${result.exitCode})`)
   }
 
-  const files: Record<string, string> = {}
-  for (const [key, value] of Object.entries(parsed)) {
-    files[key] = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(result.files)) {
+    if (existingFiles[key] !== value) out[key] = value
   }
-  return files
+  return out
 }
 
 /**
@@ -1214,53 +1177,44 @@ Only include files that need to be created or updated.`
  * Returns a map of fixed files.
  */
 export async function fixBuildErrors(
+  projectId: string,
   errorOutput: string,
   projectFiles: Record<string, string>,
 ): Promise<Record<string, string>> {
-  const fileList = Object.entries(projectFiles)
-    .map(([path, content]) => `=== ${path} ===\n${content.slice(0, 3000)}`)
-    .join('\n\n')
+  const fileList = Object.keys(projectFiles).sort().join('\n')
 
-  const fixPrompt = `A React + Vite + TypeScript project has build/compile errors. Fix them.
+  const fixPrompt = `A React + Vite + TypeScript project has build/compile errors. Fix them in-place.
+
+The workspace is your current working directory. Use \`read_file\` and \`update_file\` (or \`write_file\`) tools to inspect and patch only the files that need changes.
 
 ERROR OUTPUT:
-${errorOutput.slice(0, 3000)}
+${errorOutput.slice(0, 4000)}
 
 PROJECT FILES:
-${fileList.slice(0, 20000)}
+${fileList}
 
 RULES:
-- Analyze the error and identify which file(s) need fixing
-- Return ONLY the files that need changes, with their COMPLETE corrected content
-- Fix TypeScript errors, missing imports, JSX issues, syntax errors
-- Do NOT change the visual design or layout, only fix compilation errors
-- Return a JSON object: { "filepath": "fixed file content", ... }
-- Only include files that actually need changes`
+- Analyze the error, identify the specific file(s) with the problem, read them, and apply minimal fixes.
+- Fix TypeScript errors, missing imports, JSX issues, syntax errors.
+- Do NOT change the visual design or layout, only fix compilation errors.
+- Only modify files that actually need changes.`
 
-  let json = (await callCodeLLM(fixPrompt)).trim()
-  if (json.startsWith('```json')) json = json.slice(7)
-  else if (json.startsWith('```')) json = json.slice(3)
-  if (json.endsWith('```')) json = json.slice(0, -3)
-  json = json.trim()
-
-  let parsed: Record<string, unknown>
-  try {
-    parsed = JSON.parse(json)
-  } catch {
-    const braceStart = json.indexOf('{')
-    const braceEnd = json.lastIndexOf('}')
-    if (braceStart !== -1 && braceEnd > braceStart) {
-      parsed = JSON.parse(json.slice(braceStart, braceEnd + 1))
-    } else {
-      throw new Error('Failed to parse fix response')
-    }
+  const banya = window.electronAPI?.banya
+  if (!banya) throw new Error('banya IPC not available (electronAPI.banya missing)')
+  const result = await banya.codegen({
+    projectId,
+    prompt: fixPrompt,
+    timeoutMs: 5 * 60 * 1000,
+  })
+  if (!result.success) {
+    throw new Error(result.error || `banya codegen failed (exit ${result.exitCode})`)
   }
 
-  const files: Record<string, string> = {}
-  for (const [key, value] of Object.entries(parsed)) {
-    files[key] = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(result.files)) {
+    if (projectFiles[key] !== value) out[key] = value
   }
-  return files
+  return out
 }
 
 export function hashString(str: string): string {
