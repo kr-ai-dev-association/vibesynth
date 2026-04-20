@@ -14,6 +14,34 @@ if (!API_KEY) {
 
 const genAI = new GoogleGenerativeAI(API_KEY || '')
 
+/**
+ * Route a code-generation prompt through banya-cli (banya run --prompt-type=ask
+ * --llm-backend=gemini). Returns the LLM's accumulated text response so existing
+ * JSON-extraction logic in codegen callers keeps working unchanged.
+ *
+ * Only used for the 3 large codegen tasks (generateFrontendApp,
+ * generateIncrementalFrontend, fixBuildErrors). All other Gemini calls
+ * (design generation, image analysis, heatmaps, design systems) stay on the
+ * direct SDK path since banya-cli doesn't expose vision / structured calls yet.
+ */
+async function callCodeLLM(
+  prompt: string,
+  opts?: { projectId?: string; timeoutMs?: number },
+): Promise<string> {
+  const banya = window.electronAPI?.banya
+  if (!banya) throw new Error('banya IPC not available (electronAPI.banya missing)')
+  const result = await banya.run({
+    prompt,
+    promptType: 'ask',
+    projectId: opts?.projectId,
+    timeoutMs: opts?.timeoutMs,
+  })
+  if (!result.success) {
+    throw new Error(result.error || `banya run failed (exit ${result.exitCode})`)
+  }
+  return result.content
+}
+
 // ─── Stitch-Quality System Prompt ───────────────────────────────
 
 const SYSTEM_PROMPT = `You are VibeSynth, a premium AI design tool that generates production-quality mobile and web app UI designs as self-contained HTML+CSS.
@@ -911,11 +939,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     files[`src/pages/${component}.ref.html`] = processedHtml
   }
 
-  // ─── Step 3: Gemini converts HTML→TSX pages + App.tsx + index.css ───
-  // Note: some preview models may not support responseMimeType: 'application/json'
-  // so we request JSON in the prompt and parse manually
-  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
-
+  // ─── Step 3: banya-cli converts HTML→TSX pages + App.tsx + index.css ───
+  // Request JSON in the prompt and parse manually (routed via `banya run
+  // --prompt-type=ask --llm-backend=gemini`).
   const screenSummaries = screens.map((s, i) => {
     // Use processed HTML with /images/ paths instead of raw data URLs
     const component = s.name.replace(/[^a-zA-Z0-9]/g, '')
@@ -940,8 +966,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     ? `\n\nIMAGE FILES available in /images/ folder (MUST use these exact paths):\n${imageFiles.map(f => `- /${f.replace('public/', '')}`).join('\n')}\nFor every <img> in the reference HTML that uses /images/img-N.ext, the TSX MUST include <img src="/images/img-N.ext" /> with the same path.`
     : ''
 
-  const result = await model.generateContent([
-    `You are converting ${screens.length} HTML design screens into React TSX page components for a Vite + React Router + Tailwind CSS project.
+  const frontendAppPrompt = `You are converting ${screens.length} HTML design screens into React TSX page components for a Vite + React Router + Tailwind CSS project.
 
 The project scaffolding (package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx) is ALREADY created.
 IMPORTANT: src/main.tsx ALREADY wraps the app in <BrowserRouter>. Do NOT add another Router in App.tsx.
@@ -969,10 +994,9 @@ RULES:
 Return a JSON object: { "src/App.tsx": "...", "src/index.css": "...", "src/pages/ComponentName.tsx": "...", ... }
 Return ONLY the JSON, no explanation.
 
-${screenSummaries}`,
-  ])
+${screenSummaries}`
 
-  let json = result.response.text().trim()
+  let json = (await callCodeLLM(frontendAppPrompt)).trim()
   if (json.startsWith('```json')) json = json.slice(7)
   else if (json.startsWith('```')) json = json.slice(3)
   if (json.endsWith('```')) json = json.slice(0, -3)
@@ -992,7 +1016,7 @@ ${screenSummaries}`,
     }
   }
 
-  // Merge Gemini output into scaffolding files
+  // Merge banya output into scaffolding files
   for (const [key, value] of Object.entries(parsed)) {
     files[key] = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
   }
@@ -1102,11 +1126,6 @@ export async function generateIncrementalFrontend(
   existingFiles: Record<string, string>,
   deviceType: 'app' | 'web' | 'tablet' = 'web',
 ): Promise<Record<string, string>> {
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-3-flash-preview',
-    // responseMimeType removed — preview models may not support it; parse JSON from text
-  })
-
   const allRoutes = allScreens.map((s, i) => ({
     name: s.name,
     component: s.name.replace(/[^a-zA-Z0-9]/g, ''),
@@ -1130,8 +1149,7 @@ export async function generateIncrementalFrontend(
   const existingAppTsx = existingFiles['src/App.tsx'] || ''
   const existingIndexCss = existingFiles['src/index.css'] || ''
 
-  const result = await model.generateContent([
-    `You are doing an INCREMENTAL BUILD for a React+Vite+ReactRouter project.
+  const incrementalPrompt = `You are doing an INCREMENTAL BUILD for a React+Vite+ReactRouter project.
 
 Some screens have already been built. You only need to generate files for NEW screens and update App.tsx to include all routes.
 
@@ -1160,10 +1178,9 @@ RULES:
 - If new screens need additional CSS (font imports etc), include an src/index.css with the FULL updated content
 
 Return a JSON object: { "filepath": "file content string", ... }
-Only include files that need to be created or updated.`,
-  ])
+Only include files that need to be created or updated.`
 
-  let json = result.response.text().trim()
+  let json = (await callCodeLLM(incrementalPrompt)).trim()
   if (json.startsWith('```json')) json = json.slice(7)
   else if (json.startsWith('```')) json = json.slice(3)
   if (json.endsWith('```')) json = json.slice(0, -3)
@@ -1200,17 +1217,11 @@ export async function fixBuildErrors(
   errorOutput: string,
   projectFiles: Record<string, string>,
 ): Promise<Record<string, string>> {
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-3-flash-preview',
-    // responseMimeType removed — preview models may not support it; parse JSON from text
-  })
-
   const fileList = Object.entries(projectFiles)
     .map(([path, content]) => `=== ${path} ===\n${content.slice(0, 3000)}`)
     .join('\n\n')
 
-  const result = await model.generateContent([
-    `A React + Vite + TypeScript project has build/compile errors. Fix them.
+  const fixPrompt = `A React + Vite + TypeScript project has build/compile errors. Fix them.
 
 ERROR OUTPUT:
 ${errorOutput.slice(0, 3000)}
@@ -1224,10 +1235,9 @@ RULES:
 - Fix TypeScript errors, missing imports, JSX issues, syntax errors
 - Do NOT change the visual design or layout, only fix compilation errors
 - Return a JSON object: { "filepath": "fixed file content", ... }
-- Only include files that actually need changes`,
-  ])
+- Only include files that actually need changes`
 
-  let json = result.response.text().trim()
+  let json = (await callCodeLLM(fixPrompt)).trim()
   if (json.startsWith('```json')) json = json.slice(7)
   else if (json.startsWith('```')) json = json.slice(3)
   if (json.endsWith('```')) json = json.slice(0, -3)

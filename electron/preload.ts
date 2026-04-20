@@ -58,6 +58,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('project:export-to-folder', projectId, destPath) as Promise<{ success: boolean; path?: string; error?: string }>,
   },
 
+  // Banya CLI (codegen backend for frontend builds)
+  banya: {
+    run: (opts: {
+      prompt: string
+      projectId?: string
+      promptType?: 'ask' | 'code' | 'plan' | 'agent'
+      timeoutMs?: number
+      streamEventName?: string
+    }) =>
+      ipcRenderer.invoke('banya:run', opts) as Promise<{
+        success: boolean
+        content: string
+        exitCode: number | null
+        error?: string
+      }>,
+    onStream: (channel: string, callback: (chunk: string) => void) => {
+      const handler = (_e: any, chunk: string) => callback(chunk)
+      ipcRenderer.on(channel, handler)
+      return () => ipcRenderer.removeListener(channel, handler)
+    },
+  },
+
   // Shell commands (§11.2)
   shell: {
     openVscode: (folderPath: string) =>

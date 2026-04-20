@@ -30,6 +30,17 @@ interface ElectronShellAPI {
   openVscode: (folderPath: string) => Promise<{ success: boolean; error?: string }>
 }
 
+interface ElectronBanyaAPI {
+  run: (opts: {
+    prompt: string
+    projectId?: string
+    promptType?: 'ask' | 'code' | 'plan' | 'agent'
+    timeoutMs?: number
+    streamEventName?: string
+  }) => Promise<{ success: boolean; content: string; exitCode: number | null; error?: string }>
+  onStream: (channel: string, callback: (chunk: string) => void) => () => void
+}
+
 interface ElectronPinterestAPI {
   connect: () => Promise<void>
   open: (query: string) => Promise<void>
@@ -53,6 +64,7 @@ interface ElectronAPI {
   sendLiveEditResult: (result: { success: boolean; message: string; devMarkdown?: string }) => Promise<void>
   pinterest: ElectronPinterestAPI
   project: ElectronProjectAPI
+  banya: ElectronBanyaAPI
   liveEdit: {
     open: () => Promise<void>
     sendRequest: (prompt: string) => Promise<void>

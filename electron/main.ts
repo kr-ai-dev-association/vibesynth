@@ -5,6 +5,7 @@ import { execSync, spawn, ChildProcess } from 'child_process'
 import os from 'os'
 import { db } from './database'
 import { isGeminiCliAvailable, runGeminiCli } from './gemini-cli'
+import { isBanyaCliAvailable, runBanya } from './banya-cli'
 
 let mainWindow: BrowserWindow | null = null
 let liveAppWindow: BrowserWindow | null = null
@@ -298,6 +299,43 @@ ipcMain.handle('project:clean', async (_event, projectId: string) => {
   }
   return { success: true }
 })
+
+ipcMain.handle(
+  'banya:run',
+  async (
+    event,
+    opts: {
+      prompt: string
+      projectId?: string
+      promptType?: 'ask' | 'code' | 'plan' | 'agent'
+      timeoutMs?: number
+      streamEventName?: string
+    },
+  ) => {
+    if (!isBanyaCliAvailable()) {
+      return {
+        success: false,
+        content: '',
+        exitCode: null,
+        error: 'banya CLI not found in PATH — install banya-cli or check $PATH',
+      }
+    }
+    let workspace: string | undefined
+    if (opts.projectId) {
+      workspace = getProjectDir(opts.projectId)
+      ensureDir(workspace)
+    }
+    const streamChannel = opts.streamEventName
+    return await runBanya(opts.prompt, {
+      promptType: opts.promptType,
+      workspace,
+      timeoutMs: opts.timeoutMs,
+      onContentDelta: streamChannel
+        ? (chunk) => event.sender.send(streamChannel, chunk)
+        : undefined,
+    })
+  },
+)
 
 ipcMain.handle('project:scaffold', (_event, projectId: string, files: Record<string, string>) => {
   const projectDir = getProjectDir(projectId)
