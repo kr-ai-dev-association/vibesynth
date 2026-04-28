@@ -552,6 +552,34 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     const logId = addLog(t('editor.log.editingElement', { tag: selectedElement.tagName, screen: screen.name, prompt }), 'generating')
 
     try {
+      // <img> target → generate a new image and patch src (natural-language prompts work).
+      // Skip only if prompt is clearly a visual-property edit (rounded, border, shadow, size, color).
+      const isImgTarget = selectedElement.tagName === 'img'
+      const isPureStyleEdit = /^(?:make\s+)?(?:rounded|round|circular|smaller|larger|bigger|wider|taller|border|shadow|brightness|contrast|opacity|fade|blur|grayscale|색상|크기|테두리|그림자|둥글게)\b/i.test(prompt.trim())
+      if (isImgTarget && !isPureStyleEdit) {
+        const { generateImage } = await import('../lib/image-gen')
+        const aspect = deriveAspectFromOuterHtml(selectedElement.outerHtml)
+        updateLog(logId, t('editor.log.generatingImages'), 'generating')
+        const img = await generateImage(prompt, { aspectRatio: aspect, style: 'photo' })
+        if (img) {
+          const doc = new DOMParser().parseFromString(screen.html, 'text/html')
+          const target = doc.querySelector(selectedElement.cssPath) as HTMLImageElement | null
+          if (target) {
+            target.setAttribute('src', img.dataUrl)
+            if (target.hasAttribute('srcset')) target.removeAttribute('srcset')
+            const newHtml = '<!DOCTYPE html>' + doc.documentElement.outerHTML
+            updateLog(logId, t('editor.log.updatedElement', { name: screen.name }), 'success')
+            const updatedScreens = project.screens.map((s) =>
+              s.id === screen.id ? { ...s, html: newHtml, generating: false } : s
+            )
+            onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
+            setSelectedElement(null)
+            return
+          }
+        }
+        // Image gen failed or selector miss → fall through to text edit
+      }
+
       const { editDesignElement } = await import('../lib/gemini')
       const newHtml = await editDesignElement(screen.html, selectedElement.cssPath, selectedElement.outerHtml, prompt)
       updateLog(logId, t('editor.log.updatedElement', { name: screen.name }), 'success')
@@ -2435,6 +2463,24 @@ const HEATMAP_PROBE_SCRIPT = `
   });
 })();
 </script>`;
+
+function deriveAspectFromOuterHtml(outerHtml: string): '1:1' | '16:9' | '9:16' | '4:3' | '3:4' {
+  const widthMatch = outerHtml.match(/(?:width=["']?(\d+)|width:\s*(\d+)px)/)
+  const heightMatch = outerHtml.match(/(?:height=["']?(\d+)|height:\s*(\d+)px)/)
+  const w = widthMatch ? parseInt(widthMatch[1] || widthMatch[2]) : 0
+  const h = heightMatch ? parseInt(heightMatch[1] || heightMatch[2]) : 0
+  if (w > 0 && h > 0) {
+    const r = w / h
+    if (r > 1.7) return '16:9'
+    if (r > 1.2) return '4:3'
+    if (r > 0.85) return '1:1'
+    if (r > 0.6) return '3:4'
+    return '9:16'
+  }
+  if (/rounded-full|avatar|profile|icon/i.test(outerHtml)) return '1:1'
+  if (/hero|banner|cover/i.test(outerHtml)) return '16:9'
+  return '16:9'
+}
 
 function intensityColor(intensity: number): string {
   if (intensity >= 0.8) return 'rgba(239,68,68,0.45)'
