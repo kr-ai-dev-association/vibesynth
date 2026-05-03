@@ -5,9 +5,13 @@ interface AgentLogProps {
   isOpen: boolean
   onToggle: () => void
   entries?: AgentLogEntry[]
+  /** Set of log entry ids currently cancellable. Each gets a stop icon. */
+  cancellableIds?: Set<string>
+  /** Called when the user clicks the stop icon next to an entry. */
+  onCancel?: (id: string) => void
 }
 
-export function AgentLog({ isOpen, onToggle, entries = [] }: AgentLogProps) {
+export function AgentLog({ isOpen, onToggle, entries = [], cancellableIds, onCancel }: AgentLogProps) {
   const { t } = useI18n()
   return (
     <div className="border-t border-neutral-200 dark:border-neutral-700">
@@ -31,25 +35,37 @@ export function AgentLog({ isOpen, onToggle, entries = [] }: AgentLogProps) {
             </div>
           ) : (
             <div className="space-y-1.5">
-              {entries.map((entry) => (
-                <div key={entry.id} className="flex items-start gap-2 text-sm">
-                  <StatusIcon type={entry.type} />
-                  <span className={
-                    entry.type === 'error'
-                      ? 'text-red-600 dark:text-red-400'
-                      : entry.type === 'success'
-                      ? 'text-emerald-600 dark:text-emerald-400'
-                      : entry.type === 'generating'
-                      ? 'text-amber-600 dark:text-amber-400'
-                      : 'text-neutral-600 dark:text-neutral-400'
-                  }>
-                    {entry.message}
-                  </span>
-                  <span className="text-[10px] text-neutral-400 ml-auto shrink-0">
-                    {entry.timestamp.toLocaleTimeString()}
-                  </span>
-                </div>
-              ))}
+              {entries.map((entry) => {
+                const cancellable = !!cancellableIds?.has(entry.id) && !!onCancel
+                return (
+                  <div key={entry.id} className="flex items-start gap-2 text-sm">
+                    <StatusIcon type={entry.type} />
+                    <span className={
+                      entry.type === 'error'
+                        ? 'text-red-600 dark:text-red-400'
+                        : entry.type === 'success'
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : entry.type === 'generating'
+                        ? 'text-amber-600 dark:text-amber-400'
+                        : 'text-neutral-600 dark:text-neutral-400'
+                    }>
+                      {entry.message}
+                    </span>
+                    <span className="text-[10px] text-neutral-400 ml-auto shrink-0">
+                      {entry.timestamp.toLocaleTimeString()}
+                    </span>
+                    {cancellable && (
+                      <button
+                        onClick={() => onCancel?.(entry.id)}
+                        title="이 작업 중지"
+                        className="shrink-0 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 hover:text-red-700 dark:hover:text-red-400 transition-colors"
+                      >
+                        <StopIcon className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
@@ -90,4 +106,7 @@ function SparkleIcon({ className }: { className?: string }) {
 
 function ChevronIcon({ className }: { className?: string }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9l6 6 6-6" /></svg>
+}
+function StopIcon({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1.5" /></svg>
 }

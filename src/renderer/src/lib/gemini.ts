@@ -325,6 +325,7 @@ export async function generateDesign(
   callbacks?: GenerationCallbacks,
   existingScreenHtml?: string,
   presetDesignSystem?: DesignSystem,
+  signal?: AbortSignal,
 ): Promise<GenerateDesignResult[]> {
   const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
 
@@ -373,10 +374,13 @@ Use the EXACT same colors, fonts, border-radius, shadows, navigation style, and 
 === END CONSISTENCY ===`
   }
 
-  const result = await model.generateContent([
-    SYSTEM_PROMPT,
-    `${deviceContext}${guideContext}${presetTokenContext}${consistencyContext}\n\nUser request: ${prompt}\n\nGenerate a single complete, production-quality screen. Use the image placeholders {{HERO_IMAGE}}, {{CONTENT_IMAGE_1}}, {{CONTENT_IMAGE_2}} where photos should appear. Include realistic content, proper component styling, and polished visual hierarchy.`,
-  ])
+  const result = await model.generateContent(
+    [
+      SYSTEM_PROMPT,
+      `${deviceContext}${guideContext}${presetTokenContext}${consistencyContext}\n\nUser request: ${prompt}\n\nGenerate a single complete, production-quality screen. Use the image placeholders {{HERO_IMAGE}}, {{CONTENT_IMAGE_1}}, {{CONTENT_IMAGE_2}} where photos should appear. Include realistic content, proper component styling, and polished visual hierarchy.`,
+    ],
+    signal ? { signal } : undefined,
+  )
   callbacks?.onDesignGenComplete?.()
 
   const text = result.response.text()
@@ -477,6 +481,7 @@ export async function generateMultiScreen(
     onScreenComplete?: (index: number, total: number, name: string, html: string) => void
   },
   presetDesignSystem?: DesignSystem,
+  signal?: AbortSignal,
 ): Promise<GenerateDesignResult[]> {
   const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
   const activeGuide = guide || designGuideDB.findBestMatch(appDescription)?.guide
@@ -536,10 +541,13 @@ CRITICAL RULES:
 === END CONSISTENCY RULES ===`
     }
 
-    const result = await model.generateContent([
-      SYSTEM_PROMPT,
-      `${deviceContext}${guideContext}${presetTokenContext}${consistencyContext}\n\nApp description: ${appDescription}\n\nGenerate the "${screenName}" screen/page. Use image placeholders {{HERO_IMAGE}}, {{CONTENT_IMAGE_1}}, {{CONTENT_IMAGE_2}} where photos should appear. Include realistic content specific to this screen.`,
-    ])
+    const result = await model.generateContent(
+      [
+        SYSTEM_PROMPT,
+        `${deviceContext}${guideContext}${presetTokenContext}${consistencyContext}\n\nApp description: ${appDescription}\n\nGenerate the "${screenName}" screen/page. Use image placeholders {{HERO_IMAGE}}, {{CONTENT_IMAGE_1}}, {{CONTENT_IMAGE_2}} where photos should appear. Include realistic content specific to this screen.`,
+      ],
+      signal ? { signal } : undefined,
+    )
 
     let html = result.response.text().trim()
     if (html.startsWith('```html')) html = html.slice(7)
@@ -565,6 +573,7 @@ CRITICAL RULES:
 export async function editDesign(
   currentHtml: string,
   editPrompt: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
 
@@ -577,10 +586,13 @@ export async function editDesign(
     return key
   })
 
-  const result = await model.generateContent([
-    SYSTEM_PROMPT,
-    `Here is the current design HTML:\n\n${strippedHtml}\n\nUser wants to modify it: "${editPrompt}"\n\nReturn the COMPLETE modified HTML. Apply the requested changes while keeping the overall design intact. Keep all image placeholders like __IMG_0__, __IMG_1__ exactly as they are.`,
-  ])
+  const result = await model.generateContent(
+    [
+      SYSTEM_PROMPT,
+      `Here is the current design HTML:\n\n${strippedHtml}\n\nUser wants to modify it: "${editPrompt}"\n\nReturn the COMPLETE modified HTML. Apply the requested changes while keeping the overall design intact. Keep all image placeholders like __IMG_0__, __IMG_1__ exactly as they are.`,
+    ],
+    signal ? { signal } : undefined,
+  )
 
   let html = result.response.text().trim()
   if (html.startsWith('```html')) html = html.slice(7)
@@ -615,10 +627,11 @@ export async function editDesign(
 export async function editDesignsBatch(
   screens: Array<{ id: string; name: string; html: string }>,
   editPrompt: string,
+  signal?: AbortSignal,
 ): Promise<Array<{ id: string; html: string; changed: boolean }>> {
   if (screens.length === 0) return []
   if (screens.length === 1) {
-    const html = await editDesign(screens[0].html, editPrompt)
+    const html = await editDesign(screens[0].html, editPrompt, signal)
     return [{ id: screens[0].id, html, changed: html !== screens[0].html }]
   }
 
@@ -658,7 +671,7 @@ export async function editDesignsBatch(
     `- Do not wrap output in markdown code fences. No commentary outside the delimited blocks.\n` +
     `- Use the screen names from the INPUT as the delimiter labels (case-sensitive).`
 
-  const result = await model.generateContent([SYSTEM_PROMPT, userPrompt])
+  const result = await model.generateContent([SYSTEM_PROMPT, userPrompt], signal ? { signal } : undefined)
   let raw = result.response.text().trim()
   if (raw.startsWith('```html')) raw = raw.slice(7)
   else if (raw.startsWith('```')) raw = raw.slice(3)
@@ -722,8 +735,9 @@ export async function generateEmptyScreen(opts: {
   referenceHtml: string
   existingScreenNames: string[]
   designSystem?: DesignSystem
+  signal?: AbortSignal
 }): Promise<string> {
-  const { screenName, deviceType, referenceHtml, existingScreenNames, designSystem } = opts
+  const { screenName, deviceType, referenceHtml, existingScreenNames, designSystem, signal } = opts
   const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
 
   // Strip data URIs to keep context small and stop the model from picking
@@ -784,7 +798,7 @@ REQUIREMENTS — non-negotiable:
 
 OUTPUT: ONLY the complete HTML for this single new screen. No markdown fences, no commentary.`
 
-  const result = await model.generateContent([SYSTEM_PROMPT, userPrompt])
+  const result = await model.generateContent([SYSTEM_PROMPT, userPrompt], signal ? { signal } : undefined)
   let html = result.response.text().trim()
   if (html.startsWith('```html')) html = html.slice(7)
   else if (html.startsWith('```')) html = html.slice(3)
@@ -801,6 +815,7 @@ export async function editDesignElement(
   cssPath: string,
   elementOuterHtml: string,
   editPrompt: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
 
@@ -812,19 +827,22 @@ export async function editDesignElement(
     return key
   })
 
-  const result = await model.generateContent([
-    SYSTEM_PROMPT,
-    `Here is the current design HTML:\n\n${strippedHtml}\n\n` +
-    `The user has selected a specific element using CSS path: "${cssPath}"\n` +
-    `The selected element's HTML is:\n${elementOuterHtml}\n\n` +
-    `User wants to modify ONLY this element: "${editPrompt}"\n\n` +
-    `Rules:\n` +
-    `1. Return the COMPLETE page HTML with the modification applied.\n` +
-    `2. ONLY change the targeted element and its children. Do NOT change anything else.\n` +
-    `3. Keep the overall page structure, other elements, and styling intact.\n` +
-    `4. Keep all image placeholders like __IMG_0__, __IMG_1__ exactly as they are.\n` +
-    `5. Return ONLY valid HTML. No markdown, no code fences.`,
-  ])
+  const result = await model.generateContent(
+    [
+      SYSTEM_PROMPT,
+      `Here is the current design HTML:\n\n${strippedHtml}\n\n` +
+      `The user has selected a specific element using CSS path: "${cssPath}"\n` +
+      `The selected element's HTML is:\n${elementOuterHtml}\n\n` +
+      `User wants to modify ONLY this element: "${editPrompt}"\n\n` +
+      `Rules:\n` +
+      `1. Return the COMPLETE page HTML with the modification applied.\n` +
+      `2. ONLY change the targeted element and its children. Do NOT change anything else.\n` +
+      `3. Keep the overall page structure, other elements, and styling intact.\n` +
+      `4. Keep all image placeholders like __IMG_0__, __IMG_1__ exactly as they are.\n` +
+      `5. Return ONLY valid HTML. No markdown, no code fences.`,
+    ],
+    signal ? { signal } : undefined,
+  )
 
   let html = result.response.text().trim()
   if (html.startsWith('```html')) html = html.slice(7)

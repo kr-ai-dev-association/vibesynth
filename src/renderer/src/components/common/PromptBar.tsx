@@ -17,6 +17,10 @@ interface PromptBarProps {
   selectedElement?: { tagName: string; textPreview: string }
   onExitEditMode?: () => void
   onClearElement?: () => void
+  /** When true, the submit button switches to a red "stop" button that
+   * invokes onCancel — used to abort the currently-running prompt. */
+  busy?: boolean
+  onCancel?: () => void
 }
 
 export function PromptBar({
@@ -33,6 +37,8 @@ export function PromptBar({
   selectedElement,
   onExitEditMode,
   onClearElement,
+  busy = false,
+  onCancel,
 }: PromptBarProps) {
   const { t } = useI18n()
   const [prompt, setPrompt] = useState('')
@@ -272,15 +278,27 @@ export function PromptBar({
             <MicIcon className="w-4 h-4" />
           </button>
 
-          {/* Submit */}
-          <button
-            onClick={handleSubmit}
-            disabled={!prompt.trim()}
-            className="p-1.5 rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 disabled:opacity-30 hover:opacity-90"
-            title={t('common.generate')}
-          >
-            <ArrowUpIcon className="w-4 h-4" />
-          </button>
+          {/* Submit / Stop — when a prompt is running and the parent passes
+              busy=true + onCancel, the submit button becomes a red stop
+              button that aborts the current operation. */}
+          {busy && onCancel ? (
+            <button
+              onClick={onCancel}
+              className="p-1.5 rounded-lg bg-red-500 text-white hover:bg-red-600"
+              title="현재 요청 중지"
+            >
+              <StopIcon className="w-4 h-4" />
+            </button>
+          ) : (
+            <button
+              onClick={handleSubmit}
+              disabled={!prompt.trim()}
+              className="p-1.5 rounded-lg bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 disabled:opacity-30 hover:opacity-90"
+              title={t('common.generate')}
+            >
+              <ArrowUpIcon className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -317,6 +335,9 @@ function MicIcon({ className }: { className?: string }) {
 }
 function ArrowUpIcon({ className }: { className?: string }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+}
+function StopIcon({ className }: { className?: string }) {
+  return <svg className={className} viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
 }
 function XIcon({ className }: { className?: string }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
