@@ -43,6 +43,12 @@ export interface RunAndroidOptions {
    * caches dropped. Use after major template changes or when chasing a
    * mystery build error. */
   clean?: boolean
+  /** Free-form natural-language instruction passed straight to the
+   * Stage A codegen prompt. Used by the "design sync break" mode where
+   * the user's intent shouldn't reshape the HTML mockups but should
+   * directly steer the Kotlin output (e.g. behaviour the HTML can't
+   * express, or fixes that only make sense in the native layer). */
+  extraInstruction?: string
   cfg: {
     sdkRoot: string
     jdkHome: string
@@ -399,9 +405,16 @@ async function codegenScreens(
   const unchanged = fs.existsSync(targetKt)
     && Object.keys(currentHashes).length === Object.keys(priorHashes).length
     && Object.entries(currentHashes).every(([k, v]) => priorHashes[k] === v)
-  if (unchanged) {
+  // Skip cache when the user has supplied an extraInstruction — design
+  // sync is broken, the HTML hashes intentionally haven't changed, but
+  // the user has new direction for the Kotlin side. Without this the
+  // codegen never runs and the prompt silently has no effect.
+  if (unchanged && !opts.extraInstruction) {
     emit({ step: 'codegen', status: 'success', message: '디자인 변경 없음 — codegen 건너뜀 (캐시 사용)' })
     return
+  }
+  if (unchanged && opts.extraInstruction) {
+    emit({ step: 'codegen', status: 'progress', message: '디자인 변경 없음이지만 사용자 지시 있음 — codegen 강제 실행' })
   }
 
   // Clean stale design files so the agent doesn't see screens from a
@@ -564,12 +577,48 @@ PROCESS:
   3. Stop. DO NOT run gradle. DO NOT modify gradle/Manifest/MainActivity/
      Theme/anything else.`
 
-  emit({ step: 'codegen', status: 'progress', message: `Stage A: banya CLI 멀티모달 codegen ${firstPng ? '(이미지 포함)' : '(text-only)'}` })
+  // Design-sync-break mode: the user's instruction is the PRIMARY directive
+  // and outranks anything visible in the HTML mockups (which are now stale
+  // references, not the source of truth). Putting it FIRST + reframing the
+  // HTML role is much more reliable than appending below — agents otherwise
+  // tend to faithfully re-emit "what the design says" and ignore tail
+  // instructions that conflict with the screenshots they just read.
+  const promptWithExtra = opts.extraInstruction
+    ? `╔══════════════════════════════════════════════════════════════════╗
+║ PRIMARY DIRECTIVE (highest priority — overrides everything below) ║
+╚══════════════════════════════════════════════════════════════════╝
+
+The user has BROKEN design sync. They want you to apply this change
+DIRECTLY to the Kotlin output:
+
+  ${opts.extraInstruction}
+
+Rules for the PRIMARY DIRECTIVE:
+- Wherever the directive conflicts with what the HTML shows, the
+  DIRECTIVE wins. The HTML mockups were NOT updated for this request.
+- If the directive is about behaviour (state, navigation, validation,
+  data flow, animations, gestures), implement it in Kotlin even if the
+  HTML doesn't depict it.
+- If the directive is about layout/styling that contradicts the HTML,
+  emit Kotlin matching the directive — not the HTML.
+- Apply the directive across EVERY relevant @Composable in Screens.kt,
+  not just the first one.
+
+The rest of this prompt describes the underlying task (regenerate
+Screens.kt from the HTML mockups). Carry it out, then make sure the
+PRIMARY DIRECTIVE above is satisfied in your final output.
+
+────────────────────────────────────────────────────────────────────
+
+` + draftPrompt
+    : draftPrompt
+
+  emit({ step: 'codegen', status: 'progress', message: `Stage A: banya CLI 멀티모달 codegen ${firstPng ? '(이미지 포함)' : '(text-only)'}${opts.extraInstruction ? ' + 사용자 지시' : ''}` })
 
   const stageA = await runBanyaCodegen({
     projectId: opts.projectId + '-android-stage-a',
     workspace: projectDirPath,
-    prompt: draftPrompt,
+    prompt: promptWithExtra,
     imageFile: firstPng || undefined,
     timeoutMs: 10 * 60 * 1000,
   })

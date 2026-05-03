@@ -108,6 +108,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getActivePlatform: () => ipcRenderer.invoke('live-edit:get-active-platform'),
     openInEditor: (platform?: 'react' | 'android') =>
       ipcRenderer.invoke('live-edit:open-in-editor', platform),
+    setDesignSync: (enabled: boolean) =>
+      ipcRenderer.invoke('live-edit:set-design-sync', enabled) as Promise<void>,
+    getDesignSync: () => ipcRenderer.invoke('live-edit:get-design-sync') as Promise<boolean>,
     close: () => ipcRenderer.invoke('live-edit:close'),
   },
 
@@ -168,7 +171,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listDevices: (adbPath: string) => ipcRenderer.invoke('android:list-devices', adbPath),
     getConfig: () => ipcRenderer.invoke('android:get-config'),
     saveConfig: (cfg: any) => ipcRenderer.invoke('android:save-config', cfg),
-    run: (projectId: string, projectName: string, screens?: any[], designSystem?: any, opts?: { clean?: boolean }) =>
+    run: (projectId: string, projectName: string, screens?: any[], designSystem?: any, opts?: { clean?: boolean; extraInstruction?: string }) =>
       ipcRenderer.invoke('android:run', projectId, projectName, screens, designSystem, opts) as Promise<{ success: boolean; error?: string }>,
     onProgress: (cb: (e: { step: string; status: string; message: string; detail?: string }) => void) => {
       const handler = (_e: unknown, ev: any) => cb(ev)

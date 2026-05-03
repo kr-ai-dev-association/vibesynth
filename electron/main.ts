@@ -33,6 +33,12 @@ let liveEditProjectId: string | null = null
 // user can tell at a glance where their next prompt will land. Set by the
 // renderer through liveEdit:set-active-platform after each successful Run.
 let liveEditActivePlatform: 'web' | 'android' | null = null
+// Design sync: when true (default), Live Edit prompts modify HTML mockups
+// and let the auto-rebuild propagate. When the user explicitly breaks
+// sync from the popup, prompts are sent straight into the Android codegen
+// agent as `extraInstruction` and the HTML stays untouched. Per-process
+// state — survives popup reopen, resets on app restart.
+let liveEditDesignSync = true
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 
@@ -435,7 +441,7 @@ ipcMain.handle('android:run', async (
   projectName: string,
   screens?: Array<{ id: string; name: string; html: string }>,
   designSystem?: any,
-  opts?: { clean?: boolean },
+  opts?: { clean?: boolean; extraInstruction?: string },
 ) => {
   const settings = db.getSettings('default') as any
   const cfg: AndroidConfig | undefined = settings?.androidConfig
@@ -451,6 +457,7 @@ ipcMain.handle('android:run', async (
       designSystem,
       geminiApiKey,
       clean: !!opts?.clean,
+      extraInstruction: opts?.extraInstruction,
       cfg,
     }, mainWindow)
     return { success: true }
@@ -992,18 +999,37 @@ ipcMain.handle('live-edit:open', (_event, projectId?: string) => {
 
   <!-- Developer mode: project info -->
   <div id="le-project-info" style="display:none;font-size:11px;color:#64748b;background:#1a1a2e;border-radius:8px;padding:10px;overflow-y:auto;min-height:0">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px;flex-wrap:wrap">
       <div style="font-weight:600;color:#60a5fa">📁 Workspace</div>
-      <button id="le-open-in-editor" title="설정의 외부 편집기로 열기" style="background:rgba(96,165,250,0.15);border:1px solid rgba(96,165,250,0.4);color:#93c5fd;padding:3px 8px;border-radius:6px;font-size:10px;cursor:pointer;display:flex;align-items:center;gap:4px;line-height:1.4">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 3h7v7"/><path d="M21 3l-9 9"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>
-        <span>외부 편집기</span>
-      </button>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <button id="le-design-sync" title="디자인 동기화 끊기" style="background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.4);color:#86efac;padding:3px 8px;border-radius:6px;font-size:10px;cursor:pointer;display:flex;align-items:center;gap:4px;line-height:1.4">
+          <span class="ds-icon">🔗</span>
+          <span class="ds-label">디자인 동기화 ON</span>
+        </button>
+        <button id="le-open-in-editor" title="설정의 외부 편집기로 열기" style="background:rgba(96,165,250,0.15);border:1px solid rgba(96,165,250,0.4);color:#93c5fd;padding:3px 8px;border-radius:6px;font-size:10px;cursor:pointer;display:flex;align-items:center;gap:4px;line-height:1.4">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 3h7v7"/><path d="M21 3l-9 9"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>
+          <span>외부 편집기</span>
+        </button>
+      </div>
     </div>
     <div id="le-project-path" style="font-family:monospace;font-size:10px;color:#94a3b8;margin-bottom:8px;word-break:break-all"></div>
     <div style="font-weight:600;color:#60a5fa;margin-bottom:4px">📄 Files</div>
     <div id="le-project-files" style="font-family:monospace;font-size:10px;line-height:1.6"></div>
   </div>
   <div class="status" id="le-status"></div>
+</div>
+<!-- Confirm modal — destructive action confirmation (design sync break) -->
+<div id="le-confirm" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#0f0f17;border:1px solid #2d2d44;border-radius:14px;padding:18px 18px 14px;max-width:420px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,0.5)">
+    <div style="font-size:14px;font-weight:600;color:#fbbf24;margin-bottom:10px;display:flex;align-items:center;gap:6px">
+      <span>⚠️</span><span id="le-confirm-title">확인</span>
+    </div>
+    <div id="le-confirm-msg" style="font-size:12px;color:#cbd5e1;line-height:1.6;margin-bottom:14px"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button id="le-confirm-cancel" style="background:transparent;border:1px solid #2d2d44;color:#94a3b8;padding:6px 14px;border-radius:8px;font-size:12px;cursor:pointer">취소</button>
+      <button id="le-confirm-ok" style="background:#dc2626;border:1px solid #dc2626;color:white;padding:6px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-weight:600">승인</button>
+    </div>
+  </div>
 </div>
 <script>
   let currentMode = localStorage.getItem('vibesynth-live-feedback-mode') || 'designer';
@@ -1312,6 +1338,119 @@ ipcMain.handle('live-edit:open', (_event, projectId?: string) => {
     window.electronAPI.liveEdit.getActivePlatform().then(applyPlatform).catch(() => {});
   }
 
+  // ── Confirm modal (used by destructive actions) ──
+  const confirmModal = document.getElementById('le-confirm');
+  const confirmTitleEl = document.getElementById('le-confirm-title');
+  const confirmMsgEl = document.getElementById('le-confirm-msg');
+  const confirmOkBtn = document.getElementById('le-confirm-ok');
+  const confirmCancelBtn = document.getElementById('le-confirm-cancel');
+  function openConfirm(opts) {
+    if (!confirmModal) return Promise.resolve(false);
+    if (confirmTitleEl) confirmTitleEl.textContent = opts.title || '확인';
+    if (confirmMsgEl) confirmMsgEl.textContent = opts.message || '';
+    if (confirmOkBtn) confirmOkBtn.textContent = opts.okLabel || '승인';
+    if (confirmCancelBtn) confirmCancelBtn.textContent = opts.cancelLabel || '취소';
+    confirmModal.style.display = 'flex';
+    return new Promise((resolve) => {
+      const onOk = () => { cleanup(); resolve(true); };
+      const onCancel = () => { cleanup(); resolve(false); };
+      const onBg = (e) => { if (e.target === confirmModal) onCancel(); };
+      function cleanup() {
+        confirmModal.style.display = 'none';
+        confirmOkBtn && confirmOkBtn.removeEventListener('click', onOk);
+        confirmCancelBtn && confirmCancelBtn.removeEventListener('click', onCancel);
+        confirmModal.removeEventListener('click', onBg);
+      }
+      confirmOkBtn && confirmOkBtn.addEventListener('click', onOk);
+      confirmCancelBtn && confirmCancelBtn.addEventListener('click', onCancel);
+      confirmModal.addEventListener('click', onBg);
+    });
+  }
+
+  // ── Design sync toggle ──
+  // ON: prompts edit HTML mockups + auto-rebuild Android (default)
+  // OFF: prompts go straight to Android codegen as instructions, HTML stays
+  // Toggle requires user confirmation because the user said it must be a
+  // deliberate, irreversible-feeling action (warning copy mirrors that).
+  const designSyncBtn = document.getElementById('le-design-sync');
+  function applyDesignSync(enabled) {
+    if (!designSyncBtn) return;
+    const iconEl = designSyncBtn.querySelector('.ds-icon');
+    const labelEl = designSyncBtn.querySelector('.ds-label');
+    if (enabled) {
+      designSyncBtn.style.background = 'rgba(34,197,94,0.15)';
+      designSyncBtn.style.borderColor = 'rgba(34,197,94,0.4)';
+      designSyncBtn.style.color = '#86efac';
+      designSyncBtn.title = '디자인 동기화 끊기 — 클릭 시 경고';
+      if (iconEl) iconEl.textContent = '🔗';
+      if (labelEl) labelEl.textContent = '디자인 동기화 ON';
+    } else {
+      designSyncBtn.style.background = 'rgba(248,113,113,0.15)';
+      designSyncBtn.style.borderColor = 'rgba(248,113,113,0.4)';
+      designSyncBtn.style.color = '#fca5a5';
+      designSyncBtn.title = '디자인과 앱이 분리됨 — 프롬프트는 Android 코드젠으로 직행';
+      if (iconEl) iconEl.textContent = '🔓';
+      if (labelEl) labelEl.textContent = '동기화 끊김';
+    }
+  }
+  window.__leSetDesignSync = applyDesignSync;
+  applyDesignSync(true);
+  if (window.electronAPI?.liveEdit?.getDesignSync) {
+    window.electronAPI.liveEdit.getDesignSync().then(applyDesignSync).catch(() => {});
+  }
+  if (designSyncBtn) {
+    // Apply the new sync state through the IPC, then read it back to confirm
+    // main actually accepted the change. If the popup was opened before the
+    // IPC was added (stale preload) the optional-chained call silently no-
+    // ops; without this verify the visual flips but the renderer keeps
+    // taking the HTML-edit path on the next prompt.
+    const applySyncWithVerify = async (target) => {
+      const api = window.electronAPI && window.electronAPI.liveEdit;
+      if (!api || typeof api.setDesignSync !== 'function' || typeof api.getDesignSync !== 'function') {
+        status.textContent = '⚠ 이 팝업은 구버전 preload입니다. 닫았다가 다시 열어주세요.';
+        return false;
+      }
+      try {
+        await api.setDesignSync(target);
+        const verify = await api.getDesignSync();
+        if (verify !== target) {
+          status.textContent = '⚠ 동기화 상태가 main에 반영되지 않았습니다. 팝업 재시작 필요.';
+          return false;
+        }
+        applyDesignSync(target);
+        status.textContent = target
+          ? '🔗 동기화 ON — 이후 프롬프트는 디자인 HTML 부터 수정합니다.'
+          : '🔓 동기화 끊김 — 이후 프롬프트는 Android 코드젠으로 직행합니다.';
+        setTimeout(() => { if (status.textContent.startsWith('🔗') || status.textContent.startsWith('🔓')) status.textContent = ''; }, 4000);
+        return true;
+      } catch (e) {
+        status.textContent = '⚠ 동기화 변경 실패: ' + (e && e.message ? e.message : String(e));
+        return false;
+      }
+    };
+
+    designSyncBtn.addEventListener('click', async () => {
+      const currentlyOn = (designSyncBtn.querySelector('.ds-label') || {}).textContent !== '동기화 끊김';
+      if (currentlyOn) {
+        const ok = await openConfirm({
+          title: '디자인 동기화 끊기',
+          message: '이 기능을 사용하면 더이상 디자인과 앱이 동기화 되지 않습니다. 되돌릴 수 없으니 숙지 하시기 바랍니다.',
+          okLabel: '승인',
+          cancelLabel: '취소',
+        });
+        if (ok) await applySyncWithVerify(false);
+      } else {
+        const ok = await openConfirm({
+          title: '디자인 동기화 다시 켜기',
+          message: '다시 동기화를 켜면 이후 프롬프트는 디자인 HTML 부터 수정한 뒤 빌드됩니다. 진행하시겠습니까?',
+          okLabel: '확인',
+          cancelLabel: '취소',
+        });
+        if (ok) await applySyncWithVerify(true);
+      }
+    });
+  }
+
   // Init mode from localStorage
   setMode(currentMode);
   designerBtn.addEventListener('click', () => setMode('designer'));
@@ -1396,6 +1535,22 @@ ipcMain.handle('live-edit:set-active-platform', (_event, platform: 'web' | 'andr
 })
 
 ipcMain.handle('live-edit:get-active-platform', () => liveEditActivePlatform)
+
+// Design sync state — popup toggles via the warning modal; renderer reads
+// it before each Live Edit dispatch to decide between HTML-edit + rebuild
+// (sync on) vs straight-to-codegen with the prompt as instruction (off).
+ipcMain.handle('live-edit:set-design-sync', (_event, enabled: boolean) => {
+  liveEditDesignSync = !!enabled
+  if (liveEditWindow) {
+    const v = JSON.stringify(liveEditDesignSync)
+    liveEditWindow.webContents.executeJavaScript(`
+      (function(){
+        if (typeof window.__leSetDesignSync === 'function') window.__leSetDesignSync(${v});
+      })();
+    `).catch(() => {})
+  }
+})
+ipcMain.handle('live-edit:get-design-sync', () => liveEditDesignSync)
 
 // Get project workspace info for Developer mode display.
 // Resolves the active project id from (priority): live-edit-bound id >
@@ -1660,15 +1815,27 @@ ipcMain.handle('live-edit:get-workspace-root', () => {
 })
 
 /**
- * Open the active project's workspace root (containing web/android/…
- * subdirs) in the user's preferred external editor. The popup window
- * has its own localStorage so we read the editor preference through
- * the main renderer.
+ * Open the active project in the user's preferred external editor.
+ *
+ * Target dir is editor-aware:
+ *   - android-studio → workspaces/<id>/android  (Gradle project root —
+ *     Android Studio refuses to open the unified workspace root because
+ *     it has no settings.gradle at that level)
+ *   - webstorm       → workspaces/<id>/web      (single-root JS editor)
+ *   - vscode/cursor  → workspaces/<id>/         (multi-root, sees both)
+ *
+ * Falls back to the workspace root whenever the platform-specific subdir
+ * doesn't exist on disk yet.
+ *
+ * The popup window has its own localStorage so we read the editor pref
+ * through the main renderer.
  */
 ipcMain.handle('live-edit:open-in-editor', async () => {
   const id = liveEditProjectId || devServerProjectId
   if (!id) return { success: false, error: 'No active project' }
   const workspaceRoot = getWorkspaceRoot(id)
+  const androidDir = path.join(workspaceRoot, 'android')
+  const webDir = path.join(workspaceRoot, 'web')
 
   let editor = 'vscode'
   if (mainWindow) {
@@ -1679,7 +1846,14 @@ ipcMain.handle('live-edit:open-in-editor', async () => {
       if (typeof v === 'string' && v.trim()) editor = v.trim()
     } catch { /* fall back to vscode */ }
   }
-  return openInEditor(editor, workspaceRoot)
+
+  let target = workspaceRoot
+  if (editor === 'android-studio') {
+    target = fs.existsSync(androidDir) ? androidDir : workspaceRoot
+  } else if (editor === 'webstorm') {
+    target = fs.existsSync(webDir) ? webDir : workspaceRoot
+  }
+  return openInEditor(editor, target)
 })
 
 // ─── Pinterest Design Steal ─────────────────────────────────────

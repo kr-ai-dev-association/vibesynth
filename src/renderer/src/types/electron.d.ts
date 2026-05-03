@@ -90,6 +90,8 @@ interface ElectronAPI {
     setActivePlatform: (platform: 'web' | 'android' | null) => Promise<void>
     getActivePlatform: () => Promise<'web' | 'android' | null>
     openInEditor: (platform?: 'react' | 'android') => Promise<{ success: boolean; error?: string }>
+    setDesignSync: (enabled: boolean) => Promise<void>
+    getDesignSync: () => Promise<boolean>
     close: () => Promise<void>
   }
   shell: ElectronShellAPI
@@ -115,7 +117,7 @@ interface ElectronAPI {
       projectName: string,
       screens?: Array<{ id: string; name: string; html: string }>,
       designSystem?: any,
-      opts?: { clean?: boolean },
+      opts?: { clean?: boolean; extraInstruction?: string },
     ) => Promise<{ success: boolean; error?: string }>
     onProgress: (cb: (e: AndroidRunProgress) => void) => () => void
   }
