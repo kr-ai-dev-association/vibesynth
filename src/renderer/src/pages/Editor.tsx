@@ -631,6 +631,94 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     }
   }
 
+  // Phase 3 — Android Live: after the first successful run, edits to any
+  // screen.html debounce-trigger an incremental rebuild + reinstall so the
+  // user keeps iterating without manually clicking Run again.
+  const [androidLiveMode, setAndroidLiveMode] = useState(false)
+  const [androidStatus, setAndroidStatus] = useState<'idle' | 'building' | 'live' | 'error'>('idle')
+  const androidRebuildTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const androidBuildingRef = useRef(false)
+
+  const triggerAndroidBuild = async (isInitial: boolean, opts?: { clean?: boolean }) => {
+    if (androidBuildingRef.current) return
+    androidBuildingRef.current = true
+    setAndroidStatus('building')
+    setAgentLogOpen(true)
+    const logId = addLog(
+      opts?.clean
+        ? `Android Clean Rebuild 시작: ${project.name}`
+        : isInitial
+        ? `Android 빌드 시작: ${project.name}`
+        : `Android Live: 변경 감지 — 재빌드`,
+      'generating',
+    )
+    let progressCleanup: (() => void) | undefined
+    try {
+      progressCleanup = window.electronAPI?.android.onProgress((e) => {
+        const icon = e.status === 'success' ? '✓' : e.status === 'error' ? '✗' : '⋯'
+        const lvl: 'info' | 'success' | 'error' | 'generating' =
+          e.status === 'success' ? 'info' : e.status === 'error' ? 'error' : 'generating'
+        addLog(`${icon} [${e.step}] ${e.message}${e.detail ? ` — ${e.detail.slice(0, 100)}` : ''}`, lvl)
+      })
+      const screensPayload = project.screens.map((s) => ({ id: s.id, name: s.name, html: s.html }))
+      const result = await window.electronAPI?.android.run(
+        project.id, project.name, screensPayload,
+        project.designSystem || undefined,
+        { clean: !!opts?.clean },
+      )
+      if (result?.success) {
+        updateLog(logId, isInitial ? `Android 실행 성공: ${project.name}` : 'Android Live: 재빌드 완료', 'success')
+        setAndroidStatus('live')
+        if (isInitial) {
+          setAndroidLiveMode(true)
+          // Pop up Live Edit window so the user can keep iterating on the
+          // design from a small floating prompt while the emulator runs in
+          // a separate window. Mirrors what handleRun() does for the web
+          // live app.
+          window.electronAPI?.liveEdit.open(project.id).catch(() => {})
+          addLog('Live Edit 팝업 열림 — 프롬프트 입력 시 자동 재빌드', 'info')
+        }
+      } else {
+        updateLog(logId, `Android 실행 실패: ${result?.error || 'unknown'}`, 'error')
+        setAndroidStatus('error')
+      }
+    } catch (err: any) {
+      updateLog(logId, `Android 실행 예외: ${err?.message || err}`, 'error')
+      setAndroidStatus('error')
+    } finally {
+      progressCleanup?.()
+      androidBuildingRef.current = false
+    }
+  }
+
+  const handleRunAndroid = () => triggerAndroidBuild(true)
+  const handleRunAndroidClean = () => triggerAndroidBuild(true, { clean: true })
+
+  const handleStopAndroidLive = () => {
+    setAndroidLiveMode(false)
+    setAndroidStatus('idle')
+    if (androidRebuildTimer.current) {
+      clearTimeout(androidRebuildTimer.current)
+      androidRebuildTimer.current = null
+    }
+    addLog('Android Live 모드 종료', 'info')
+  }
+
+  // Watch: when Live mode is on and screen.html changes, debounce + rebuild.
+  // Skips: while a build is already in flight, or if the html content hasn't
+  // actually changed (project.updatedAt is the cheaper change-signal).
+  useEffect(() => {
+    if (!androidLiveMode) return
+    if (androidBuildingRef.current) return
+    if (androidRebuildTimer.current) clearTimeout(androidRebuildTimer.current)
+    androidRebuildTimer.current = setTimeout(() => {
+      triggerAndroidBuild(false)
+    }, 2000)
+    return () => {
+      if (androidRebuildTimer.current) clearTimeout(androidRebuildTimer.current)
+    }
+  }, [project.screens, androidLiveMode]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleToggleHeatmap = async (forceRegenerate = false) => {
     // Plain toggle (no force): hide if currently shown.
     if (heatmapMode && !forceRegenerate) {
@@ -1257,7 +1345,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       if (devServerUrl) {
         await window.electronAPI?.openLiveWindowUrl(devServerUrl, deviceType)
       }
-      window.electronAPI?.liveEdit.open()
+      window.electronAPI?.liveEdit.open(project.id)
       return
     }
 
@@ -1283,7 +1371,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             setDevServerUrl(url)
             await window.electronAPI?.openLiveWindowUrl(url, deviceType)
             setIsRunning(true)
-            window.electronAPI?.liveEdit.open()
+            window.electronAPI?.liveEdit.open(project.id)
             setBuildingFrontend(false)
             return
           }
@@ -1298,7 +1386,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             addLog(t('editor.log.devServerRunning', { url }), 'success')
             await window.electronAPI?.openLiveWindowUrl(url, deviceType)
             setIsRunning(true)
-            window.electronAPI?.liveEdit.open()
+            window.electronAPI?.liveEdit.open(project.id)
             setBuildingFrontend(false)
             return
           }
@@ -1458,7 +1546,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         }
         setIsRunning(true)
         // Open Live Edit popup alongside Live App
-        window.electronAPI?.liveEdit.open()
+        window.electronAPI?.liveEdit.open(project.id)
       } catch (err: any) {
         addLog(t('editor.log.frontendFailed', { error: err.message }), 'error')
       } finally {
@@ -1470,7 +1558,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         : project.screens[0]
       window.electronAPI?.openLiveWindow(screen?.html, deviceType)
       setIsRunning(true)
-      window.electronAPI?.liveEdit.open()
+      window.electronAPI?.liveEdit.open(project.id)
     }
   }
 
@@ -1541,7 +1629,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         addLog(t('editor.log.devServerRunning', { url }), 'success')
         await window.electronAPI?.openLiveWindowUrl(url, deviceType)
         setIsRunning(true)
-        window.electronAPI?.liveEdit.open()
+        window.electronAPI?.liveEdit.open(project.id)
       } else {
         addLog(t('editor.log.buildError', { error: devResult?.error || 'Unknown' }), 'error')
       }
@@ -1573,7 +1661,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       addLog(t('editor.log.devServerRunning', { url }), 'success')
       await window.electronAPI?.openLiveWindowUrl(url, deviceType)
       setIsRunning(true)
-      window.electronAPI?.liveEdit.open()
+      window.electronAPI?.liveEdit.open(project.id)
     } else {
       addLog(`Server restart failed: ${result?.error || 'Unknown'}`, 'error')
     }
@@ -1770,6 +1858,29 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                 >
                   🔄 Rebuild (Clean)
                 </button>
+                <div className="border-t border-neutral-200 dark:border-neutral-700 my-1" />
+                <button
+                  onClick={() => { setShowRunMenu(false); handleRunAndroid() }}
+                  disabled={androidStatus === 'building'}
+                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 disabled:opacity-50"
+                >
+                  🤖 {androidLiveMode ? 'Android 재빌드 + 실행' : 'Android 에뮬레이터에서 실행'}
+                </button>
+                <button
+                  onClick={() => { setShowRunMenu(false); handleRunAndroidClean() }}
+                  disabled={androidStatus === 'building'}
+                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 disabled:opacity-50"
+                >
+                  🤖🧹 Android Clean Rebuild
+                </button>
+                {androidLiveMode && (
+                  <button
+                    onClick={() => { setShowRunMenu(false); handleStopAndroidLive() }}
+                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 text-red-600 dark:text-red-400"
+                  >
+                    🛑 Android Live 끄기
+                  </button>
+                )}
               </div>
               </>
             )}
@@ -1780,6 +1891,31 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             <span className="flex items-center gap-1 text-[10px] font-mono text-emerald-600 dark:text-emerald-400">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
               {devServerUrl.replace('http://localhost:', ':')}
+            </span>
+          )}
+
+          {/* Android Live status pill */}
+          {androidLiveMode && (
+            <span
+              className={`flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full border ${
+                androidStatus === 'building'
+                  ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-700'
+                  : androidStatus === 'error'
+                  ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-700'
+                  : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-700'
+              }`}
+              title={
+                androidStatus === 'building' ? 'Android 빌드 중…'
+                : androidStatus === 'error' ? 'Android 빌드 실패 — 로그 확인'
+                : 'Android Live: 화면 변경 시 자동 재빌드'
+              }
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                androidStatus === 'building' ? 'bg-amber-500 animate-pulse'
+                : androidStatus === 'error' ? 'bg-red-500'
+                : 'bg-emerald-500 animate-pulse'
+              }`} />
+              🤖 Android {androidStatus === 'building' ? '빌드중' : androidStatus === 'error' ? '실패' : 'Live'}
             </span>
           )}
 

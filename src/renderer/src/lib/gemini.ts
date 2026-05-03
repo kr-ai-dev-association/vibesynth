@@ -3,16 +3,38 @@ import type { DesignGuide, DesignSystem } from '../App'
 import { generateDesignImages } from './image-gen'
 import { designGuideDB } from './design-guide-db'
 
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string
+// API key resolution — `let` (not const) so the singleton can be swapped
+// at runtime when the user saves a different key in Settings. All model
+// calls below dereference `genAI` lazily so the most-recent client is used.
+let API_KEY = (import.meta.env.VITE_GEMINI_API_KEY as string) || ''
+let genAI = new GoogleGenerativeAI(API_KEY)
 
-if (!API_KEY) {
-  console.error(
-    '[VibeSynth] VITE_GEMINI_API_KEY not found. ' +
-    'Ensure .env file exists in project root with VITE_GEMINI_API_KEY=your_key'
-  )
+/** Update the active Gemini key. Called by Settings on save. */
+export function setActiveGeminiKey(key: string) {
+  const trimmed = (key || '').trim()
+  if (!trimmed || trimmed === API_KEY) return
+  API_KEY = trimmed
+  genAI = new GoogleGenerativeAI(trimmed)
 }
 
-const genAI = new GoogleGenerativeAI(API_KEY || '')
+// Returns the currently-active key — useful for image-gen and other
+// modules that prefer to read directly rather than maintain their own copy.
+export function getActiveGeminiKey(): string { return API_KEY }
+
+/** On boot in Electron, prefer the user-saved key from db over the build-time
+ * .env value. This runs once at module load, fire-and-forget. */
+if (typeof window !== 'undefined' && window.electronAPI?.db?.getEffectiveGeminiKey) {
+  window.electronAPI.db.getEffectiveGeminiKey()
+    .then((k) => { if (k) setActiveGeminiKey(k) })
+    .catch(() => {})
+}
+
+if (!API_KEY) {
+  console.warn(
+    '[VibeSynth] No Gemini API key at module load. ' +
+    'Set one in Settings → AI → API key, or add VITE_GEMINI_API_KEY to .env.'
+  )
+}
 
 // ─── Stitch-Quality System Prompt ───────────────────────────────
 

@@ -91,11 +91,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   shell: {
     openVscode: (folderPath: string) =>
       ipcRenderer.invoke('shell:open-vscode', folderPath) as Promise<{ success: boolean; error?: string }>,
+    openInEditor: (editor: string, folderPath: string) =>
+      ipcRenderer.invoke('shell:open-in-editor', editor, folderPath) as Promise<{ success: boolean; error?: string }>,
   },
 
   // Live Edit popup
   liveEdit: {
-    open: () => ipcRenderer.invoke('live-edit:open'),
+    open: (projectId?: string) => ipcRenderer.invoke('live-edit:open', projectId),
     sendRequest: (prompt: string) => ipcRenderer.invoke('live-edit-request', prompt, window.location.href),
     getProjectInfo: () => ipcRenderer.invoke('live-edit:get-project-info'),
     getDesignSystem: () => ipcRenderer.invoke('live-edit:get-design-system'),
@@ -143,5 +145,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getSettings: (userId: string) => ipcRenderer.invoke('db:get-settings', userId),
     saveSettings: (settings: any) => ipcRenderer.invoke('db:save-settings', settings),
     getDbPath: () => ipcRenderer.invoke('db:get-path'),
+    getEffectiveGeminiKey: () => ipcRenderer.invoke('db:get-effective-gemini-key') as Promise<string>,
+  },
+
+  // banya CLI detection + saved config (Settings page)
+  banyaCli: {
+    detect: (explicitPath?: string) => ipcRenderer.invoke('banya-cli:detect', explicitPath),
+    getConfig: () => ipcRenderer.invoke('banya-cli:get-config'),
+    saveConfig: (cfg: any) => ipcRenderer.invoke('banya-cli:save-config', cfg),
+  },
+
+  // Android build environment (settings page Android section)
+  android: {
+    detect: () => ipcRenderer.invoke('android:detect'),
+    validate: (cfg: any) => ipcRenderer.invoke('android:validate', cfg),
+    listAvds: (emulatorPath: string) => ipcRenderer.invoke('android:list-avds', emulatorPath),
+    listDevices: (adbPath: string) => ipcRenderer.invoke('android:list-devices', adbPath),
+    getConfig: () => ipcRenderer.invoke('android:get-config'),
+    saveConfig: (cfg: any) => ipcRenderer.invoke('android:save-config', cfg),
+    run: (projectId: string, projectName: string, screens?: any[], designSystem?: any, opts?: { clean?: boolean }) =>
+      ipcRenderer.invoke('android:run', projectId, projectName, screens, designSystem, opts) as Promise<{ success: boolean; error?: string }>,
+    onProgress: (cb: (e: { step: string; status: string; message: string; detail?: string }) => void) => {
+      const handler = (_e: unknown, ev: any) => cb(ev)
+      ipcRenderer.on('android:progress', handler)
+      return () => ipcRenderer.removeListener('android:progress', handler)
+    },
   },
 })

@@ -9,6 +9,7 @@ interface ElectronDBAPI {
   getSettings: (userId: string) => Promise<any>
   saveSettings: (settings: any) => Promise<boolean>
   getDbPath: () => Promise<string>
+  getEffectiveGeminiKey: () => Promise<string>
 }
 
 interface ElectronProjectAPI {
@@ -28,6 +29,7 @@ interface ElectronProjectAPI {
 
 interface ElectronShellAPI {
   openVscode: (folderPath: string) => Promise<{ success: boolean; error?: string }>
+  openInEditor: (editor: string, folderPath: string) => Promise<{ success: boolean; error?: string }>
 }
 
 interface ElectronBanyaAPI {
@@ -74,9 +76,14 @@ interface ElectronAPI {
   project: ElectronProjectAPI
   banya: ElectronBanyaAPI
   liveEdit: {
-    open: () => Promise<void>
+    open: (projectId?: string) => Promise<void>
     sendRequest: (prompt: string) => Promise<void>
-    getProjectInfo: () => Promise<{ projectId: string; path: string; files: string[] } | null>
+    getProjectInfo: () => Promise<{
+      projectId: string
+      path: string
+      files: string[]
+      platforms?: Array<{ platform: 'react' | 'android'; path: string; files: string[] }>
+    } | null>
     getDesignSystem: () => Promise<any | null>
     updateFeedback: (message: string, type: 'success' | 'error' | 'generating', devMarkdown?: string) => Promise<void>
     close: () => Promise<void>
@@ -87,7 +94,70 @@ interface ElectronAPI {
     close: () => Promise<void>
   }
   db: ElectronDBAPI
+  banyaCli: {
+    detect: (explicitPath?: string) => Promise<BanyaCliInfo>
+    getConfig: () => Promise<BanyaCliConfig>
+    saveConfig: (cfg: BanyaCliConfig) => Promise<boolean>
+  }
+  android: {
+    detect: () => Promise<AndroidConfig>
+    validate: (cfg: AndroidConfig) => Promise<AndroidValidationResult>
+    listAvds: (emulatorPath: string) => Promise<AvdInfo[]>
+    listDevices: (adbPath: string) => Promise<AndroidDeviceInfo[]>
+    getConfig: () => Promise<AndroidConfig>
+    saveConfig: (cfg: AndroidConfig) => Promise<boolean>
+    run: (
+      projectId: string,
+      projectName: string,
+      screens?: Array<{ id: string; name: string; html: string }>,
+      designSystem?: any,
+      opts?: { clean?: boolean },
+    ) => Promise<{ success: boolean; error?: string }>
+    onProgress: (cb: (e: AndroidRunProgress) => void) => () => void
+  }
 }
+
+interface AndroidRunProgress {
+  step: 'scaffold' | 'wrapper' | 'gradle' | 'emulator' | 'install' | 'launch' | string
+  status: 'progress' | 'success' | 'error' | string
+  message: string
+  detail?: string
+}
+
+interface BanyaCliInfo {
+  available: boolean
+  path: string
+  version: string
+  error?: string
+}
+
+interface BanyaCliConfig {
+  explicitPath: string             // empty = auto-detect
+  agentModelMode: 'fixed' | 'cli-default'
+  fixedModel: string               // gemini-2.0-flash | gemini-3.1-pro | ...
+  criticEnabled: boolean
+}
+
+interface AndroidConfig {
+  sdkRoot: string
+  jdkHome: string
+  adbPath: string
+  emulatorPath: string
+  avdManagerPath: string
+  preferredAvd: string
+}
+interface AndroidFieldStatus { ok: boolean; message: string; detail?: string }
+interface AndroidValidationResult {
+  sdkRoot: AndroidFieldStatus
+  jdkHome: AndroidFieldStatus
+  adb: AndroidFieldStatus
+  emulator: AndroidFieldStatus
+  avdManager: AndroidFieldStatus
+  preferredAvd: AndroidFieldStatus
+  overall: 'ok' | 'partial' | 'fail'
+}
+interface AvdInfo { name: string; apiLevel?: number; device?: string }
+interface AndroidDeviceInfo { serial: string; state: string; isEmulator: boolean }
 
 interface Window {
   electronAPI?: ElectronAPI

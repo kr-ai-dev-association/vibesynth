@@ -41,7 +41,70 @@ export function isBanyaCliAvailable(): boolean {
   return resolveBanyaPath() !== null
 }
 
+// ─── Detection / validation API for the Settings page ─────────
+
+export interface BanyaCliInfo {
+  available: boolean
+  path: string             // resolved or empty
+  version: string          // banya version output (or empty)
+  error?: string           // populated when validation failed
+}
+
+/** Force a fresh detection — clears the cached resolved path. Useful when
+ * the user installs the CLI mid-session. */
+export function detectBanyaCli(explicitPath?: string): BanyaCliInfo {
+  // If an explicit path is provided, validate it directly without caching.
+  if (explicitPath && explicitPath.trim()) {
+    const p = explicitPath.trim()
+    return validateBanyaCliAt(p)
+  }
+
+  // Reset cache so we re-probe well-known locations.
+  resolvedBanyaPath = undefined
+  const found = resolveBanyaPath()
+  if (!found) {
+    return {
+      available: false,
+      path: '',
+      version: '',
+      error: 'banya CLI 를 찾을 수 없음 — `make install` 또는 `~/.local/bin/banya` 확인',
+    }
+  }
+  return validateBanyaCliAt(found)
+}
+
+function validateBanyaCliAt(p: string): BanyaCliInfo {
+  if (!p) return { available: false, path: '', version: '', error: '경로 비어있음' }
+  if (p !== 'banya' && !fs.existsSync(p)) {
+    return { available: false, path: p, version: '', error: `파일 없음: ${p}` }
+  }
+  try {
+    const out = execSync(`${JSON.stringify(p)} version`, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 5000,
+      encoding: 'utf-8',
+    }).trim()
+    // Output looks like "banya version 0.1.0".
+    const version = out || '(no output)'
+    return { available: true, path: p, version }
+  } catch (e: any) {
+    return {
+      available: false,
+      path: p,
+      version: '',
+      error: `'${p} version' 실행 실패: ${(e?.message || '').slice(0, 200)}`,
+    }
+  }
+}
+
 function resolveGeminiKey(): string {
+  // User-saved setting wins (set via Settings UI, persisted in db).
+  try {
+    const { db } = require('./database') as { db: { getSettings: (u: string) => any } }
+    const s = db.getSettings('default')
+    if (s?.apiKey && String(s.apiKey).trim()) return String(s.apiKey).trim()
+  } catch { /* db not available — fall through */ }
+
   const fromEnv = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY
   if (fromEnv) return fromEnv
   try {
@@ -138,6 +201,11 @@ export interface BanyaCodegenOptions {
   prompt: string
   preScaffold?: Record<string, string>
   timeoutMs?: number
+  /** Optional path to a PNG/JPEG to attach to the first turn — passed to
+   * the agent CLI as `--image-file`, surfaced to the LLM as multimodal
+   * inline data. Lets vibesynth send a rendered design screenshot
+   * alongside the HTML for vision-aware Kotlin codegen. */
+  imageFile?: string
   onContentDelta?: (chunk: string) => void
   onEvent?: (eventType: string, data: any) => void
 }
@@ -190,19 +258,42 @@ export async function runBanyaCodegen(
   )
   fs.writeFileSync(tmpPromptFile, options.prompt, 'utf-8')
 
+  // Saved Settings → banyaCliConfig drives backend/model/critic args.
+  // 'fixed' mode (default): vibesynth forces Gemini + chosen model + critic
+  //   off (or on, per saved toggle).
+  // 'cli-default' mode: omit --llm-* and --critic so the CLI uses the
+  //   user's `banya config` values (their main provider/model + critic).
+  let banyaCfg: any = {}
+  try {
+    const { db } = require('./database') as { db: { getSettings: (u: string) => any } }
+    banyaCfg = db.getSettings('default')?.banyaCliConfig || {}
+  } catch { /* db not ready — fall back to fixed Gemini */ }
+  const mode = banyaCfg.agentModelMode || 'fixed'
+  const fixedModel = banyaCfg.fixedModel || 'gemini-2.0-flash'
+  const criticEnabled = !!banyaCfg.criticEnabled
+
   const args = [
     'run',
     '--prompt-file', tmpPromptFile,
     '--prompt-type', 'agent',
     '--workspace', options.workspace,
-    '--llm-backend', 'gemini',
-    '--llm-key', apiKey,
-    '--critic=false',
     '--no-patch-nudge',
     '--auto-approve=true',
     '--idle-abort', '0',
     '--timeout', `${Math.floor(timeoutMs / 1000)}s`,
   ]
+  if (mode === 'fixed') {
+    args.push('--llm-backend', 'gemini', '--llm-key', apiKey, '--llm-model', fixedModel)
+    args.push(criticEnabled ? '--critic=true' : '--critic=false')
+  } else {
+    // cli-default: still need a key for Gemini critic if user enables it,
+    // but otherwise let CLI pick its main provider from ~/.banya.
+    if (criticEnabled) args.push('--critic=true')
+    else args.push('--critic=false')
+  }
+  if (options.imageFile && fs.existsSync(options.imageFile)) {
+    args.push('--image-file', options.imageFile)
+  }
 
   return new Promise<BanyaCodegenResult>((resolve) => {
     const child = spawn(banyaBin, args, {

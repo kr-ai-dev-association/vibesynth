@@ -34,12 +34,22 @@ class NanoBananaProvider implements ImageProvider {
   name = 'NanoBanana (Gemini)'
   private ai: any = null
 
+  private cachedKey: string = ''
+
   private async getClient() {
-    if (!this.ai) {
+    // Prefer user-saved key (Settings → AI → API key); fall back to .env.
+    const { getActiveGeminiKey } = await import('./gemini')
+    let apiKey = getActiveGeminiKey()
+    if (!apiKey && typeof window !== 'undefined' && window.electronAPI?.db?.getEffectiveGeminiKey) {
+      apiKey = await window.electronAPI.db.getEffectiveGeminiKey()
+    }
+    if (!apiKey) apiKey = (import.meta.env.VITE_GEMINI_API_KEY as string) || ''
+    if (!apiKey) throw new Error('Gemini API key not set — open Settings → AI → API key')
+    // Re-create client when the key changes (user changed it in Settings).
+    if (!this.ai || this.cachedKey !== apiKey) {
       const { GoogleGenAI } = await import('@google/genai')
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY as string
-      if (!apiKey) throw new Error('VITE_GEMINI_API_KEY not set')
       this.ai = new GoogleGenAI({ apiKey })
+      this.cachedKey = apiKey
     }
     return this.ai
   }

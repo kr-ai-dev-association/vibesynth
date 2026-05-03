@@ -5,7 +5,15 @@ import { execSync, spawn, ChildProcess } from 'child_process'
 import os from 'os'
 import { db } from './database'
 import { isGeminiCliAvailable, runGeminiCli } from './gemini-cli'
-import { isBanyaCliAvailable, runBanyaCodegen } from './banya-cli'
+import { isBanyaCliAvailable, runBanyaCodegen, detectBanyaCli } from './banya-cli'
+import {
+  detectAndroid,
+  validateAndroid,
+  listAvds,
+  listDevices,
+  type AndroidConfig,
+} from './android-env'
+import { runOnAndroid } from './android-build'
 
 let mainWindow: BrowserWindow | null = null
 let liveAppWindow: BrowserWindow | null = null
@@ -15,8 +23,84 @@ let pinterestConnected = false
 let currentLiveHtml: string | null = null
 let devServerProcess: ChildProcess | null = null
 let devServerProjectId: string | null = null
+// Tracks which project the Live Edit popup is currently bound to. Set by
+// the renderer when it calls live-edit:open(projectId). Independent of
+// devServerProjectId so the popup works for Android-only builds (where
+// no Vite dev server runs) and before the user has hit Run.
+let liveEditProjectId: string | null = null
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
+
+/**
+ * Packaged macOS .app launches inherit only a minimal PATH
+ * (`/usr/bin:/bin:/usr/sbin:/sbin`), so any child process spawning
+ * `npx`, `npm`, or `node` (for live-app build/dev) fails with
+ * "command not found" — these binaries usually live under
+ * `~/.nvm/...`, `/opt/homebrew/bin`, or `/usr/local/bin`.
+ *
+ * Fix: at startup, ask the user's login shell what their interactive
+ * PATH is and copy it into process.env.PATH so all subsequent spawn /
+ * execSync calls see the same PATH the user has in Terminal.
+ *
+ * Also add a few well-known fallback locations as a safety net for
+ * cases where the login shell read fails (e.g. corrupted .zshrc).
+ */
+function patchShellPath(): void {
+  if (process.platform !== 'darwin' && process.platform !== 'linux') return
+
+  const home = os.homedir()
+  const fallbacks = [
+    `${home}/.nvm/versions/node/*/bin`, // expanded below
+    `${home}/.fnm/aliases/default/bin`,
+    `${home}/.volta/bin`,
+    `${home}/.local/bin`,
+    '/opt/homebrew/bin',
+    '/opt/homebrew/sbin',
+    '/usr/local/bin',
+    '/usr/local/sbin',
+  ]
+
+  // 1. Try the user's login shell — captures PATH from .zshrc / .bash_profile.
+  let shellPath = ''
+  try {
+    const shell = process.env.SHELL || '/bin/zsh'
+    shellPath = execSync(`${shell} -ilc 'echo -n $PATH' 2>/dev/null`, {
+      encoding: 'utf8',
+      timeout: 3000,
+    }).trim()
+  } catch {
+    /* shell may exit non-zero from rc-file noise — fallbacks pick up the slack */
+  }
+
+  // 2. Expand nvm wildcard (use latest installed version).
+  let nvmBin = ''
+  try {
+    const nvmRoot = `${home}/.nvm/versions/node`
+    if (fs.existsSync(nvmRoot)) {
+      const versions = fs.readdirSync(nvmRoot).filter((v) => /^v\d/.test(v)).sort()
+      if (versions.length > 0) {
+        nvmBin = path.join(nvmRoot, versions[versions.length - 1], 'bin')
+      }
+    }
+  } catch { /* best-effort */ }
+
+  // 3. Compose final PATH: shellPath > nvmBin > existing > static fallbacks.
+  const parts = [
+    shellPath,
+    nvmBin,
+    process.env.PATH || '',
+    ...fallbacks.filter((p) => !p.includes('*') && fs.existsSync(p)),
+  ].filter(Boolean)
+  const seen = new Set<string>()
+  const merged = parts
+    .flatMap((p) => p.split(':'))
+    .filter((p) => p && !seen.has(p) && (seen.add(p), true))
+    .join(':')
+  process.env.PATH = merged
+  console.log('[VibeSynth] PATH patched:', merged.split(':').slice(0, 6).join(':'), '…')
+}
+// Defer to whenReady to avoid module-load-time issues if execSync hangs.
+app.whenReady().then(() => { try { patchShellPath() } catch (e) { console.error('[VibeSynth] patchShellPath failed:', e) } })
 
 function getProjectDir(projectId: string): string {
   const home = os.homedir()
@@ -255,6 +339,23 @@ ipcMain.handle('db:save-project', (_event, project: any) => {
 
 ipcMain.handle('db:delete-project', (_event, id: string) => {
   db.deleteProject(id)
+  // Also wipe on-disk build directories so deleting a project from the
+  // dashboard doesn't leave gigabytes of stale gradle caches / vite builds
+  // behind. Two roots — react/vite live app, and android Kotlin project.
+  const home = os.homedir()
+  for (const root of [
+    path.join(home, 'VibeSynth', 'projects', id),
+    path.join(home, 'VibeSynth', 'projects-android', id),
+  ]) {
+    if (fs.existsSync(root)) {
+      try {
+        fs.rmSync(root, { recursive: true, force: true })
+        console.log(`[VibeSynth] deleted build dir: ${root}`)
+      } catch (e: any) {
+        console.warn(`[VibeSynth] failed to delete ${root}:`, e?.message || e)
+      }
+    }
+  }
   return true
 })
 
@@ -281,6 +382,86 @@ ipcMain.handle('db:save-settings', (_event, settings: any) => {
   db.saveSettings(settings)
   return true
 })
+
+// ─── banya CLI detection / config IPC ──────────────────────────
+ipcMain.handle('banya-cli:detect', (_event, explicitPath?: string) => detectBanyaCli(explicitPath))
+ipcMain.handle('banya-cli:get-config', () => {
+  const s = db.getSettings('default') as any
+  return s.banyaCliConfig || {
+    explicitPath: '',
+    agentModelMode: 'fixed' as 'fixed' | 'cli-default',
+    fixedModel: 'gemini-2.0-flash',
+    criticEnabled: false,
+  }
+})
+ipcMain.handle('banya-cli:save-config', (_event, cfg: any) => {
+  const s = db.getSettings('default') as any
+  db.saveSettings({ ...s, banyaCliConfig: cfg })
+  return true
+})
+
+// ─── Android build environment IPC ─────────────────────────────
+// Persisted under db.settings as a sub-object so the existing per-user
+// settings collection stays the single source of truth.
+ipcMain.handle('android:detect', () => detectAndroid())
+ipcMain.handle('android:validate', (_event, cfg: AndroidConfig) => validateAndroid(cfg))
+ipcMain.handle('android:list-avds', (_event, emulatorPath: string) => listAvds(emulatorPath))
+ipcMain.handle('android:list-devices', (_event, adbPath: string) => listDevices(adbPath))
+ipcMain.handle('android:get-config', () => {
+  const s = db.getSettings('default') as any
+  return s.androidConfig || detectAndroid()
+})
+ipcMain.handle('android:save-config', (_event, cfg: AndroidConfig) => {
+  const s = db.getSettings('default') as any
+  db.saveSettings({ ...s, androidConfig: cfg })
+  return true
+})
+
+// Phase 2 — scaffold → wrapper → AI codegen → build → install → launch.
+ipcMain.handle('android:run', async (
+  _event,
+  projectId: string,
+  projectName: string,
+  screens?: Array<{ id: string; name: string; html: string }>,
+  designSystem?: any,
+  opts?: { clean?: boolean },
+) => {
+  const settings = db.getSettings('default') as any
+  const cfg: AndroidConfig | undefined = settings?.androidConfig
+  if (!cfg || !cfg.sdkRoot || !cfg.adbPath || !cfg.emulatorPath || !cfg.jdkHome) {
+    return { success: false, error: 'Android 환경이 설정되지 않았습니다. 설정 → Android 빌드 환경에서 자동 감지 + 검증 + 저장 먼저 해주세요.' }
+  }
+  const geminiApiKey = resolveEffectiveGeminiKey()
+  try {
+    await runOnAndroid({
+      projectId,
+      projectName,
+      screens,
+      designSystem,
+      geminiApiKey,
+      clean: !!opts?.clean,
+      cfg,
+    }, mainWindow)
+    return { success: true }
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) }
+  }
+})
+
+/**
+ * The single source of truth for "which Gemini API key are we using right
+ * now?" — settings (user-saved) > .env (vite-define inlined). All paths
+ * that need a key (renderer Gemini calls, banya-cli, Android codegen)
+ * funnel through here so a single Save in Settings takes effect everywhere.
+ */
+function resolveEffectiveGeminiKey(): string {
+  try {
+    const s = db.getSettings('default') as any
+    if (s?.apiKey && String(s.apiKey).trim()) return String(s.apiKey).trim()
+  } catch { /* db not ready */ }
+  return process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || ''
+}
+ipcMain.handle('db:get-effective-gemini-key', () => resolveEffectiveGeminiKey())
 
 ipcMain.handle('db:get-path', () => {
   return db.getDbPath()
@@ -651,7 +832,12 @@ ipcMain.handle('feedback:close', () => {
 
 let liveEditWindow: BrowserWindow | null = null
 
-ipcMain.handle('live-edit:open', () => {
+ipcMain.handle('live-edit:open', (_event, projectId?: string) => {
+  // Bind the popup to the project the renderer just clicked from. Falls
+  // back to the dev-server project (web flow) when the renderer didn't
+  // pass an id (older callers).
+  if (projectId) liveEditProjectId = projectId
+  else if (devServerProjectId) liveEditProjectId = devServerProjectId
   if (liveEditWindow) {
     liveEditWindow.focus()
     return
@@ -1001,7 +1187,10 @@ ipcMain.handle('live-edit:open', () => {
   fs.writeFileSync(tmpFile, html, 'utf-8')
   liveEditWindow.loadFile(tmpFile)
 
-  liveEditWindow.on('closed', () => { liveEditWindow = null })
+  liveEditWindow.on('closed', () => {
+    liveEditWindow = null
+    liveEditProjectId = null
+  })
 })
 
 // Get current design system for Live Edit palette
@@ -1011,12 +1200,33 @@ ipcMain.handle('live-edit:get-design-system', () => {
   return project?.designSystem || null
 })
 
-// Get project workspace info for Developer mode display
+// Get project workspace info for Developer mode display.
+// Resolves the active project id from (priority): live-edit-bound id >
+// dev-server id. Returns paths for ALL platforms so the user sees both the
+// React/Vite live app dir AND the Android Kotlin project dir (whichever
+// ones exist on disk).
 ipcMain.handle('live-edit:get-project-info', () => {
-  if (!devServerProjectId) return null
-  const projectDir = getProjectDir(devServerProjectId)
-  const files = fs.existsSync(projectDir) ? listRelativePathsSync(projectDir) : []
-  return { projectId: devServerProjectId, path: projectDir, files }
+  const id = liveEditProjectId || devServerProjectId
+  if (!id) return null
+  const home = os.homedir()
+  const reactDir = path.join(home, 'VibeSynth', 'projects', id)
+  const androidDir = path.join(home, 'VibeSynth', 'projects-android', id)
+  const platforms: { platform: 'react' | 'android'; path: string; files: string[] }[] = []
+  if (fs.existsSync(reactDir)) {
+    platforms.push({ platform: 'react', path: reactDir, files: listRelativePathsSync(reactDir) })
+  }
+  if (fs.existsSync(androidDir)) {
+    platforms.push({ platform: 'android', path: androidDir, files: listRelativePathsSync(androidDir) })
+  }
+  // Back-compat: pick the first platform's path/files for legacy callers
+  // that read `path`/`files` directly. New callers should consume `platforms`.
+  const primary = platforms[0]
+  return {
+    projectId: id,
+    path: primary?.path || '',
+    files: primary?.files || [],
+    platforms,
+  }
 })
 
 ipcMain.handle('live-edit:update-feedback', (_event, message: string, type: 'success' | 'error' | 'generating', devMarkdown?: string) => {
@@ -1176,21 +1386,59 @@ ipcMain.handle('project:export-zip', async (_event, projectId: string, screens: 
   }
 })
 
-ipcMain.handle('shell:open-vscode', (_event, folderPath: string) => {
+/**
+ * Open `folderPath` in the user's chosen external editor. The renderer
+ * passes `editor` from its persisted setting (vibesynth-external-editor).
+ *
+ * Strategy per editor:
+ *   - vscode  → `code` CLI
+ *   - cursor  → `cursor` CLI
+ *   - webstorm → `wstorm` CLI (JetBrains Toolbox), fallback `open -a "WebStorm"`
+ *   - android-studio → `studio` CLI, fallback `open -a "Android Studio"`
+ *
+ * Falls back to `code` then `cursor` if the requested editor isn't
+ * installed, so the existing "Open in editor" UX never silently fails.
+ */
+function openInEditor(editor: string, folderPath: string): { success: boolean; error?: string } {
   const resolved = expandUserPath(folderPath)
-  try {
-    execSync(`code "${resolved}"`, { stdio: 'ignore', timeout: 5000 })
-    return { success: true }
-  } catch {
-    // Fallback: try 'cursor' CLI
+  const q = `"${resolved.replace(/"/g, '\\"')}"`
+  const tries: { cmd: string; label: string }[] = []
+
+  switch (editor) {
+    case 'cursor':
+      tries.push({ cmd: `cursor ${q}`, label: 'Cursor CLI' })
+      break
+    case 'webstorm':
+      tries.push({ cmd: `wstorm ${q}`, label: 'WebStorm CLI' })
+      tries.push({ cmd: `open -a "WebStorm" ${q}`, label: 'WebStorm.app' })
+      break
+    case 'android-studio':
+      tries.push({ cmd: `studio ${q}`, label: 'Android Studio CLI' })
+      tries.push({ cmd: `open -a "Android Studio" ${q}`, label: 'Android Studio.app' })
+      break
+    case 'vscode':
+    default:
+      tries.push({ cmd: `code ${q}`, label: 'VS Code CLI' })
+      break
+  }
+  // Universal fallback chain: vscode → cursor (preserves prior behaviour).
+  if (editor !== 'vscode') tries.push({ cmd: `code ${q}`, label: 'VS Code CLI (fallback)' })
+  if (editor !== 'cursor') tries.push({ cmd: `cursor ${q}`, label: 'Cursor CLI (fallback)' })
+
+  const errors: string[] = []
+  for (const t of tries) {
     try {
-      execSync(`cursor "${resolved}"`, { stdio: 'ignore', timeout: 5000 })
+      execSync(t.cmd, { stdio: 'ignore', timeout: 5000 })
       return { success: true }
     } catch (err: any) {
-      return { success: false, error: 'Could not open VS Code or Cursor. Make sure "code" or "cursor" CLI is on your PATH.' }
+      errors.push(`${t.label}: ${err?.message?.split('\n')[0] || 'failed'}`)
     }
   }
-})
+  return { success: false, error: `Could not open in editor. Tried: ${errors.join(' | ')}` }
+}
+
+ipcMain.handle('shell:open-vscode', (_event, folderPath: string) => openInEditor('vscode', folderPath))
+ipcMain.handle('shell:open-in-editor', (_event, editor: string, folderPath: string) => openInEditor(editor, folderPath))
 
 // ─── Pinterest Design Steal ─────────────────────────────────────
 
