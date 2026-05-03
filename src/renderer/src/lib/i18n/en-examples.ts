@@ -72,40 +72,56 @@ The introductory landing page for LifeFlow. As the first touchpoint for potentia
   'ex-homepage': `# LifeFlow Inc. — Company Homepage
 
 ## Overview
-The official homepage of the company behind LifeFlow. Provides corporate information including the company's vision, team, careers, blog, partnerships, and builds trust with B2B audiences such as investors, partners, and press.
+The official homepage of the company behind LifeFlow. Provides corporate information including the company's vision, team, product lineup, careers, blog, partnerships, and builds trust with B2B audiences such as investors, partners, and press.
 
 ## Target Audience
 - General users interested in the service (→ linked to landing page)
 - Investors, partner companies, media contacts
+- HR / Operations leads evaluating corporate wellness solutions
 - Job applicants
 
-## Key Screens (3 screens)
+## Key Pages (4 pages)
 
-### Screen 1: Home
-- **Navigation:** Logo, About, Team, Blog, Careers, Contact, "Try LifeFlow" CTA
+### Page 1: Home
+- **Navigation:** Logo, About, Service, Careers, Blog, Contact, "Try LifeFlow" CTA
 - **Hero:** "Designing a Better Tomorrow with AI" + company mission subtext
 - **Numbers:** 50K+ Users, 10M+ Patterns Analyzed, 87% Avg. Achievement Rate, 30+ Partners
 - **Featured In:** TechCrunch, Forbes, Wired logos
+- **Product Preview:** Personal / Family / Enterprise three cards → linked to "Service & Products"
 - **Latest Blog Posts:** 3 cards (AI Technology, Wellness Trends, User Stories)
 
-### Screen 2: About / Team
+### Page 2: About / Team
 - **Mission Statement:** "Everyone should be able to understand and improve their life through data"
 - **Timeline:** 2023 Founded → 2024 Seed Funding → 2025 50K Users → 2026 Series A
 - **Team Grid:** CEO, CTO, Head of AI, Head of Design (name, role, previous experience)
 - **Values:** Innovation, Privacy, Empathy, Science-Driven
+- **Advisory Board:** 4 advisors from medicine / psychology / AI
 
-### Screen 3: Careers
+### Page 3: Service & Products
+- **Intro:** "Pick the LifeFlow that fits your life stage"
+- **Product Lineup (3 cards):**
+  1. **LifeFlow Personal** — core app for individuals (iOS/Android), Free + Plus + Premium tiers
+  2. **LifeFlow Family** — family hub for up to 5 members (includes iPad family mode), $14.99/mo
+  3. **LifeFlow Enterprise** — employee wellness program + admin dashboard + SSO/SCIM, contact sales
+- **Feature Comparison Table:** product × feature matrix (AI coaching, family sharing, admin console, API access, dedicated CSM, etc.)
+- **Integrations:** Apple Health, Google Fit, Garmin, Fitbit, Slack, Microsoft Teams logo grid
+- **B2B Case Study:** "Company A rolled out to 5,000 employees, reduced sick-day rate by 18% in 6 months" + 6 customer logos
+- **CTA:** "Start Personal Free" / "Try Family 14 days" / "Request Enterprise Demo"
+
+### Page 4: Careers
 - **Culture Section:** Remote work, flexible hours, learning stipend, health support
-- **Open Positions:** Senior AI Engineer, Product Designer, Growth Manager, Data Scientist
+- **Open Positions:** Senior AI Engineer, Product Designer, Growth Manager, Data Scientist, Enterprise Account Executive
 - Each position: title, team, location (Remote/Seoul), experience, "Apply" button
 - **Employee Testimonial:** "Working at LifeFlow has improved my own life patterns too" — AI Team Lead
+- **Hiring Process:** Application → 1st interview → take-home → culture fit → offer (typically 2–3 weeks)
 
 ## Design Direction
 - Clean and professional corporate site
 - Navigation: sticky header + generous whitespace
 - White base + deep navy/blue text
 - Premium typography (Serif headline + Sans body)
-- Large image placeholders (team photos, office)
+- Large image placeholders (team photos, office, product mockups)
+- Service page leans on cards + comparison table — confident B2B tone
 `,
 
   'ex-dashboard': `# LifeFlow Admin — Member Management Dashboard
@@ -152,14 +168,14 @@ An admin dashboard used by the LifeFlow operations team. Provides member managem
   'ex-iphone': `# LifeFlow — iPhone App
 
 ## Overview
-LifeFlow's core mobile app (iOS). The main interface where users record daily life patterns, receive personalized AI advice, and track progress.
+LifeFlow's core mobile app (iOS). The main interface where users record daily life patterns, receive personalized AI advice, track progress, and review their long-term achievements at a glance.
 
 ## Target Audience
 - iOS users (iPhone 12+)
 - Ages 25–45, office workers interested in self-care/wellness
 - Busy users who prefer 3–5 minutes of daily app usage
 
-## Key Screens (3 screens)
+## Key Screens (4 screens)
 
 ### Screen 1: Today (Home)
 - **Status Bar:** 9:41, signal/wifi/battery
@@ -173,7 +189,7 @@ LifeFlow's core mobile app (iOS). The main interface where users record daily li
   - ☐ Write gratitude journal
 - **Streak Counter:** "🔥 15-day streak!"
 - **Quick Log Buttons:** Sleep | Exercise | Meals | Mood
-- **Bottom Nav:** Today (active), Insights, Log, Community, Profile
+- **Bottom Nav:** Today (active), Insights, Log, Profile
 
 ### Screen 2: Insights
 - **Weekly Score Ring:** Overall wellness score (78/100), color-coded
@@ -195,6 +211,21 @@ LifeFlow's core mobile app (iOS). The main interface where users record daily li
 - **Save + AI Response:** Shows AI comment immediately after save
 - **Quick Tags:** #caffeine #exercise #stress #goodday
 
+### Screen 4: Profile & Achievements
+- **Profile Header:** Avatar, name (Minji), join date (joined Jun 2025), membership badge (Plus)
+- **Lifetime Stats (3-column cards):**
+  - 142 total logged days
+  - Avg wellness score 78
+  - Longest streak 🔥 32 days
+- **Badge Collection (4×3 grid):**
+  - 🌅 Early Bird / 🧘 Meditation Master / 💧 Hydration Champ / 📖 30-Day Reader
+  - 🏃 First Run / 😊 Mood Journal / 🥗 7-Day Diet / 🌱 Sprout (signup)
+  - Locked badges shown grey with progress bar
+- **Connected Devices:** Apple Watch (paired), AirPods, HealthKit sync ON
+- **Settings Quick Access:** Notifications, Privacy, Export Data, Subscription, Help
+- **Theme:** System / Light / Dark toggle
+- **Sign Out / Delete Account** (small text at the bottom)
+
 ## Design Direction
 - iOS design guidelines (390px viewport)
 - Bright, warm colors (mint/green tones + white)
@@ -206,14 +237,15 @@ LifeFlow's core mobile app (iOS). The main interface where users record daily li
   'ex-android': `# LifeFlow — Android App
 
 ## Overview
-LifeFlow's Android version. Follows Material Design 3 guidelines, providing the same core features as the iPhone version while applying Android-native UI patterns.
+LifeFlow's Android version. Follows Material Design 3 guidelines, providing the same core features as the iPhone version while applying Android-native UI patterns. The 4-screen layout adds a Community space where users join challenges and cheer on friends and coworkers.
 
 ## Target Audience
 - Android users (Pixel, Samsung Galaxy, etc.)
 - Ages 25–45, users interested in lifestyle improvement
 - Users who leverage Android-specific features like widgets and notification customization
+- Social users who enjoy challenges with friends/coworkers
 
-## Key Screens (3 screens)
+## Key Screens (4 screens)
 
 ### Screen 1: Home (Today)
 - **Top App Bar:** "LifeFlow" + profile avatar + notification bell
@@ -225,7 +257,7 @@ LifeFlow's Android version. Follows Material Design 3 guidelines, providing the 
   - Read 20 min ☐ | Gratitude journal ☐ | Vitamins ✓
 - **Stats Row:** 12-day streak 🔥 | Weekly rate 72% | Monthly avg A-
 - **FAB:** + Quick add record
-- **Bottom Navigation Bar:** Home, Insights, Record, Social, Settings
+- **Bottom Navigation Bar:** Home, AI Coach, Progress, Community
 
 ### Screen 2: AI Coach Chat
 - **Chat Interface:** Conversational interface with AI coach
@@ -247,6 +279,22 @@ LifeFlow's Android version. Follows Material Design 3 guidelines, providing the 
 - **Monthly Calendar Heatmap:** This month's activity intensity (GitHub-style)
 - **AI Prediction:** "At your current pace, you're projected to achieve 89% of this month's goals!"
 
+### Screen 4: Community
+- **Top Tabs:** Friends | Challenges | Groups
+- **Friend Activity Feed (card list):**
+  - Jiyoung completed "Morning Run 7-Day Challenge" 🏃‍♀️ — Cheer / Comment
+  - Donghyun earned the "Hydration Champ" badge 💧
+  - Sumin joined the "30-Day Meditation" challenge 🧘
+- **Active Challenges (horizontal card scroll):**
+  - "Weekend 10K Steps" — 12 participants / your rank #4 / 2 days left (progress bar)
+  - "Sleep before 9pm × 7 days" — 5 participants / 3/7 done
+- **Recommended Challenges (2-col grid):**
+  - 🌅 21-Day Morning Routine / 💪 4-Week Home Workout / 📚 30-Day Reading / 🥗 7-Day Veggie
+  - Each card: participant count, average completion rate, "Join" button
+- **Group (card):** "Design Team Wellness" — 8 members, weekly avg score 76, group chat preview
+- **Add Friend FAB:** + Search friends / QR invite code
+- **Notification Bell Counter:** 3 new cheers, 1 challenge invite
+
 ## Design Direction
 - Material Design 3 compliant (Dynamic Color)
 - 390px viewport (mobile)
@@ -254,20 +302,22 @@ LifeFlow's Android version. Follows Material Design 3 guidelines, providing the 
 - Top App Bar + Bottom Navigation Bar pattern
 - FAB (Floating Action Button) usage
 - Rounded cards (12px), MD3 elevation system
+- Community screen leans warm and social — friend avatars and activity cards take the lead
 `,
 
   'ex-ipad': `# LifeFlow — iPad App
 
 ## Overview
-LifeFlow's dedicated iPad app. Leverages the wide screen for parallel analytics dashboard and recording interface, with Apple Pencil support for mood journaling/sketching.
+LifeFlow's dedicated iPad app. Leverages the wide screen for a parallel analytics dashboard and recording interface, supports Apple Pencil for mood journaling/sketching, and uses a full-canvas Insights Report screen to surface long-term trends in depth.
 
 ## Target Audience
 - iPad Pro / iPad Air users
 - Power users who want data visualization on a large screen
 - Users who want to keep mood journals with Apple Pencil
 - Families who want to manage habits together
+- Users who want to export monthly/quarterly PDF reports
 
-## Key Screens (3 screens)
+## Key Screens (4 screens)
 
 ### Screen 1: Dashboard (Split View)
 - **Left Pane (40%):** Today's Overview
@@ -280,6 +330,7 @@ LifeFlow's dedicated iPad app. Leverages the wide screen for parallel analytics 
   - Sleep/exercise/meal trend line charts (4 weeks)
   - Emotion calendar (emoji heatmap)
 - **Top Bar:** LifeFlow logo, date navigator (< Today >), profile, notifications, settings
+- **Sidebar:** Dashboard, Journal, Family Hub, Insights Report
 
 ### Screen 2: Journal (Full Canvas)
 - **Date Header:** "Saturday, April 4, 2026"
@@ -304,6 +355,22 @@ LifeFlow's dedicated iPad app. Leverages the wide screen for parallel analytics 
   - AI family insight: "Haeun has been consistently maintaining her reading habit this week. Let's celebrate! 🎉"
 - **Shared Goals:** Family shared goals (weekend exercise together, family meals 3x/week)
 
+### Screen 4: Insights Report (Full-Canvas Analytics)
+- **Top Control Bar:** period picker (This Week / This Month / Quarter / Custom), category filter, "Export PDF" button, "Share" button
+- **Summary Header Card:** "April 2026 overall score 81 · +6 vs last month ↑" + one-line AI summary
+- **Two-column Grid Layout:**
+  - **Left Column:**
+    - Monthly trend per category (sleep / exercise / meals / mood — 4 line charts)
+    - Time-of-day activity heatmap (weekday × hour — most active windows highlighted)
+  - **Right Column:**
+    - Correlation cards: "Average sleep score is +14 higher on days you exercised"
+    - 5 insights such as "Days with 4+ caffeines → next-day energy −22%"
+    - Goal achieved vs missed comparison donut chart
+- **AI Synthesis (full-width card):**
+  - 3 strengths this month, 2 areas to improve, 3 recommended actions for next month (checkable list)
+- **Achievement Timeline (full-width):** Horizontal timeline of badges/milestones earned in the period
+- **Footer:** "Report generated 2026-04-30 21:14" + data sources (own logs, Apple Health sync)
+
 ## Design Direction
 - iPad optimized (1024px portrait viewport)
 - Split View / multi-panel layout
@@ -312,5 +379,6 @@ LifeFlow's dedicated iPad app. Leverages the wide screen for parallel analytics 
 - Generous whitespace, large typography
 - Card-based information hierarchy
 - Apple Pencil area with subtle paper texture hint
+- Insights Report uses a tidy print-friendly grid and a steady chart palette suitable for PDF export
 `,
 }

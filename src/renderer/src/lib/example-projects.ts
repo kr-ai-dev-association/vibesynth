@@ -35,11 +35,11 @@ export function getSuggestions(locale: Locale) {
 
 const prompts: Record<string, string> = {
   'ex-landing': 'A desktop landing page for "LifeFlow" — an AI life pattern tracking service. Gradient blue-to-purple hero, clean white feature section, modern sans-serif typography. Sticky navigation with logo. screens: Hero Landing, Features & Pricing, Footer & CTA',
-  'ex-homepage': 'A corporate homepage for "LifeFlow Inc.", the company behind the LifeFlow AI life pattern tracking app. Clean corporate style with white base, navy text, serif headings, generous whitespace. screens: Home, About & Team, Careers',
+  'ex-homepage': 'A corporate homepage for "LifeFlow Inc.", the company behind the LifeFlow AI life pattern tracking app. Clean corporate style with white base, navy text, serif headings, generous whitespace. screens: Home, About & Team, Service & Products, Careers',
   'ex-dashboard': 'A dark-themed admin dashboard for "LifeFlow" member management. Dark background (#0f1117), orange (#FF7849) accent, clean data-focused design. Sidebar navigation (Overview, Members, Subscriptions, Analytics, Support, Settings). screens: Overview Dashboard, Member List, Member Detail',
-  'ex-iphone': 'A native iOS mobile app (390px width) for "LifeFlow" — AI life pattern tracking. Warm mint/green palette, white background, soft card shadows, rounded corners 16px, iOS-style design with status bar 9:41 and bottom nav. screens: Today Home, Insights, Log Entry',
-  'ex-android': 'A Material Design 3 Android app (390px width) for "LifeFlow" — AI life pattern tracking. Warm orange/coral palette, Material Design 3 elevation, rounded cards 12px, FAB, bottom navigation. screens: Home, AI Coach Chat, Progress & Goals',
-  'ex-ipad': 'A tablet app (1024px portrait) for "LifeFlow" — AI life pattern tracking on iPad. Calm lavender/purple palette, iPadOS-style sidebar, generous whitespace, large typography, card-based hierarchy. screens: Dashboard Split View, Journal, Family Hub',
+  'ex-iphone': 'A native iOS mobile app (390px width) for "LifeFlow" — AI life pattern tracking. Warm mint/green palette, white background, soft card shadows, rounded corners 16px, iOS-style design with status bar 9:41 and bottom nav. screens: Today Home, Insights, Log Entry, Profile & Achievements',
+  'ex-android': 'A Material Design 3 Android app (390px width) for "LifeFlow" — AI life pattern tracking. Warm orange/coral palette, Material Design 3 elevation, rounded cards 12px, FAB, bottom navigation. screens: Home, AI Coach Chat, Progress & Goals, Community',
+  'ex-ipad': 'A tablet app (1024px portrait) for "LifeFlow" — AI life pattern tracking on iPad. Calm lavender/purple palette, iPadOS-style sidebar, generous whitespace, large typography, card-based hierarchy. screens: Dashboard Split View, Journal, Family Hub, Insights Report',
 }
 
 const gradients: Record<string, string> = {
