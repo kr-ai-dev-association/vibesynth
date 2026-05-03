@@ -67,6 +67,13 @@ The introductory landing page for LifeFlow. As the first touchpoint for potentia
 - Font: clean sans-serif (Inter/Pretendard)
 - Color: trustworthy blue/purple tones + bright accents
 - Professional yet friendly tone
+
+## Common Consistency Rules (apply identically across every screen/section)
+1. **Nav item count = screen (section) count**: enumerate exactly the screens/sections defined above; do not add ghost menu items ("Settings", "More") that don't correspond to a real one.
+2. **Nav label = screen name**: each menu item's text matches the screen/section name verbatim.
+3. **Nav = router**: clicking the Nth menu item navigates/scrolls to the Nth screen/section; each screen highlights its own menu item as active.
+4. **Uniform padding**: every screen's outermost content container uses the same top/right/bottom/left padding values. Header, footer, and status bars sit outside this padded container.
+5. **Shared chrome pixel-identical**: header nav and footer (height, colors, fonts, active indicator) are byte-for-byte the same across screens — only the active index differs.
 `,
 
   'ex-homepage': `# LifeFlow Inc. — Company Homepage
@@ -122,6 +129,13 @@ The official homepage of the company behind LifeFlow. Provides corporate informa
 - Premium typography (Serif headline + Sans body)
 - Large image placeholders (team photos, office, product mockups)
 - Service page leans on cards + comparison table — confident B2B tone
+
+## Common Consistency Rules (apply identically across every page)
+1. **Header nav item count = page count**: enumerate exactly the 4 pages defined above; do not add ghost menu items.
+2. **Nav label = page name**: each header nav item's text matches the page name verbatim.
+3. **Nav = router**: clicking nav goes to the matching page; each page highlights its own nav item as active (underline / bold / color).
+4. **Uniform padding**: every page's outermost content container uses the same top/right/bottom/left padding values. Header and footer sit outside this padded container.
+5. **Shared chrome pixel-identical**: header nav and footer (height, colors, fonts, active indicator) are byte-for-byte the same across pages — only the active index differs.
 `,
 
   'ex-dashboard': `# LifeFlow Admin — Member Management Dashboard
@@ -163,6 +177,13 @@ An admin dashboard used by the LifeFlow operations team. Provides member managem
 - Data-centric: clean tables, charts, KPI cards
 - Color: dark background + orange/blue accents
 - Font: high-readability mono/sans-serif combination
+
+## Common Consistency Rules (apply identically across every screen)
+1. **Sidebar item count = screen count**: enumerate exactly the screens defined above; do not add ghost items.
+2. **Sidebar label = screen name**: each sidebar item's text matches the screen name verbatim.
+3. **Sidebar = router**: clicking an item goes to the matching screen; each screen highlights its own sidebar item as active (background / color / bold).
+4. **Uniform padding**: every screen's outermost content area uses the same top/right/bottom/left padding values. Sidebar and top bar sit outside this padded container.
+5. **Shared chrome pixel-identical**: sidebar and top bar (width, colors, icon set, active indicator) are byte-for-byte the same across screens — only the active index differs.
 `,
 
   'ex-iphone': `# LifeFlow — iPhone App
@@ -232,6 +253,13 @@ LifeFlow's core mobile app (iOS). The main interface where users record daily li
 - SF Pro style typography
 - Soft card shadows, rounded corners (16px)
 - Emotional yet clean interface
+
+## Common Consistency Rules (apply identically across every screen)
+1. **Bottom nav tab count = screen count**: exactly 4 tabs (Today / Insights / Log / Profile) — no ghost tabs like "Settings" or "More".
+2. **Tab label = screen name**: each tab's text matches the screen name verbatim (Today → "Today", Insights → "Insights", Log → "Log", Profile → "Profile").
+3. **Tab = router**: tapping the Nth tab goes to the Nth screen; each screen highlights its own tab as active (color / bold).
+4. **Uniform padding**: every screen's outermost content container uses the same top/right/bottom/left padding values (e.g. 16px horizontal, 12px top, 80px bottom to clear the nav). Status bar and bottom nav sit outside this padded container.
+5. **Shared chrome pixel-identical**: bottom nav (height, background, icon set, active indicator, label font) is byte-for-byte the same on every screen — only the active index differs.
 `,
 
   'ex-android': `# LifeFlow — Android App
@@ -303,6 +331,13 @@ LifeFlow's Android version. Follows Material Design 3 guidelines, providing the 
 - FAB (Floating Action Button) usage
 - Rounded cards (12px), MD3 elevation system
 - Community screen leans warm and social — friend avatars and activity cards take the lead
+
+## Common Consistency Rules (apply identically across every screen)
+1. **Bottom navigation tab count = screen count**: exactly 4 tabs (Home / AI Coach / Progress / Community) — no ghost tabs like "Settings" or "More".
+2. **Tab label = screen name**: each tab's text matches the screen name verbatim (Home → "Home", AI Coach → "AI Coach", Progress → "Progress", Community → "Community").
+3. **Tab = router**: tapping the Nth tab goes to the Nth screen; each screen highlights its own tab with the MD3 active indicator.
+4. **Uniform padding**: every screen's outermost content container uses the same top/right/bottom/left padding values (e.g. 16dp horizontal, 12dp top, 80dp bottom to clear the Bottom Navigation). Top App Bar and Bottom Navigation Bar sit outside this padded container.
+5. **Shared chrome pixel-identical**: Top App Bar and Bottom Navigation (height, background, icon set, active indicator, label font) are byte-for-byte the same on every screen — only the active index differs. FAB position/size/color is identical too.
 `,
 
   'ex-ipad': `# LifeFlow — iPad App
@@ -380,5 +415,12 @@ LifeFlow's dedicated iPad app. Leverages the wide screen for a parallel analytic
 - Card-based information hierarchy
 - Apple Pencil area with subtle paper texture hint
 - Insights Report uses a tidy print-friendly grid and a steady chart palette suitable for PDF export
+
+## Common Consistency Rules (apply identically across every screen)
+1. **Sidebar item count = screen count**: enumerate exactly the 4 screens defined above (Dashboard / Journal / Family Hub / Insights Report) in the iPadOS sidebar — no ghost items.
+2. **Sidebar label = screen name**: each sidebar item's text matches the screen name verbatim.
+3. **Sidebar = router**: clicking an item switches to the matching screen; each screen highlights its own sidebar item as active (filled background or accent color).
+4. **Uniform padding**: every screen's outermost content area uses the same top/right/bottom/left padding values (e.g. uniform 24pt). Sidebar and top bar sit outside this padded container.
+5. **Shared chrome pixel-identical**: sidebar and top bar (width, colors, icon set, active indicator, typography) are byte-for-byte the same on every screen — only the active index differs.
 `,
 }
