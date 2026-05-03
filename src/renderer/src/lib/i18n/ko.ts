@@ -68,6 +68,11 @@ const _ko: Record<keyof typeof en, string> = {
   'editor.menu.openExtEditor': '외부 에디터에서 열기',
   'editor.menu.appearance': '외관',
   'editor.menu.commandMenu': '명령 메뉴',
+  'editor.menu.sectionGenerate': '생성',
+  'editor.menu.newEmptyScreen': '새 빈 화면',
+  'editor.log.creatingEmptyScreen': '새 빈 화면 생성 중: {name}',
+  'editor.log.emptyScreenCreated': '새 빈 화면 생성됨: {name}',
+  'editor.log.emptyScreenFailed': '새 빈 화면 생성 실패: {error}',
 
   // Editor — Left toolbar
   'editor.tool.cursor': '커서',
@@ -336,6 +341,7 @@ const _ko: Record<keyof typeof en, string> = {
   'toolbar.favourite': '즐겨찾기',
   'toolbar.copyAs': '복사 형식...',
   'toolbar.sectionGenerate': '생성',
+  'toolbar.newEmptyScreen': '새 빈 화면',
   'toolbar.sectionEdit': '편집',
   'toolbar.sectionRun': '실행',
 

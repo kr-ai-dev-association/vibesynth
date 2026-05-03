@@ -698,6 +698,101 @@ export async function editDesignsBatch(
 }
 
 /**
+ * Generate a brand-new empty screen that adopts the chrome (top app bar /
+ * bottom nav / sidebar / footer / status bar) of the existing reference
+ * screen verbatim, but leaves the content area intentionally empty so the
+ * user can fill it in via prompts. Solves the "I want one more screen
+ * matching the rest" workflow without forcing the model to invent
+ * inconsistent navigation from scratch.
+ *
+ * Behavior:
+ * - Reference screen's data: URIs are stripped to placeholders so we don't
+ *   ship megabytes of base64 to the model and it doesn't try to invent
+ *   image content for an "empty" screen.
+ * - Device-type drives the viewport hint and the kind of chrome the model
+ *   should expect (mobile bottom nav vs tablet sidebar vs desktop header).
+ * - The new screen's name is appended to the nav as the active item; any
+ *   existing nav items are preserved in their original order. (Updating
+ *   the OTHER screens' navs to include this new entry is left as a follow-
+ *   up batch edit so we don't silently regenerate the whole project here.)
+ */
+export async function generateEmptyScreen(opts: {
+  screenName: string
+  deviceType: 'app' | 'web' | 'tablet'
+  referenceHtml: string
+  existingScreenNames: string[]
+  designSystem?: DesignSystem
+}): Promise<string> {
+  const { screenName, deviceType, referenceHtml, existingScreenNames, designSystem } = opts
+  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
+
+  // Strip data URIs to keep context small and stop the model from picking
+  // up "image content patterns" — this is supposed to be empty.
+  const stripped = referenceHtml.replace(/data:[^"')\s]{200,}/g, '__IMG_REF__')
+
+  const viewport =
+    deviceType === 'app' ? '390 × 844 (mobile phone)'
+    : deviceType === 'tablet' ? '1024 × 1366 (tablet portrait)'
+    : '1280 × 1024 (desktop / web)'
+
+  const chromeHint =
+    deviceType === 'app'
+      ? 'Mobile chrome: status bar at top, top app bar (with title), and a bottom navigation bar with N tabs. Title position matches the reference exactly.'
+      : deviceType === 'tablet'
+      ? 'Tablet chrome: iPadOS-style sidebar (or top app bar — copy whatever the reference uses) and a top header area with the screen title.'
+      : 'Desktop chrome: header nav across the top (or left sidebar — copy whatever the reference uses) with the screen title visible in the standard slot.'
+
+  const dsHint = designSystem
+    ? `\nDESIGN SYSTEM (use these tokens for consistency):\n${formatDesignSystemTokens(designSystem)}\n`
+    : ''
+
+  const navList = existingScreenNames.length > 0
+    ? existingScreenNames.join(', ')
+    : '(none yet)'
+
+  const userPrompt = `You are adding ONE new EMPTY screen named "${screenName}" to an existing app. The screen must visually belong to this app — same chrome, same colors, same nav, same padding — but its content area must be intentionally empty.
+
+DEVICE: ${deviceType} — viewport ${viewport}
+${chromeHint}
+${dsHint}
+EXISTING SCREEN NAMES IN THE APP: ${navList}
+NEW SCREEN NAME (this one): "${screenName}"
+
+REFERENCE SCREEN (copy ALL chrome from this — pixel-identical layout, height, colors, icons, fonts, root container padding values):
+
+${stripped}
+
+REQUIREMENTS — non-negotiable:
+
+1. CHROME: copy the reference's status bar / top app bar / sidebar / bottom nav / footer verbatim — same height, background, icons, typography, spacing.
+
+2. TITLE: place the screen title "${screenName}" in the EXACT slot the reference uses for its title (centered top app bar text, sidebar header, web hero — match the reference).
+
+3. NAV CONSISTENCY:
+   - The nav (bottom tabs / sidebar / header) must list the existing screens [${navList}] PLUS this new screen "${screenName}" appended at the end.
+   - Mark "${screenName}" as the ACTIVE nav item on this screen (matching the reference's active-state styling exactly).
+   - Existing items keep their original order, labels, and icons.
+
+4. ROOT CONTAINER PADDING: identical top/right/bottom/left padding values as the reference's root content container. Status bar, app bar, sidebar, and bottom nav sit OUTSIDE this padded area — they don't change padding.
+
+5. CONTENT AREA — INTENTIONALLY EMPTY:
+   - DO NOT generate cards, lists, hero sections, charts, forms, or any imagery.
+   - Render a centered subtle placeholder: a faint dashed box (1px dashed, color from the reference's neutral palette at low opacity) containing one line of muted text such as "Empty content — describe what to put here in the prompt bar" (or the Korean equivalent if the reference is Korean).
+   - The placeholder should fill the available content area with reasonable margins; it must not look like a real component.
+
+6. NO LOREM IPSUM, no fake stats, no sample user data, no images.
+
+OUTPUT: ONLY the complete HTML for this single new screen. No markdown fences, no commentary.`
+
+  const result = await model.generateContent([SYSTEM_PROMPT, userPrompt])
+  let html = result.response.text().trim()
+  if (html.startsWith('```html')) html = html.slice(7)
+  else if (html.startsWith('```')) html = html.slice(3)
+  if (html.endsWith('```')) html = html.slice(0, -3)
+  return html.trim()
+}
+
+/**
  * Edit a specific element within a design, identified by its CSS selector path.
  * Only the targeted element (and its children) should change; the rest of the page stays intact.
  */

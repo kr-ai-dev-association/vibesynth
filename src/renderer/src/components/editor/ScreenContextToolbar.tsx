@@ -200,6 +200,7 @@ export function ScreenContextMenu({ x, y, onAction, onClose }: ContextMenuProps)
     {
       header: t('toolbar.sectionGenerate'),
       items: [
+        { label: t('toolbar.newEmptyScreen'), action: 'new-empty-screen' },
         { label: t('toolbar.variations'), shortcut: '⇧V', action: 'variations' },
         { label: t('toolbar.regenerate'), shortcut: '⇧R', action: 'regenerate' },
         { label: t('toolbar.desktopWebVersion'), action: 'desktop-web' },
@@ -259,6 +260,55 @@ export function ScreenContextMenu({ x, y, onAction, onClose }: ContextMenuProps)
           ))}
         </div>
       ))}
+    </div>
+  )
+}
+
+// --- Canvas Empty-Area Context Menu ---
+//
+// Shown on right-click of the canvas background (no screen under the
+// cursor). Currently exposes the GENERATE group with "new empty screen"
+// — the same item also lives in the per-screen context menu and the
+// hamburger menu, so users can reach it from whichever surface they're
+// already on.
+
+interface CanvasContextMenuProps {
+  x: number
+  y: number
+  onAction: (action: string) => void
+  onClose: () => void
+}
+
+export function CanvasContextMenu({ x, y, onAction, onClose }: CanvasContextMenuProps) {
+  const { t } = useI18n()
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  const handle = (action: string) => { onAction(action); onClose() }
+
+  return (
+    <div
+      ref={menuRef}
+      className="fixed z-[100] w-56 bg-white dark:bg-neutral-800 rounded-xl shadow-xl border border-neutral-200 dark:border-neutral-700 py-1 text-sm"
+      style={{ left: x, top: y }}
+    >
+      <div className="px-3 pt-1.5 pb-0.5 text-[10px] font-semibold text-neutral-400 tracking-wider">
+        {t('toolbar.sectionGenerate')}
+      </div>
+      <button
+        onClick={() => handle('new-empty-screen')}
+        className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-neutral-50 dark:hover:bg-neutral-700"
+      >
+        <span className="text-base leading-none">＋</span>
+        <span>{t('toolbar.newEmptyScreen')}</span>
+      </button>
     </div>
   )
 }

@@ -66,6 +66,11 @@ export const en = {
   'editor.menu.openExtEditor': 'Open in external editor',
   'editor.menu.appearance': 'Appearance',
   'editor.menu.commandMenu': 'Command menu',
+  'editor.menu.sectionGenerate': 'Generate',
+  'editor.menu.newEmptyScreen': 'New empty screen',
+  'editor.log.creatingEmptyScreen': 'Creating new empty screen: {name}',
+  'editor.log.emptyScreenCreated': 'New empty screen created: {name}',
+  'editor.log.emptyScreenFailed': 'Failed to create empty screen: {error}',
 
   // Editor — Left toolbar
   'editor.tool.cursor': 'Cursor',
@@ -334,6 +339,7 @@ export const en = {
   'toolbar.favourite': 'Favourite',
   'toolbar.copyAs': 'Copy as...',
   'toolbar.sectionGenerate': 'GENERATE',
+  'toolbar.newEmptyScreen': 'New empty screen',
   'toolbar.sectionEdit': 'EDIT',
   'toolbar.sectionRun': 'RUN',
 

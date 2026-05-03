@@ -3,9 +3,9 @@ import type { Project, Screen, DesignSystem, HeatmapZone } from '../App'
 import { PromptBar } from '../components/common/PromptBar'
 import { AppearanceToggle } from '../components/common/AppearanceToggle'
 import { AgentLog } from '../components/editor/AgentLog'
-import { ScreenContextToolbar, ScreenContextMenu } from '../components/editor/ScreenContextToolbar'
+import { ScreenContextToolbar, ScreenContextMenu, CanvasContextMenu } from '../components/editor/ScreenContextToolbar'
 import { RightPanel } from '../components/editor/RightPanel'
-import { generateDesign, generateMultiScreen, editDesign, editDesignsBatch, generateDesignSystem, generateHeatmap, generateFrontendApp, generateIncrementalFrontend, editFrontendFile, fixBuildErrors, hashString, analyzeDesignFromImage } from '../lib/gemini'
+import { generateDesign, generateMultiScreen, editDesign, editDesignsBatch, generateEmptyScreen, generateDesignSystem, generateHeatmap, generateFrontendApp, generateIncrementalFrontend, editFrontendFile, fixBuildErrors, hashString, analyzeDesignFromImage } from '../lib/gemini'
 import { DEFAULT_DESIGN_GUIDE } from '../lib/default-design-guide'
 import { designGuideDB } from '../lib/design-guide-db'
 import { useI18n } from '../lib/i18n'
@@ -98,6 +98,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   const [selectedScreen, setSelectedScreen] = useState<string | null>(null)
   const [selectedScreens, setSelectedScreens] = useState<Set<string>>(new Set())
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
+  const [canvasContextMenu, setCanvasContextMenu] = useState<{ x: number; y: number } | null>(null)
   const [elementContextMenu, setElementContextMenu] = useState<{
     x: number; y: number; screenName: string
     info: { cssPath: string; tagName: string; textPreview: string; outerHtml: string }
@@ -342,6 +343,70 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       const message = err instanceof Error ? err.message : 'Unknown error'
       updateLog(logId, t('editor.log.genFailed', { error: message }), 'error')
       // Remove placeholder on failure
+      onProjectUpdate({
+        ...project,
+        screens: project.screens.filter(s => s.id !== placeholderId),
+        updatedAt: new Date().toLocaleDateString(),
+      })
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  // Add a new screen that copies chrome (top bar / nav / sidebar / footer)
+  // from the first existing screen and leaves the content area empty.
+  // Auto-names "Untitled N+1" so the user gets the screen instantly and can
+  // rename via the same project-name-style edit affordance.
+  const handleCreateEmptyScreen = async () => {
+    if (isGenerating) return
+    const reference = project.screens.find(s => s.html && s.html.length > 100)
+    // Build an auto name like "Untitled 1" (or 2, 3, ... if duplicates).
+    let n = project.screens.length + 1
+    let candidate = `Untitled ${n}`
+    while (project.screens.some(s => s.name === candidate)) {
+      n += 1
+      candidate = `Untitled ${n}`
+    }
+    const newName = candidate
+
+    const placeholderId = crypto.randomUUID()
+    const placeholder: Screen = { id: placeholderId, name: newName, html: '', generating: true }
+    onProjectUpdate({
+      ...project,
+      screens: [...project.screens, placeholder],
+      updatedAt: new Date().toLocaleDateString(),
+    })
+
+    setIsGenerating(true)
+    setAgentLogOpen(true)
+    const logId = addLog(t('editor.log.creatingEmptyScreen', { name: newName }), 'generating')
+
+    try {
+      // Without a reference screen we can't copy chrome — fall back to a
+      // tiny boilerplate so the user still gets something on canvas.
+      let html: string
+      if (!reference) {
+        html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;color:#9ca3af;background:#f9fafb}div{border:1px dashed #d1d5db;border-radius:12px;padding:48px;text-align:center}</style></head><body><div>Empty content — describe what to put here in the prompt bar</div></body></html>`
+      } else {
+        html = await generateEmptyScreen({
+          screenName: newName,
+          deviceType,
+          referenceHtml: reference.html,
+          existingScreenNames: project.screens.filter(s => !s.generating).map(s => s.name),
+          designSystem: project.designSystem || undefined,
+        })
+      }
+
+      const finished: Screen = { id: placeholderId, name: newName, html }
+      const updatedScreens = project.screens
+        .filter(s => s.id !== placeholderId)
+        .concat([finished])
+      onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
+      updateLog(logId, t('editor.log.emptyScreenCreated', { name: newName }), 'success')
+      setSelectedScreen(newName)
+    } catch (err: any) {
+      const message = err?.message || String(err)
+      updateLog(logId, t('editor.log.emptyScreenFailed', { error: message }), 'error')
       onProjectUpdate({
         ...project,
         screens: project.screens.filter(s => s.id !== placeholderId),
@@ -921,7 +986,12 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   }
 
   const handlePromptSubmit = async (prompt: string) => {
-    if (editMode && selectedElement && selectedScreen) {
+    // Element edit takes priority whenever a target is selected — including
+    // selection via right-click (context menu) which doesn't flip editMode.
+    // Without this, prompts like "이 div에 이미지 생성해줘" would silently
+    // fall through to handleEditScreen, which has no image-gen path and
+    // rewrites the whole HTML as text (image dropped on the floor).
+    if (selectedElement && selectedScreen) {
       handleElementEdit(prompt)
     } else if (selectedScreens.size >= 2) {
       // Multi-selected screens → batch edit all selected
@@ -1120,6 +1190,9 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       case 'variations':
         handleGenerateVariation()
         break
+      case 'new-empty-screen':
+        handleCreateEmptyScreen()
+        break
       case 'desktop-web':
         addLog(t('common.comingSoon', { action: 'Desktop web version' }), 'info')
         break
@@ -1301,6 +1374,16 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     const cleanup = window.electronAPI?.onLiveEditRequest(async (prompt: string) => {
       if (!project.id) return
 
+      // ─── Element edit takes priority — if the user picked an element on
+      // the main canvas (right-click or edit-mode click) and then typed in
+      // the popup, target that element. handleElementEdit handles the
+      // image-generation path for "generate an image into this div" prompts
+      // and falls back to LLM element edit otherwise.
+      if (selectedElement && selectedScreen) {
+        handleElementEdit(prompt)
+        return
+      }
+
       // ─── Android branch: edit screen HTMLs, let the auto-rebuild useEffect
       // pick up project.screens changes, then runOnAndroid pushes a new APK
       // to the emulator. Per-screen edit goes through editDesignsBatch on
@@ -1404,7 +1487,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       }
     })
     return () => cleanup?.()
-  }, [devServerUrl, project, project.id, project.screens, feedbackMode, locale, androidLiveMode, selectedScreens, selectedScreen]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [devServerUrl, project, project.id, project.screens, feedbackMode, locale, androidLiveMode, selectedScreens, selectedScreen, selectedElement]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleStop = async () => {
     window.electronAPI?.closeLiveWindow()
@@ -1795,6 +1878,11 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                   }
                 }} />
                 <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-1" />
+                <div className="px-3 pt-1.5 pb-0.5 text-[10px] font-semibold text-neutral-400 tracking-wider">
+                  {t('editor.menu.sectionGenerate')}
+                </div>
+                <MenuItem icon="＋" label={t('editor.menu.newEmptyScreen')} onClick={() => { setShowHamburger(false); handleCreateEmptyScreen() }} />
+                <div className="h-px bg-neutral-200 dark:bg-neutral-700 my-1" />
                 <MenuItem icon="🎨" label={t('editor.menu.appearance')} onClick={() => {
                   setShowHamburger(false)
                   const root = document.documentElement
@@ -1889,6 +1977,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                 ) : isRunning ? 'Resume' : t('editor.run')}
               </button>
               <button
+                data-testid="run-dropdown-toggle"
                 onClick={() => setShowRunMenu(v => !v)}
                 disabled={buildingFrontend}
                 className={`flex items-center px-1.5 py-1.5 text-sm rounded-r-lg ${
@@ -1936,6 +2025,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                 </button>
                 <div className="border-t border-neutral-200 dark:border-neutral-700 my-1" />
                 <button
+                  data-testid="run-android"
                   onClick={() => { setShowRunMenu(false); handleRunAndroid() }}
                   disabled={androidStatus === 'building'}
                   className="w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 disabled:opacity-50"
@@ -2183,6 +2273,15 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
           onWheel={handleWheel}
+          onContextMenu={(e) => {
+            // Only fire when right-clicking the empty canvas background.
+            // Screen cards stop propagation (or we filter via target.closest)
+            // so the per-screen context menu still wins inside a screen.
+            const target = e.target as HTMLElement
+            if (target.closest('[data-screen-card]')) return
+            e.preventDefault()
+            setCanvasContextMenu({ x: e.clientX, y: e.clientY })
+          }}
         >
           <div
             className="min-w-max min-h-max p-16"
@@ -2256,6 +2355,30 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                           s.id === screenId ? { ...s, customWidth: newW, customHeight: newH } : s
                         )
                         onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
+                      }}
+                      onRename={(screenId, newName) => {
+                        // Disallow duplicate names — keeps nav routing in
+                        // sibling screens unambiguous.
+                        const dup = project.screens.some(s => s.id !== screenId && s.name === newName)
+                        if (dup) {
+                          addLog(`이름 변경 실패: "${newName}" 이미 사용 중`, 'error')
+                          return
+                        }
+                        const oldName = project.screens.find(s => s.id === screenId)?.name
+                        const updatedScreens = project.screens.map(s =>
+                          s.id === screenId ? { ...s, name: newName } : s
+                        )
+                        onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
+                        // Keep selection / multi-selection in sync since both
+                        // index by name rather than id.
+                        if (oldName && selectedScreen === oldName) setSelectedScreen(newName)
+                        if (oldName && selectedScreens.has(oldName)) {
+                          const next = new Set(selectedScreens)
+                          next.delete(oldName)
+                          next.add(newName)
+                          setSelectedScreens(next)
+                        }
+                        addLog(`화면 이름 변경: "${oldName}" → "${newName}"`, 'info')
                       }}
                     />
                   ))
@@ -2566,6 +2689,19 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           y={contextMenu.y}
           onAction={handleScreenAction}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* Canvas empty-area context menu (right-click on background) */}
+      {canvasContextMenu && (
+        <CanvasContextMenu
+          x={canvasContextMenu.x}
+          y={canvasContextMenu.y}
+          onAction={(action) => {
+            setCanvasContextMenu(null)
+            if (action === 'new-empty-screen') handleCreateEmptyScreen()
+          }}
+          onClose={() => setCanvasContextMenu(null)}
         />
       )}
 
@@ -2963,7 +3099,7 @@ function intensityBorder(intensity: number): string {
 
 function ScreenCard({
   screen, width, minHeight, isSelected, isMultiSelected, deviceType, editMode, heatmapMode, heatmapZones,
-  onClick, onContextMenu, onElementSelect, onElementContextMenu, onElementDeselect, onTextEdit, onHeatmapZoneClick, onHeightMeasured, onResize,
+  onClick, onContextMenu, onElementSelect, onElementContextMenu, onElementDeselect, onTextEdit, onHeatmapZoneClick, onHeightMeasured, onResize, onRename,
 }: {
   screen: Screen; width: number; minHeight: number; deviceType: 'app' | 'web' | 'tablet'
   isSelected?: boolean; isMultiSelected?: boolean; editMode?: boolean; heatmapMode?: boolean; heatmapZones?: HeatmapZone[]
@@ -2975,7 +3111,12 @@ function ScreenCard({
   onHeatmapZoneClick?: (zone: HeatmapZone, x: number, y: number) => void
   onHeightMeasured?: (screenId: string, height: number) => void
   onResize?: (screenId: string, newWidth: number, newHeight: number) => void
+  onRename?: (screenId: string, newName: string) => void
 }) {
+  const [editingName, setEditingName] = useState(false)
+  const [nameDraft, setNameDraft] = useState(screen.name)
+  // Sync draft when screen.name changes externally (e.g. parent updates).
+  useEffect(() => { if (!editingName) setNameDraft(screen.name) }, [screen.name, editingName])
   const isGenerating = screen.generating === true
   const [revealed, setRevealed] = useState(!isGenerating)
 
@@ -3303,7 +3444,39 @@ body>*{min-height:0!important;}
           <span className="w-3.5 h-3.5 rounded-sm bg-violet-500 text-white flex items-center justify-center text-[9px] font-bold shrink-0">✓</span>
         )}
         {deviceType === 'app' ? <PhoneSmallIcon /> : deviceType === 'tablet' ? <TabletSmallIcon /> : <MonitorSmallIcon />}
-        <span>{screen.name}</span>
+        {editingName ? (
+          <input
+            autoFocus
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onBlur={() => {
+              const next = nameDraft.trim()
+              if (next && next !== screen.name) onRename?.(screen.id, next)
+              else setNameDraft(screen.name)
+              setEditingName(false)
+            }}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+              else if (e.key === 'Escape') { setNameDraft(screen.name); setEditingName(false) }
+            }}
+            className="bg-transparent border-b border-blue-400 outline-none text-xs text-neutral-700 dark:text-neutral-200 min-w-0 max-w-[180px]"
+          />
+        ) : (
+          <span
+            className="cursor-text hover:text-neutral-700 dark:hover:text-neutral-300"
+            title="더블클릭으로 이름 변경"
+            onDoubleClick={(e) => {
+              e.stopPropagation()
+              setNameDraft(screen.name)
+              setEditingName(true)
+            }}
+          >
+            {screen.name}
+          </span>
+        )}
         {isEditable && (
           <span className="ml-1 px-1.5 py-0.5 text-[10px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 rounded">
             EDIT
