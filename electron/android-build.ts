@@ -1,7 +1,7 @@
 /**
  * Phase 1 Android run pipeline:
  *   1. Scaffold a boilerplate Kotlin Compose project under
- *      ~/VibeSynth/projects-android/<projectId>/ (idempotent — skips if
+ *      ~/VibeSynth/workspaces/<projectId>/android/ (idempotent — skips if
  *      already present).
  *   2. Ensure gradle-wrapper.jar is downloaded + cached at
  *      ~/Library/Application Support/vibesynth/gradle-wrapper-<ver>.jar
@@ -37,7 +37,7 @@ export interface RunAndroidOptions {
   screens?: ScreenForCodegen[]
   designSystem?: DesignSystemLite
   geminiApiKey?: string
-  /** When true, wipes ~/VibeSynth/projects-android/<id>/ entirely before
+  /** When true, wipes ~/VibeSynth/workspaces/<id>/android/ entirely before
    * scaffolding — equivalent to a "clean rebuild": gradle wrapper is
    * re-downloaded, all dependencies re-resolved, all codegen + build
    * caches dropped. Use after major template changes or when chasing a
@@ -65,7 +65,8 @@ type Emit = (e: ProgressEvent) => void
 // ─── helpers ──────────────────────────────────────────────────
 
 function projectDir(projectId: string): string {
-  return path.join(os.homedir(), 'VibeSynth', 'projects-android', projectId)
+  // android platform under the unified workspace root
+  return path.join(os.homedir(), 'VibeSynth', 'workspaces', projectId, 'android')
 }
 
 function ensureDir(p: string) { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }) }

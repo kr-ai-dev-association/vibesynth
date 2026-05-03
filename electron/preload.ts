@@ -106,6 +106,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setActivePlatform: (platform: 'web' | 'android' | null) =>
       ipcRenderer.invoke('live-edit:set-active-platform', platform),
     getActivePlatform: () => ipcRenderer.invoke('live-edit:get-active-platform'),
+    openInEditor: (platform?: 'react' | 'android') =>
+      ipcRenderer.invoke('live-edit:open-in-editor', platform),
     close: () => ipcRenderer.invoke('live-edit:close'),
   },
 

@@ -2,7 +2,7 @@
  * Web (React+Vite) live-app build pipeline — single channel through banya
  * CLI agent, mirroring the Android pipeline:
  *
- *   1. scaffold a React+Vite project at ~/VibeSynth/projects/<id>/ (idempotent)
+ *   1. scaffold a React+Vite project at ~/VibeSynth/workspaces/<id>/web/ (idempotent)
  *   2. drop each screen's HTML to <projectDir>/_design/
  *   3. render the first screen to PNG (multimodal anchor)
  *   4. spawn banya CLI agent: convert HTMLs → src/App.tsx + src/pages/*.tsx
@@ -47,7 +47,8 @@ export interface ReactProgressEvent {
 type Emit = (e: ReactProgressEvent) => void
 
 function projectDir(projectId: string): string {
-  return path.join(os.homedir(), 'VibeSynth', 'projects', projectId)
+  // web platform under the unified workspace root
+  return path.join(os.homedir(), 'VibeSynth', 'workspaces', projectId, 'web')
 }
 function ensureDir(p: string) { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }) }
 function pascal(s: string): string {

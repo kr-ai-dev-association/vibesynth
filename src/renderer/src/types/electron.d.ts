@@ -82,12 +82,14 @@ interface ElectronAPI {
       projectId: string
       path: string
       files: string[]
+      workspaceRoot?: string
       platforms?: Array<{ platform: 'react' | 'android'; path: string; files: string[] }>
     } | null>
     getDesignSystem: () => Promise<any | null>
     updateFeedback: (message: string, type: 'success' | 'error' | 'generating', devMarkdown?: string) => Promise<void>
     setActivePlatform: (platform: 'web' | 'android' | null) => Promise<void>
     getActivePlatform: () => Promise<'web' | 'android' | null>
+    openInEditor: (platform?: 'react' | 'android') => Promise<{ success: boolean; error?: string }>
     close: () => Promise<void>
   }
   shell: ElectronShellAPI

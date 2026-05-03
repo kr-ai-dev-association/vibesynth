@@ -195,7 +195,7 @@ class VibeSynthDatabase {
     return {
       userId,
       theme: 'system',
-      defaultProjectPath: '~/VibeSynth/projects',
+      defaultProjectPath: '~/VibeSynth/workspaces',
       defaultFramework: 'React + Vite',
       defaultDevPort: 5173,
       defaultModel: '3.0 Flash',

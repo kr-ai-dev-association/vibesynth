@@ -20,7 +20,7 @@ interface GeneralSettings {
 }
 
 const DEFAULT_GENERAL: GeneralSettings = {
-  projectPath: '~/VibeSynth/projects',
+  projectPath: '~/VibeSynth/workspaces',
   framework: 'React + Vite',
   devPort: 5173,
   apiKey: '',

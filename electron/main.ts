@@ -107,9 +107,20 @@ function patchShellPath(): void {
 // Defer to whenReady to avoid module-load-time issues if execSync hangs.
 app.whenReady().then(() => { try { patchShellPath() } catch (e) { console.error('[VibeSynth] patchShellPath failed:', e) } })
 
+// Unified workspace layout — every project owns one root with one
+// directory per platform (web, android, ios, …). Replaces the old split
+// of ~/VibeSynth/projects/<id> + ~/VibeSynth/projects-android/<id>.
+function getWorkspaceRoot(projectId: string): string {
+  return path.join(os.homedir(), 'VibeSynth', 'workspaces', projectId)
+}
 function getProjectDir(projectId: string): string {
-  const home = os.homedir()
-  return path.join(home, 'VibeSynth', 'projects', projectId)
+  // The 'web' platform folder. Kept named getProjectDir for back-compat
+  // with all the existing IPC handlers below that operate on the React
+  // side — switching the path is enough; their semantics are unchanged.
+  return path.join(getWorkspaceRoot(projectId), 'web')
+}
+function getAndroidProjectDir(projectId: string): string {
+  return path.join(getWorkspaceRoot(projectId), 'android')
 }
 
 function ensureDir(dirPath: string) {
@@ -344,21 +355,16 @@ ipcMain.handle('db:save-project', (_event, project: any) => {
 
 ipcMain.handle('db:delete-project', (_event, id: string) => {
   db.deleteProject(id)
-  // Also wipe on-disk build directories so deleting a project from the
-  // dashboard doesn't leave gigabytes of stale gradle caches / vite builds
-  // behind. Two roots — react/vite live app, and android Kotlin project.
-  const home = os.homedir()
-  for (const root of [
-    path.join(home, 'VibeSynth', 'projects', id),
-    path.join(home, 'VibeSynth', 'projects-android', id),
-  ]) {
-    if (fs.existsSync(root)) {
-      try {
-        fs.rmSync(root, { recursive: true, force: true })
-        console.log(`[VibeSynth] deleted build dir: ${root}`)
-      } catch (e: any) {
-        console.warn(`[VibeSynth] failed to delete ${root}:`, e?.message || e)
-      }
+  // Wipe the unified workspace dir (web/, android/, future ios/, …) so
+  // dashboard delete doesn't leave gigabytes of gradle caches / vite
+  // builds behind.
+  const root = getWorkspaceRoot(id)
+  if (fs.existsSync(root)) {
+    try {
+      fs.rmSync(root, { recursive: true, force: true })
+      console.log(`[VibeSynth] deleted workspace: ${root}`)
+    } catch (e: any) {
+      console.warn(`[VibeSynth] failed to delete ${root}:`, e?.message || e)
     }
   }
   return true
@@ -986,7 +992,13 @@ ipcMain.handle('live-edit:open', (_event, projectId?: string) => {
 
   <!-- Developer mode: project info -->
   <div id="le-project-info" style="display:none;font-size:11px;color:#64748b;background:#1a1a2e;border-radius:8px;padding:10px;overflow-y:auto;min-height:0">
-    <div style="font-weight:600;color:#60a5fa;margin-bottom:6px">📁 Workspace</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px">
+      <div style="font-weight:600;color:#60a5fa">📁 Workspace</div>
+      <button id="le-open-in-editor" title="설정의 외부 편집기로 열기" style="background:rgba(96,165,250,0.15);border:1px solid rgba(96,165,250,0.4);color:#93c5fd;padding:3px 8px;border-radius:6px;font-size:10px;cursor:pointer;display:flex;align-items:center;gap:4px;line-height:1.4">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 3h7v7"/><path d="M21 3l-9 9"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>
+        <span>외부 편집기</span>
+      </button>
+    </div>
     <div id="le-project-path" style="font-family:monospace;font-size:10px;color:#94a3b8;margin-bottom:8px;word-break:break-all"></div>
     <div style="font-weight:600;color:#60a5fa;margin-bottom:4px">📄 Files</div>
     <div id="le-project-files" style="font-family:monospace;font-size:10px;line-height:1.6"></div>
@@ -1222,18 +1234,49 @@ ipcMain.handle('live-edit:open', (_event, projectId?: string) => {
       const platforms = (info.platforms && info.platforms.length > 0)
         ? info.platforms
         : [{ platform: 'project', path: info.path, files: info.files || [] }];
-      // Show all platform paths on top (one per line) so user can see both
-      // react/ and android/ workspaces when both exist on disk.
-      projectPath.textContent = platforms.map(p => p.path).join('\\n');
+      // Workspace label = single unified root. Main creates a
+      // ~/VibeSynth/workspaces/<id>/ dir with web/ android/ symlinks
+      // so this path is openable in any editor and contains every
+      // platform as a sibling.
+      projectPath.textContent = info.workspaceRoot || platforms[0]?.path || '';
       let html = '';
       for (const p of platforms) {
-        if (platforms.length > 1) {
-          html += '<div class="tree-platform">' + escapeHtml(p.platform) + '</div>';
-        }
+        // Show platform header (web / android / …) with its absolute
+        // path tooltip so users still know where each subtree physically
+        // lives on disk.
+        html += '<div class="tree-platform" title="' + escapeHtml(p.path) + '">'
+          + escapeHtml(p.platform)
+          + '</div>';
         html += renderTreeNode(buildTree(p.files || []));
       }
       projectFiles.innerHTML = html;
     } catch {}
+  }
+
+  // ── Open in external editor (uses settings preference) ──
+  const openEditorBtn = document.getElementById('le-open-in-editor');
+  if (openEditorBtn) {
+    openEditorBtn.addEventListener('click', async () => {
+      const orig = openEditorBtn.innerHTML;
+      openEditorBtn.disabled = true;
+      openEditorBtn.innerHTML = '<span style="opacity:0.7">여는 중…</span>';
+      try {
+        // platform 인자는 생략 → main이 active platform을 사용한다
+        const r = await window.electronAPI?.liveEdit?.openInEditor?.();
+        if (r?.success) {
+          openEditorBtn.innerHTML = '<span style="color:#34d399">✓ 열림</span>';
+        } else {
+          openEditorBtn.innerHTML = '<span style="color:#f87171">✗ 실패</span>';
+          status.textContent = r?.error || '편집기 실행 실패';
+        }
+      } catch (e) {
+        openEditorBtn.innerHTML = '<span style="color:#f87171">✗ 오류</span>';
+      }
+      setTimeout(() => {
+        openEditorBtn.innerHTML = orig;
+        openEditorBtn.disabled = false;
+      }, 1800);
+    });
   }
 
   // ── Platform indicator (web vs android) ──
@@ -1362,23 +1405,30 @@ ipcMain.handle('live-edit:get-active-platform', () => liveEditActivePlatform)
 ipcMain.handle('live-edit:get-project-info', () => {
   const id = liveEditProjectId || devServerProjectId
   if (!id) return null
-  const home = os.homedir()
-  const reactDir = path.join(home, 'VibeSynth', 'projects', id)
-  const androidDir = path.join(home, 'VibeSynth', 'projects-android', id)
-  const platforms: { platform: 'react' | 'android'; path: string; files: string[] }[] = []
-  if (fs.existsSync(reactDir)) {
-    platforms.push({ platform: 'react', path: reactDir, files: listRelativePathsSync(reactDir) })
+  const workspaceRoot = getWorkspaceRoot(id)
+  // Discover every platform subdirectory the build pipeline has created
+  // under this workspace. New platforms (ios, desktop, …) appear here
+  // automatically once their builder writes a sibling folder.
+  const platforms: { platform: 'web' | 'android' | string; path: string; files: string[] }[] = []
+  if (fs.existsSync(workspaceRoot)) {
+    for (const entry of fs.readdirSync(workspaceRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const sub = path.join(workspaceRoot, entry.name)
+      platforms.push({ platform: entry.name as any, path: sub, files: listRelativePathsSync(sub) })
+    }
   }
-  if (fs.existsSync(androidDir)) {
-    platforms.push({ platform: 'android', path: androidDir, files: listRelativePathsSync(androidDir) })
-  }
-  // Back-compat: pick the first platform's path/files for legacy callers
-  // that read `path`/`files` directly. New callers should consume `platforms`.
+  // Stable order: web first, android second, then alphabetical.
+  platforms.sort((a, b) => {
+    const order = (n: string) => n === 'web' ? 0 : n === 'android' ? 1 : 2
+    return order(a.platform) - order(b.platform) || a.platform.localeCompare(b.platform)
+  })
+  // Back-compat: legacy callers read `path`/`files`; new callers consume `platforms`.
   const primary = platforms[0]
   return {
     projectId: id,
     path: primary?.path || '',
     files: primary?.files || [],
+    workspaceRoot,
     platforms,
   }
 })
@@ -1541,43 +1591,52 @@ ipcMain.handle('project:export-zip', async (_event, projectId: string, screens: 
 })
 
 /**
- * Open `folderPath` in the user's chosen external editor. The renderer
- * passes `editor` from its persisted setting (vibesynth-external-editor).
+ * Open `folderPath` (or several) in the user's chosen external editor.
+ * The renderer passes `editor` from its persisted setting
+ * (vibesynth-external-editor).
  *
  * Strategy per editor:
- *   - vscode  → `code` CLI
- *   - cursor  → `cursor` CLI
- *   - webstorm → `wstorm` CLI (JetBrains Toolbox), fallback `open -a "WebStorm"`
- *   - android-studio → `studio` CLI, fallback `open -a "Android Studio"`
+ *   - vscode / cursor → CLI accepts multiple folder args and presents
+ *     them as a multi-root workspace, so when the project has both
+ *     react/ and android/ subprojects we pass them both.
+ *   - webstorm / android-studio → IDE windows are single-root, so we
+ *     pass only one path. Caller should already pre-pick the right one
+ *     (react for webstorm, android for android-studio).
  *
  * Falls back to `code` then `cursor` if the requested editor isn't
- * installed, so the existing "Open in editor" UX never silently fails.
+ * installed, so the "Open in editor" UX never silently fails.
  */
-function openInEditor(editor: string, folderPath: string): { success: boolean; error?: string } {
-  const resolved = expandUserPath(folderPath)
-  const q = `"${resolved.replace(/"/g, '\\"')}"`
+function openInEditor(editor: string, folderPaths: string | string[]): { success: boolean; error?: string } {
+  const paths = (Array.isArray(folderPaths) ? folderPaths : [folderPaths])
+    .filter(Boolean)
+    .map((p) => expandUserPath(p))
+  if (paths.length === 0) return { success: false, error: 'No folder path provided' }
+  const quote = (p: string) => `"${p.replace(/"/g, '\\"')}"`
+  const argsAll = paths.map(quote).join(' ')
+  const argsFirst = quote(paths[0])
   const tries: { cmd: string; label: string }[] = []
 
   switch (editor) {
     case 'cursor':
-      tries.push({ cmd: `cursor ${q}`, label: 'Cursor CLI' })
+      tries.push({ cmd: `cursor ${argsAll}`, label: 'Cursor CLI' })
       break
     case 'webstorm':
-      tries.push({ cmd: `wstorm ${q}`, label: 'WebStorm CLI' })
-      tries.push({ cmd: `open -a "WebStorm" ${q}`, label: 'WebStorm.app' })
+      // JetBrains opens one project per window — only the first path is honored.
+      tries.push({ cmd: `wstorm ${argsFirst}`, label: 'WebStorm CLI' })
+      tries.push({ cmd: `open -a "WebStorm" ${argsFirst}`, label: 'WebStorm.app' })
       break
     case 'android-studio':
-      tries.push({ cmd: `studio ${q}`, label: 'Android Studio CLI' })
-      tries.push({ cmd: `open -a "Android Studio" ${q}`, label: 'Android Studio.app' })
+      tries.push({ cmd: `studio ${argsFirst}`, label: 'Android Studio CLI' })
+      tries.push({ cmd: `open -a "Android Studio" ${argsFirst}`, label: 'Android Studio.app' })
       break
     case 'vscode':
     default:
-      tries.push({ cmd: `code ${q}`, label: 'VS Code CLI' })
+      tries.push({ cmd: `code ${argsAll}`, label: 'VS Code CLI' })
       break
   }
   // Universal fallback chain: vscode → cursor (preserves prior behaviour).
-  if (editor !== 'vscode') tries.push({ cmd: `code ${q}`, label: 'VS Code CLI (fallback)' })
-  if (editor !== 'cursor') tries.push({ cmd: `cursor ${q}`, label: 'Cursor CLI (fallback)' })
+  if (editor !== 'vscode') tries.push({ cmd: `code ${argsAll}`, label: 'VS Code CLI (fallback)' })
+  if (editor !== 'cursor') tries.push({ cmd: `cursor ${argsAll}`, label: 'Cursor CLI (fallback)' })
 
   const errors: string[] = []
   for (const t of tries) {
@@ -1593,6 +1652,35 @@ function openInEditor(editor: string, folderPath: string): { success: boolean; e
 
 ipcMain.handle('shell:open-vscode', (_event, folderPath: string) => openInEditor('vscode', folderPath))
 ipcMain.handle('shell:open-in-editor', (_event, editor: string, folderPath: string) => openInEditor(editor, folderPath))
+
+ipcMain.handle('live-edit:get-workspace-root', () => {
+  const id = liveEditProjectId || devServerProjectId
+  if (!id) return null
+  return getWorkspaceRoot(id)
+})
+
+/**
+ * Open the active project's workspace root (containing web/android/…
+ * subdirs) in the user's preferred external editor. The popup window
+ * has its own localStorage so we read the editor preference through
+ * the main renderer.
+ */
+ipcMain.handle('live-edit:open-in-editor', async () => {
+  const id = liveEditProjectId || devServerProjectId
+  if (!id) return { success: false, error: 'No active project' }
+  const workspaceRoot = getWorkspaceRoot(id)
+
+  let editor = 'vscode'
+  if (mainWindow) {
+    try {
+      const v = await mainWindow.webContents.executeJavaScript(
+        `localStorage.getItem('vibesynth-external-editor')`,
+      )
+      if (typeof v === 'string' && v.trim()) editor = v.trim()
+    } catch { /* fall back to vscode */ }
+  }
+  return openInEditor(editor, workspaceRoot)
+})
 
 // ─── Pinterest Design Steal ─────────────────────────────────────
 
