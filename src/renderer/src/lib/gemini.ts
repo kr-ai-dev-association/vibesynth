@@ -557,6 +557,107 @@ export async function editDesign(
 }
 
 /**
+ * Edit MULTIPLE selected screens in a SINGLE model call so shared UI
+ * (bottom nav, top bar, color palette, typography) ends up consistent
+ * across them. Each screen is wrapped in a delimited block so the model
+ * can read every screen's HTML before deciding what "consistent" means,
+ * then return one block per screen in the same order.
+ *
+ * Per-screen content stays unique — only the user-requested change is
+ * applied uniformly. Image data: URIs are stripped to per-screen
+ * placeholders (`__IMG_S<i>_<n>__`) before sending and re-injected on the
+ * way back, so the model never sees megabytes of base64.
+ *
+ * If the model's response misses a screen (parser fails to find a
+ * delimiter), that screen falls back to its original HTML — never silent
+ * data loss. Caller can detect this by comparing returned html to input.
+ */
+export async function editDesignsBatch(
+  screens: Array<{ id: string; name: string; html: string }>,
+  editPrompt: string,
+): Promise<Array<{ id: string; html: string; changed: boolean }>> {
+  if (screens.length === 0) return []
+  if (screens.length === 1) {
+    const html = await editDesign(screens[0].html, editPrompt)
+    return [{ id: screens[0].id, html, changed: html !== screens[0].html }]
+  }
+
+  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' })
+
+  // Per-screen image stripping with screen-scoped placeholder keys so two
+  // screens can't collide on `__IMG_0__`.
+  const prepped = screens.map((s, i) => {
+    const map = new Map<string, string>()
+    let n = 0
+    const stripped = s.html.replace(/data:[^"')\s]{200,}/g, (match) => {
+      const key = `__IMG_S${i}_${n++}__`
+      map.set(key, match)
+      return key
+    })
+    return { id: s.id, name: s.name, stripped, map, original: s.html }
+  })
+
+  const DELIM_OPEN = '===== SCREEN:'
+  const DELIM_CLOSE = '====='
+  const screensBlock = prepped
+    .map((s) => `${DELIM_OPEN} ${s.name} ${DELIM_CLOSE}\n${s.stripped}`)
+    .join('\n\n')
+
+  const userPrompt =
+    `You will edit ${screens.length} screens AT ONCE. Treat them as ONE design system: any shared UI element (bottom navigation, top app bar, color tokens, typography, spacing system) MUST be IDENTICAL across every returned screen. Per-screen unique content stays unique.\n\n` +
+    `User's request: "${editPrompt}"\n\n` +
+    `Below are the current screens, each wrapped in a delimited block. Read ALL screens first, decide what "consistent" looks like, then output every screen edited.\n\n` +
+    `INPUT SCREENS:\n\n${screensBlock}\n\n` +
+    `RETURN FORMAT — output every screen in the EXACT same order using the EXACT same delimiters:\n\n` +
+    `${DELIM_OPEN} <ScreenName> ${DELIM_CLOSE}\n<COMPLETE modified HTML for that screen>\n\n` +
+    `${DELIM_OPEN} <NextScreenName> ${DELIM_CLOSE}\n<COMPLETE modified HTML for that screen>\n\n` +
+    `... and so on for every input screen.\n\n` +
+    `STRICT RULES:\n` +
+    `- Return COMPLETE HTML for every screen, even if a screen needs no per-screen change (still re-emit it so navigation/header updates apply uniformly).\n` +
+    `- Keep every \`__IMG_S<i>_<n>__\` placeholder EXACTLY as it appears in the input — do not rename, drop, or re-number them.\n` +
+    `- Do not wrap output in markdown code fences. No commentary outside the delimited blocks.\n` +
+    `- Use the screen names from the INPUT as the delimiter labels (case-sensitive).`
+
+  const result = await model.generateContent([SYSTEM_PROMPT, userPrompt])
+  let raw = result.response.text().trim()
+  if (raw.startsWith('```html')) raw = raw.slice(7)
+  else if (raw.startsWith('```')) raw = raw.slice(3)
+  if (raw.endsWith('```')) raw = raw.slice(0, -3)
+  raw = raw.trim()
+
+  // Parse: split on the opening delimiter; each chunk is "<name> =====\n<html>".
+  const splitRe = /^={5}\s*SCREEN:\s*/m
+  const chunks = raw.split(splitRe).map((c) => c.trim()).filter((c) => c.length > 0)
+
+  const parsed = new Map<string, string>()
+  for (const chunk of chunks) {
+    // Find the closing "=====" that ends the header line.
+    const headerEnd = chunk.indexOf('=====')
+    if (headerEnd < 0) continue
+    const name = chunk.slice(0, headerEnd).trim()
+    let html = chunk.slice(headerEnd + 5).trim()
+    // Defensive: strip any lingering leading/trailing markdown fences.
+    if (html.startsWith('```html')) html = html.slice(7).trim()
+    else if (html.startsWith('```')) html = html.slice(3).trim()
+    if (html.endsWith('```')) html = html.slice(0, -3).trim()
+    if (name && html) parsed.set(name, html)
+  }
+
+  return prepped.map((s) => {
+    const modifiedStripped = parsed.get(s.name)
+    if (!modifiedStripped) {
+      // Model didn't return this screen — keep original untouched.
+      return { id: s.id, html: s.original, changed: false }
+    }
+    let html = modifiedStripped
+    for (const [key, dataUrl] of s.map) {
+      html = html.split(key).join(dataUrl)
+    }
+    return { id: s.id, html, changed: html !== s.original }
+  })
+}
+
+/**
  * Edit a specific element within a design, identified by its CSS selector path.
  * Only the targeted element (and its children) should change; the rest of the page stays intact.
  */

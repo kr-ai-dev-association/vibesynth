@@ -5,7 +5,7 @@ import { AppearanceToggle } from '../components/common/AppearanceToggle'
 import { AgentLog } from '../components/editor/AgentLog'
 import { ScreenContextToolbar, ScreenContextMenu } from '../components/editor/ScreenContextToolbar'
 import { RightPanel } from '../components/editor/RightPanel'
-import { generateDesign, generateMultiScreen, editDesign, generateDesignSystem, generateHeatmap, generateFrontendApp, generateIncrementalFrontend, editFrontendFile, fixBuildErrors, hashString, analyzeDesignFromImage } from '../lib/gemini'
+import { generateDesign, generateMultiScreen, editDesign, editDesignsBatch, generateDesignSystem, generateHeatmap, generateFrontendApp, generateIncrementalFrontend, editFrontendFile, fixBuildErrors, hashString, analyzeDesignFromImage } from '../lib/gemini'
 import { DEFAULT_DESIGN_GUIDE } from '../lib/default-design-guide'
 import { designGuideDB } from '../lib/design-guide-db'
 import { useI18n } from '../lib/i18n'
@@ -469,12 +469,15 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       const logId = addLog(t('editor.log.batchEditing', { count: project.screens.length, prompt }), 'generating')
 
       try {
-        const editPromises = project.screens.map(async (s) => {
-          const newHtml = await editDesign(s.html, prompt)
-          return { ...s, html: newHtml, generating: false }
+        const batchResult = await editDesignsBatch(
+          project.screens.map(s => ({ id: s.id, name: s.name, html: s.html })),
+          prompt,
+        )
+        const byId = new Map(batchResult.map(r => [r.id, r]))
+        const updatedScreens = project.screens.map(s => {
+          const r = byId.get(s.id)
+          return r ? { ...s, html: r.html, generating: false } : { ...s, generating: false }
         })
-
-        const updatedScreens = await Promise.all(editPromises)
         updateLog(logId, t('editor.log.batchUpdated', { count: updatedScreens.length }), 'success')
 
         const dsLogId = addLog(t('editor.log.updatingDS'), 'generating')
@@ -876,18 +879,25 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     const logId = addLog(`Editing ${targets.length} selected screens: "${prompt}"`, 'generating')
 
     try {
-      const editPromises = targets.map(async (s) => {
-        const newHtml = await editDesign(s.html, prompt)
-        return { ...s, html: newHtml, generating: false }
-      })
-      const updated = await Promise.all(editPromises)
+      // SINGLE model call with all selected screens — model sees every
+      // screen at once so shared UI (bottom nav, top bar, palette) ends
+      // up consistent. Per-screen content stays unique.
+      const updated = await editDesignsBatch(
+        targets.map(s => ({ id: s.id, name: s.name, html: s.html })),
+        prompt,
+      )
+      const updatedById = new Map(updated.map(u => [u.id, u]))
+      const skipped = updated.filter(u => !u.changed).length
 
       const newScreens = project.screens.map(s => {
-        const u = updated.find(us => us.id === s.id)
-        return u || s
+        const u = updatedById.get(s.id)
+        return u ? { ...s, html: u.html, generating: false } : s
       })
 
-      updateLog(logId, `Updated ${updated.length} screens`, 'success')
+      const msg = skipped > 0
+        ? `Updated ${updated.length - skipped} screens (${skipped} unchanged or skipped by model)`
+        : `Updated ${updated.length} screens (consistent across all)`
+      updateLog(logId, msg, 'success')
       onProjectUpdate({ ...project, screens: newScreens, updatedAt: new Date().toLocaleDateString() })
     } catch (err: any) {
       updateLog(logId, `Batch edit failed: ${err.message}`, 'error')
@@ -1977,14 +1987,23 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                   addLog(`Batch editing ${selectedScreens.size} screens: "${prompt}"`, 'generating')
                   try {
                     const targets = project.screens.filter(s => selectedScreens.has(s.name))
-                    const promises = targets.map(s => editDesign(s.html, prompt).then(html => ({ ...s, html })))
-                    const updated = await Promise.all(promises)
+                    const updated = await editDesignsBatch(
+                      targets.map(s => ({ id: s.id, name: s.name, html: s.html })),
+                      prompt,
+                    )
+                    const byId = new Map(updated.map(u => [u.id, u]))
                     const newScreens = project.screens.map(s => {
-                      const u = updated.find(us => us.id === s.id)
-                      return u || s
+                      const u = byId.get(s.id)
+                      return u ? { ...s, html: u.html } : s
                     })
                     onProjectUpdate({ ...project, screens: newScreens, updatedAt: new Date().toLocaleDateString() })
-                    addLog(`Batch updated ${updated.length} screens`, 'success')
+                    const skipped = updated.filter(u => !u.changed).length
+                    addLog(
+                      skipped > 0
+                        ? `Batch updated ${updated.length - skipped} screens (${skipped} unchanged)`
+                        : `Batch updated ${updated.length} screens (consistent across all)`,
+                      'success'
+                    )
                   } catch (err: any) {
                     addLog(`Batch edit failed: ${err.message}`, 'error')
                   } finally {
@@ -2235,20 +2254,20 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                   `Headline font: ${ds.typography.headline.family}, Body font: ${ds.typography.body.family}\n` +
                   `Color scheme: ${ds.colorScheme || 'auto'}`
 
-                const editPromises = project.screens
-                  .filter(s => s.html && s.html.length > 100)
-                  .map(async (s) => {
-                    const newHtml = await editDesign(s.html,
-                      `Completely re-style this screen with the following design system. ` +
-                      `Change ALL colors, fonts, and component styles to match. ` +
-                      `Keep the exact same layout, content, and functionality. ` +
-                      `${dsDescription}`
-                    )
-                    return { ...s, html: newHtml, generating: false }
-                  })
-
-                const updatedScreens = await Promise.all(editPromises)
-                updateLog(logId, `Design system "${ds.name}" applied to ${updatedScreens.length} screens`, 'success')
+                const targets = project.screens.filter(s => s.html && s.html.length > 100)
+                const batchResult = await editDesignsBatch(
+                  targets.map(s => ({ id: s.id, name: s.name, html: s.html })),
+                  `Completely re-style this screen with the following design system. ` +
+                  `Change ALL colors, fonts, and component styles to match. ` +
+                  `Keep the exact same layout, content, and functionality. ` +
+                  `${dsDescription}`,
+                )
+                const dsResultById = new Map(batchResult.map(r => [r.id, r]))
+                const updatedScreens = project.screens.map(s => {
+                  const r = dsResultById.get(s.id)
+                  return r ? { ...s, html: r.html, generating: false } : { ...s, generating: false }
+                })
+                updateLog(logId, `Design system "${ds.name}" applied to ${batchResult.length} screens`, 'success')
 
                 onProjectUpdate({
                   ...project,
