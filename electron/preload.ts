@@ -103,6 +103,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getDesignSystem: () => ipcRenderer.invoke('live-edit:get-design-system'),
     updateFeedback: (message: string, type: 'success' | 'error' | 'generating', devMarkdown?: string) =>
       ipcRenderer.invoke('live-edit:update-feedback', message, type, devMarkdown),
+    setActivePlatform: (platform: 'web' | 'android' | null) =>
+      ipcRenderer.invoke('live-edit:set-active-platform', platform),
+    getActivePlatform: () => ipcRenderer.invoke('live-edit:get-active-platform'),
     close: () => ipcRenderer.invoke('live-edit:close'),
   },
 

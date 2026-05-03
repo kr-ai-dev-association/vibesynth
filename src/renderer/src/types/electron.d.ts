@@ -86,6 +86,8 @@ interface ElectronAPI {
     } | null>
     getDesignSystem: () => Promise<any | null>
     updateFeedback: (message: string, type: 'success' | 'error' | 'generating', devMarkdown?: string) => Promise<void>
+    setActivePlatform: (platform: 'web' | 'android' | null) => Promise<void>
+    getActivePlatform: () => Promise<'web' | 'android' | null>
     close: () => Promise<void>
   }
   shell: ElectronShellAPI

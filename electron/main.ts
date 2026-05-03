@@ -28,6 +28,11 @@ let devServerProjectId: string | null = null
 // devServerProjectId so the popup works for Android-only builds (where
 // no Vite dev server runs) and before the user has hit Run.
 let liveEditProjectId: string | null = null
+// 'web' = React/Vite live app on dev server, 'android' = APK on emulator.
+// Drives the platform indicator icon in the Live Edit popup header so the
+// user can tell at a glance where their next prompt will land. Set by the
+// renderer through liveEdit:set-active-platform after each successful Run.
+let liveEditActivePlatform: 'web' | 'android' | null = null
 
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
 
@@ -874,6 +879,11 @@ ipcMain.handle('live-edit:open', (_event, projectId?: string) => {
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f17;color:#e2e8f0;display:flex;flex-direction:column;height:100vh}
   .header{padding:10px 16px;border-bottom:1px solid #1e1e2e;display:flex;align-items:center;justify-content:space-between;-webkit-app-region:drag}
   .header .logo{font-size:13px;font-weight:600;color:#a5b4fc}
+  .platform-badge{-webkit-app-region:no-drag;display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:600;letter-spacing:0.3px;border:1px solid transparent;line-height:1.5}
+  .platform-badge .pf-icon{font-size:11px;line-height:1}
+  .platform-badge.web{background:rgba(34,197,94,0.12);color:#86efac;border-color:rgba(34,197,94,0.35)}
+  .platform-badge.android{background:rgba(251,146,60,0.14);color:#fdba74;border-color:rgba(251,146,60,0.4)}
+  .platform-badge.unknown{background:rgba(100,116,139,0.15);color:#94a3b8;border-color:rgba(100,116,139,0.3)}
   .mode-toggle{display:flex;gap:2px;background:#1a1a2e;border-radius:8px;padding:2px;-webkit-app-region:no-drag}
   .mode-btn{padding:4px 10px;font-size:11px;font-weight:600;border:none;border-radius:6px;cursor:pointer;transition:all 0.15s;background:transparent;color:#64748b}
   .mode-btn.active{color:white}
@@ -914,10 +924,29 @@ ipcMain.handle('live-edit:open', (_event, projectId?: string) => {
   .feedback code{background:#ffffff10;padding:1px 4px;border-radius:3px;font-size:10px}
   .status{font-size:11px;color:#64748b;text-align:center;padding:2px}
   .section-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#64748b;margin-bottom:4px}
+  /* ── File tree ── */
+  .tree-row{display:flex;align-items:center;gap:4px;padding:1px 4px;border-radius:3px;cursor:default;user-select:none;line-height:1.5}
+  .tree-row.dir{cursor:pointer}
+  .tree-row.dir:hover{background:#22243a}
+  .tree-row.file:hover{background:#15192a}
+  .tree-chevron{display:inline-block;width:10px;text-align:center;color:#64748b;font-size:8px;transition:transform 0.1s ease}
+  .tree-chevron.open{transform:rotate(90deg)}
+  .tree-children{padding-left:14px;display:none;border-left:1px dashed #2d2d44;margin-left:5px}
+  .tree-children.open{display:block}
+  .tree-icon{font-size:11px;width:14px;text-align:center}
+  .tree-name{font-family:'SF Mono',Menlo,monospace;font-size:10px}
+  .tree-platform{font-size:9px;font-weight:700;color:#a78bfa;margin:8px 0 3px;text-transform:uppercase;letter-spacing:0.5px}
+  .tree-platform:first-child{margin-top:0}
   @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 </style></head><body>
 <div class="header">
-  <span class="logo">✦ Live Edit</span>
+  <div style="display:flex;align-items:center;gap:8px">
+    <span class="logo">✦ Live Edit</span>
+    <span id="le-platform" class="platform-badge unknown" title="Active target — set after Run">
+      <span class="pf-icon">·</span>
+      <span class="pf-label">no target</span>
+    </span>
+  </div>
   <div class="mode-toggle">
     <button class="mode-btn designer active" id="le-mode-designer">🎨 Designer</button>
     <button class="mode-btn developer" id="le-mode-developer">💻 Developer</button>
@@ -1121,16 +1150,123 @@ ipcMain.handle('live-edit:open', (_event, projectId?: string) => {
     }
   }
 
+  // ── File tree helpers ──
+  function escapeHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function colorForFile(name) {
+    if (name.endsWith('.tsx') || name.endsWith('.ts')) return '#93c5fd';
+    if (name.endsWith('.css')) return '#f9a8d4';
+    if (name.endsWith('.json')) return '#fcd34d';
+    if (name.endsWith('.kt') || name.endsWith('.kts')) return '#fb923c';
+    if (name.endsWith('.xml')) return '#a3e635';
+    if (name.endsWith('.gradle') || name.endsWith('.properties')) return '#fda4af';
+    if (name.endsWith('.md')) return '#cbd5e1';
+    if (name.endsWith('.html')) return '#fdba74';
+    if (name.endsWith('.js') || name.endsWith('.mjs') || name.endsWith('.cjs')) return '#fde68a';
+    return '#94a3b8';
+  }
+  function buildTree(paths) {
+    const root = { dirs: {}, files: [] };
+    for (const p of paths) {
+      const parts = String(p).split(/[\\\\/]/).filter(Boolean);
+      if (parts.length === 0) continue;
+      let node = root;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const seg = parts[i];
+        if (!node.dirs[seg]) node.dirs[seg] = { dirs: {}, files: [] };
+        node = node.dirs[seg];
+      }
+      node.files.push(parts[parts.length - 1]);
+    }
+    return root;
+  }
+  function renderTreeNode(node) {
+    const dirNames = Object.keys(node.dirs).sort((a,b) => a.localeCompare(b));
+    const fileNames = node.files.slice().sort((a,b) => a.localeCompare(b));
+    let out = '';
+    for (const d of dirNames) {
+      out += '<div class="tree-row dir">'
+        + '<span class="tree-chevron">▶</span>'
+        + '<span class="tree-icon">📁</span>'
+        + '<span class="tree-name" style="color:#e2e8f0">' + escapeHtml(d) + '</span>'
+        + '</div>'
+        + '<div class="tree-children">' + renderTreeNode(node.dirs[d]) + '</div>';
+    }
+    for (const f of fileNames) {
+      out += '<div class="tree-row file">'
+        + '<span class="tree-chevron"></span>'
+        + '<span class="tree-icon">📄</span>'
+        + '<span class="tree-name" style="color:' + colorForFile(f) + '">' + escapeHtml(f) + '</span>'
+        + '</div>';
+    }
+    return out;
+  }
+
+  // Click delegation: toggle the .tree-children div that follows a .tree-row.dir.
+  // Default state is closed (no .open class), one click opens, another closes.
+  projectFiles.addEventListener('click', (e) => {
+    const row = e.target.closest && e.target.closest('.tree-row.dir');
+    if (!row || !projectFiles.contains(row)) return;
+    const next = row.nextElementSibling;
+    if (!next || !next.classList.contains('tree-children')) return;
+    const chev = row.querySelector('.tree-chevron');
+    next.classList.toggle('open');
+    if (chev) chev.classList.toggle('open');
+  });
+
   async function loadProjectInfo() {
     try {
       const info = await window.electronAPI?.liveEdit?.getProjectInfo?.();
-      if (info && projectPath && projectFiles) {
-        projectPath.textContent = info.path;
-        projectFiles.innerHTML = info.files
-          .map(f => '<div style="color:' + (f.endsWith('.tsx') ? '#93c5fd' : f.endsWith('.css') ? '#f9a8d4' : f.endsWith('.json') ? '#fcd34d' : '#94a3b8') + '">' + f + '</div>')
-          .join('');
+      if (!info || !projectPath || !projectFiles) return;
+      const platforms = (info.platforms && info.platforms.length > 0)
+        ? info.platforms
+        : [{ platform: 'project', path: info.path, files: info.files || [] }];
+      // Show all platform paths on top (one per line) so user can see both
+      // react/ and android/ workspaces when both exist on disk.
+      projectPath.textContent = platforms.map(p => p.path).join('\\n');
+      let html = '';
+      for (const p of platforms) {
+        if (platforms.length > 1) {
+          html += '<div class="tree-platform">' + escapeHtml(p.platform) + '</div>';
+        }
+        html += renderTreeNode(buildTree(p.files || []));
       }
+      projectFiles.innerHTML = html;
     } catch {}
+  }
+
+  // ── Platform indicator (web vs android) ──
+  // Renderer pushes the active platform via live-edit:set-active-platform
+  // (which executes window.__leSetPlatform). On popup load we also pull
+  // the current value once via getActivePlatform so reopens stay correct.
+  const platformBadge = document.getElementById('le-platform');
+  function applyPlatform(p) {
+    if (!platformBadge) return;
+    platformBadge.classList.remove('web','android','unknown');
+    const iconEl = platformBadge.querySelector('.pf-icon');
+    const labelEl = platformBadge.querySelector('.pf-label');
+    if (p === 'web') {
+      platformBadge.classList.add('web');
+      platformBadge.title = 'Editing the React/Vite live app — changes hot-reload in the browser window';
+      if (iconEl) iconEl.textContent = '🌐';
+      if (labelEl) labelEl.textContent = 'Web';
+    } else if (p === 'android') {
+      platformBadge.classList.add('android');
+      platformBadge.title = 'Editing the Android Kotlin app — changes rebuild + reinstall to the emulator';
+      if (iconEl) iconEl.textContent = '🤖';
+      if (labelEl) labelEl.textContent = 'Android';
+    } else {
+      platformBadge.classList.add('unknown');
+      platformBadge.title = 'No active target yet — hit Run on the main canvas';
+      if (iconEl) iconEl.textContent = '·';
+      if (labelEl) labelEl.textContent = 'no target';
+    }
+  }
+  window.__leSetPlatform = applyPlatform;
+  applyPlatform(null);
+  if (window.electronAPI?.liveEdit?.getActivePlatform) {
+    window.electronAPI.liveEdit.getActivePlatform().then(applyPlatform).catch(() => {});
   }
 
   // Init mode from localStorage
@@ -1190,6 +1326,7 @@ ipcMain.handle('live-edit:open', (_event, projectId?: string) => {
   liveEditWindow.on('closed', () => {
     liveEditWindow = null
     liveEditProjectId = null
+    liveEditActivePlatform = null
   })
 })
 
@@ -1199,6 +1336,23 @@ ipcMain.handle('live-edit:get-design-system', () => {
   const project = db.getProject(devServerProjectId)
   return project?.designSystem || null
 })
+
+// Renderer tells us which platform the user is actively editing right
+// now (web dev server vs android emulator). We stash it and push it to
+// the Live Edit popup so its header icon always reflects the truth.
+ipcMain.handle('live-edit:set-active-platform', (_event, platform: 'web' | 'android' | null) => {
+  liveEditActivePlatform = platform
+  if (liveEditWindow) {
+    const escaped = JSON.stringify(platform)
+    liveEditWindow.webContents.executeJavaScript(`
+      (function(){
+        if (typeof window.__leSetPlatform === 'function') window.__leSetPlatform(${escaped});
+      })();
+    `).catch(() => {})
+  }
+})
+
+ipcMain.handle('live-edit:get-active-platform', () => liveEditActivePlatform)
 
 // Get project workspace info for Developer mode display.
 // Resolves the active project id from (priority): live-edit-bound id >

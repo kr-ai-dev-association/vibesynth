@@ -707,6 +707,19 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     addLog('Android Live 모드 종료', 'info')
   }
 
+  // Push the active platform to the Live Edit popup whenever the run mode
+  // changes. The popup uses this to render its header indicator (web vs
+  // android) and we use it to decide where to dispatch the next prompt.
+  // Order matters: android wins over web because Android Live mode is the
+  // explicit currently-active rebuild loop.
+  useEffect(() => {
+    const platform: 'web' | 'android' | null =
+      androidLiveMode ? 'android'
+      : isRunning ? 'web'
+      : null
+    window.electronAPI?.liveEdit.setActivePlatform?.(platform).catch(() => {})
+  }, [androidLiveMode, isRunning])
+
   // Watch: when Live mode is on and screen.html changes, debounce + rebuild.
   // Skips: while a build is already in flight, or if the html content hasn't
   // actually changed (project.updatedAt is the cheaper change-signal).
@@ -1286,7 +1299,60 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
 
   useEffect(() => {
     const cleanup = window.electronAPI?.onLiveEditRequest(async (prompt: string) => {
-      if (!devServerUrl || !project.id) return
+      if (!project.id) return
+
+      // ─── Android branch: edit screen HTMLs, let the auto-rebuild useEffect
+      // pick up project.screens changes, then runOnAndroid pushes a new APK
+      // to the emulator. Per-screen edit goes through editDesignsBatch on
+      // every selected screen (or the currently focused one if none) —
+      // model sees siblings so shared UI stays consistent.
+      if (androidLiveMode) {
+        addLog(t('editor.log.liveEditRequest', { prompt }), 'generating')
+        try {
+          const targets = selectedScreens.size > 0
+            ? project.screens.filter(s => selectedScreens.has(s.name))
+            : selectedScreen
+              ? project.screens.filter(s => s.name === selectedScreen)
+              : project.screens
+          if (targets.length === 0) {
+            const msg = '편집할 스크린이 없습니다.'
+            addLog(msg, 'error')
+            window.electronAPI?.liveEdit.updateFeedback(msg, 'error')
+            window.electronAPI?.sendLiveEditResult({ success: false, message: msg })
+            return
+          }
+
+          const batch = await editDesignsBatch(
+            targets.map(s => ({ id: s.id, name: s.name, html: s.html })),
+            prompt,
+          )
+          const byId = new Map(batch.map(b => [b.id, b]))
+          const newScreens = project.screens.map(s => {
+            const u = byId.get(s.id)
+            return u ? { ...s, html: u.html, generating: false } : s
+          })
+          // Bump updatedAt so the androidLiveMode useEffect treats it as a
+          // change and triggers the debounced runOnAndroid.
+          onProjectUpdate({ ...project, screens: newScreens, updatedAt: new Date().toLocaleDateString() })
+
+          const skipped = batch.filter(b => !b.changed).length
+          const summary = skipped > 0
+            ? `Updated ${batch.length - skipped} screens (${skipped} unchanged) — Android 재빌드 자동 트리거`
+            : `Updated ${batch.length} screens — Android 재빌드 자동 트리거`
+          addLog(summary, 'success')
+          window.electronAPI?.liveEdit.updateFeedback(summary, 'success')
+          window.electronAPI?.sendLiveEditResult({ success: true, message: summary })
+        } catch (err: any) {
+          const msg = err?.message || String(err)
+          addLog(`Live Edit (Android) 실패: ${msg}`, 'error')
+          window.electronAPI?.liveEdit.updateFeedback(msg, 'error')
+          window.electronAPI?.sendLiveEditResult({ success: false, message: msg })
+        }
+        return
+      }
+
+      // ─── Web branch (original): patch src/App.tsx and let Vite HMR reload.
+      if (!devServerUrl) return
       addLog(t('editor.log.liveEditRequest', { prompt }), 'generating')
 
       const targetFile = 'src/App.tsx'
@@ -1338,7 +1404,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       }
     })
     return () => cleanup?.()
-  }, [devServerUrl, project.id, project.screens, feedbackMode, locale]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [devServerUrl, project, project.id, project.screens, feedbackMode, locale, androidLiveMode, selectedScreens, selectedScreen]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleStop = async () => {
     window.electronAPI?.closeLiveWindow()
