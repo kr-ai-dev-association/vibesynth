@@ -56,14 +56,18 @@ export function AppearanceToggle() {
     { value: 'dark', label: t('appearance.dark'), icon: <MoonIcon /> },
   ]
 
+  const currentLabel = theme === 'dark' ? t('appearance.dark') : theme === 'light' ? t('appearance.light') : t('appearance.system')
+
   return (
     <div ref={menuRef} className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors text-[11px] font-semibold text-neutral-700 dark:text-neutral-200"
         title={t('appearance.title')}
       >
         {theme === 'dark' ? <MoonIcon /> : theme === 'light' ? <SunIcon /> : <MonitorIcon />}
+        <span>{currentLabel}</span>
+        <ChevronDownIcon />
       </button>
 
       {isOpen && (
@@ -96,4 +100,7 @@ function MonitorIcon() {
 }
 function CheckIcon({ className }: { className?: string }) {
   return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6L9 17l-5-5" /></svg>
+}
+function ChevronDownIcon() {
+  return <svg className="w-3 h-3 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6" /></svg>
 }

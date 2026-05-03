@@ -37,6 +37,7 @@ export function ScreenContextToolbar({ screenName, onAction }: ScreenContextTool
           { label: t('toolbar.regenerate'), shortcut: '⇧R', action: 'regenerate' },
           { label: t('toolbar.desktopWebVersion'), action: 'desktop-web' },
           { label: t('toolbar.predictiveHeatmap'), action: 'heatmap' },
+          { label: t('toolbar.regenerateHeatmap'), action: 'heatmap-regenerate' },
         ]}
         onAction={(action) => { onAction(action); setOpenMenu(null) }}
       />

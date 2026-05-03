@@ -98,6 +98,10 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   const [selectedScreen, setSelectedScreen] = useState<string | null>(null)
   const [selectedScreens, setSelectedScreens] = useState<Set<string>>(new Set())
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
+  const [elementContextMenu, setElementContextMenu] = useState<{
+    x: number; y: number; screenName: string
+    info: { cssPath: string; tagName: string; textPreview: string; outerHtml: string }
+  } | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [logEntries, setLogEntries] = useState<AgentLogEntry[]>([])
   const [showCodeModal, setShowCodeModal] = useState(false)
@@ -552,30 +556,60 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     const logId = addLog(t('editor.log.editingElement', { tag: selectedElement.tagName, screen: screen.name, prompt }), 'generating')
 
     try {
-      // <img> target → generate a new image and patch src (natural-language prompts work).
-      // Skip only if prompt is clearly a visual-property edit (rounded, border, shadow, size, color).
+      // Image-aware path: triggers when target is <img>, OR when target is a
+      // container element AND the prompt mentions images. For containers we
+      // either replace an existing child <img>'s src, or inject a fresh <img>.
       const isImgTarget = selectedElement.tagName === 'img'
       const isPureStyleEdit = /^(?:make\s+)?(?:rounded|round|circular|smaller|larger|bigger|wider|taller|border|shadow|brightness|contrast|opacity|fade|blur|grayscale|색상|크기|테두리|그림자|둥글게)\b/i.test(prompt.trim())
-      if (isImgTarget && !isPureStyleEdit) {
+      const mentionsImage = /(image|img|photo|picture|logo|icon|banner|illustration|thumbnail|avatar|이미지|사진|로고|아이콘|배너|일러스트|썸네일|프로필\s*사진)/i.test(prompt)
+      const containerCanHostImage = ['div','section','figure','article','aside','main','header','footer','span','a','button','li'].includes(selectedElement.tagName)
+      const useImageGen = !isPureStyleEdit && (isImgTarget || (containerCanHostImage && mentionsImage))
+
+      if (useImageGen) {
         const { generateImage } = await import('../lib/image-gen')
         const aspect = deriveAspectFromOuterHtml(selectedElement.outerHtml)
         updateLog(logId, t('editor.log.generatingImages'), 'generating')
         const img = await generateImage(prompt, { aspectRatio: aspect, style: 'photo' })
         if (img) {
           const doc = new DOMParser().parseFromString(screen.html, 'text/html')
-          const target = doc.querySelector(selectedElement.cssPath) as HTMLImageElement | null
+          const target = doc.querySelector(selectedElement.cssPath) as HTMLElement | null
           if (target) {
-            target.setAttribute('src', img.dataUrl)
-            if (target.hasAttribute('srcset')) target.removeAttribute('srcset')
-            const newHtml = '<!DOCTYPE html>' + doc.documentElement.outerHTML
-            updateLog(logId, t('editor.log.updatedElement', { name: screen.name }), 'success')
-            const updatedScreens = project.screens.map((s) =>
-              s.id === screen.id ? { ...s, html: newHtml, generating: false } : s
-            )
-            onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
-            setSelectedElement(null)
-            return
+            let applied = false
+            if (target.tagName === 'IMG') {
+              target.setAttribute('src', img.dataUrl)
+              if (target.hasAttribute('srcset')) target.removeAttribute('srcset')
+              applied = true
+            } else {
+              // Container: replace existing child <img>, or inject one.
+              const childImg = target.querySelector('img')
+              if (childImg) {
+                childImg.setAttribute('src', img.dataUrl)
+                if (childImg.hasAttribute('srcset')) childImg.removeAttribute('srcset')
+                applied = true
+              } else {
+                const newImg = doc.createElement('img')
+                newImg.setAttribute('src', img.dataUrl)
+                newImg.setAttribute('alt', prompt.slice(0, 80))
+                newImg.setAttribute('style', 'max-width:100%;height:auto;display:block;')
+                target.appendChild(newImg)
+                applied = true
+              }
+            }
+            if (applied) {
+              const newHtml = '<!DOCTYPE html>' + doc.documentElement.outerHTML
+              updateLog(logId, t('editor.log.updatedElement', { name: screen.name }), 'success')
+              const updatedScreens = project.screens.map((s) =>
+                s.id === screen.id ? { ...s, html: newHtml, generating: false } : s
+              )
+              onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
+              setSelectedElement(null)
+              return
+            }
+          } else {
+            updateLog(logId, `Element selector missed: ${selectedElement.cssPath} — falling back to LLM edit`, 'info')
           }
+        } else {
+          updateLog(logId, 'Image generation returned no result — falling back to LLM edit', 'info')
         }
         // Image gen failed or selector miss → fall through to text edit
       }
@@ -597,8 +631,9 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     }
   }
 
-  const handleToggleHeatmap = async () => {
-    if (heatmapMode) {
+  const handleToggleHeatmap = async (forceRegenerate = false) => {
+    // Plain toggle (no force): hide if currently shown.
+    if (heatmapMode && !forceRegenerate) {
       setHeatmapMode(false)
       setHeatmapActionMenu(null)
       addLog(t('editor.log.exitedHeatmap'), 'info')
@@ -613,10 +648,20 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     const screen = project.screens.find((s) => s.name === selectedScreen)
     if (!screen) return
 
-    if (heatmapData.has(screen.id)) {
+    // Cached path: only when NOT forcing a regenerate.
+    if (!forceRegenerate && heatmapData.has(screen.id)) {
       setHeatmapMode(true)
       addLog(t('editor.log.cachedHeatmap', { name: screen.name }), 'info')
       return
+    }
+
+    // Forcing: drop cached data so the new probe re-runs cleanly.
+    if (forceRegenerate) {
+      setHeatmapData((prev) => {
+        const next = new Map(prev)
+        next.delete(screen.id)
+        return next
+      })
     }
 
     setHeatmapLoading(true)
@@ -718,11 +763,10 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         onProjectUpdate({ ...project, screens: updatedScreens, updatedAt: new Date().toLocaleDateString() })
       }
 
-      setHeatmapData((prev) => {
-        const next = new Map(prev)
-        next.delete(screen.id)
-        return next
-      })
+      // Keep the heatmap visible after applying an action so the user can
+      // continue applying effects to other zones. The HTML may have shifted
+      // slightly (especially for AI actions) — the rect re-probe in
+      // ScreenCard's heatmap effect picks up new positions on iframe reload.
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       updateLog(logId, t('editor.log.actionFailed', { action, error: message }), 'error')
@@ -970,6 +1014,9 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         break
       case 'heatmap':
         handleToggleHeatmap()
+        break
+      case 'heatmap-regenerate':
+        handleToggleHeatmap(true)
         break
       case 'edit':
         setEditMode(!editMode)
@@ -1909,6 +1956,26 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                         setSelectedElement(info)
                         addLog(t('editor.log.selectedElement', { tag: info.tagName, text: info.textPreview.slice(0, 40) }), 'info')
                       }}
+                      onElementDeselect={() => setSelectedElement(null)}
+                      onElementContextMenu={(info) => {
+                        setSelectedElement({
+                          cssPath: info.cssPath,
+                          tagName: info.tagName,
+                          textPreview: info.textPreview,
+                          outerHtml: info.outerHtml,
+                        })
+                        setElementContextMenu({
+                          x: info.x,
+                          y: info.y,
+                          screenName: screen.name,
+                          info: {
+                            cssPath: info.cssPath,
+                            tagName: info.tagName,
+                            textPreview: info.textPreview,
+                            outerHtml: info.outerHtml,
+                          },
+                        })
+                      }}
                       onTextEdit={(screenId, newHtml, editInfo) => {
                         const updatedScreens = project.screens.map(s =>
                           s.id === screenId ? { ...s, html: newHtml } : s
@@ -2238,6 +2305,61 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         />
       )}
 
+      {/* Element context menu (edit-mode right-click) */}
+      {elementContextMenu && (
+        <ElementContextMenu
+          x={elementContextMenu.x}
+          y={elementContextMenu.y}
+          info={elementContextMenu.info}
+          onAction={(action) => {
+            const info = elementContextMenu.info
+            const screenName = elementContextMenu.screenName
+            setElementContextMenu(null)
+            if (action === 'copy-html') {
+              navigator.clipboard.writeText(info.outerHtml).catch(() => {})
+              addLog(`Copied ${info.tagName} HTML`, 'info')
+            } else if (action === 'edit-ai') {
+              // Selected element already set; user can now use the prompt bar to edit it.
+              addLog(`Use the prompt bar to edit ${info.tagName}`, 'info')
+            } else if (action === 'delete') {
+              const screen = project.screens.find(s => s.name === screenName)
+              if (!screen) return
+              try {
+                const doc = new DOMParser().parseFromString(screen.html, 'text/html')
+                const node = doc.querySelector(info.cssPath)
+                if (node) {
+                  node.remove()
+                  const newHtml = '<!DOCTYPE html>' + doc.documentElement.outerHTML
+                  const updated = project.screens.map(s => s.id === screen.id ? { ...s, html: newHtml } : s)
+                  onProjectUpdate({ ...project, screens: updated, updatedAt: new Date().toLocaleDateString() })
+                  setSelectedElement(null)
+                  addLog(`Deleted ${info.tagName}`, 'success')
+                }
+              } catch (e: any) {
+                addLog(`Delete failed: ${e?.message || e}`, 'error')
+              }
+            } else if (action === 'duplicate') {
+              const screen = project.screens.find(s => s.name === screenName)
+              if (!screen) return
+              try {
+                const doc = new DOMParser().parseFromString(screen.html, 'text/html')
+                const node = doc.querySelector(info.cssPath)
+                if (node && node.parentNode) {
+                  node.parentNode.insertBefore(node.cloneNode(true), node.nextSibling)
+                  const newHtml = '<!DOCTYPE html>' + doc.documentElement.outerHTML
+                  const updated = project.screens.map(s => s.id === screen.id ? { ...s, html: newHtml } : s)
+                  onProjectUpdate({ ...project, screens: updated, updatedAt: new Date().toLocaleDateString() })
+                  addLog(`Duplicated ${info.tagName}`, 'success')
+                }
+              } catch (e: any) {
+                addLog(`Duplicate failed: ${e?.message || e}`, 'error')
+              }
+            }
+          }}
+          onClose={() => setElementContextMenu(null)}
+        />
+      )}
+
       {/* Heatmap action menu */}
       {heatmapActionMenu && (
         <HeatmapActionMenu
@@ -2272,18 +2394,41 @@ const EDIT_MODE_SCRIPT = `
 <script>
 (function() {
   let hoverEl = null;
+  let selectedEl = null;
   let editingEl = null;
   const overlay = document.createElement('div');
   overlay.id = '__vs_overlay';
-  overlay.style.cssText = 'position:fixed;pointer-events:none;border:2px solid #3b82f6;background:rgba(59,130,246,0.08);z-index:99999;transition:all 0.1s;display:none;border-radius:4px;';
+  overlay.style.cssText = 'position:fixed;pointer-events:none;border:2px dashed #3b82f6;background:rgba(59,130,246,0.06);z-index:99998;transition:all 0.1s;display:none;border-radius:4px;';
   document.body.appendChild(overlay);
+
+  // Persistent selection overlay (separate from hover overlay).
+  const selOverlay = document.createElement('div');
+  selOverlay.id = '__vs_selected';
+  selOverlay.style.cssText = 'position:fixed;pointer-events:none;border:2px solid #22c55e;background:rgba(34,197,94,0.08);z-index:99999;display:none;border-radius:4px;box-shadow:0 0 0 1px rgba(255,255,255,0.6);';
+  document.body.appendChild(selOverlay);
 
   const label = document.createElement('div');
   label.id = '__vs_label';
   label.style.cssText = 'position:fixed;z-index:100000;background:#3b82f6;color:#fff;font:500 11px/1.3 system-ui;padding:2px 6px;border-radius:4px;pointer-events:none;display:none;white-space:nowrap;';
   document.body.appendChild(label);
 
-  function isVsEl(el) { return el && (el.id === '__vs_overlay' || el.id === '__vs_label' || el.id === '__vs_edit_hint'); }
+  function isVsEl(el) { return el && (el.id === '__vs_overlay' || el.id === '__vs_selected' || el.id === '__vs_label' || el.id === '__vs_edit_hint'); }
+
+  function repositionSelOverlay() {
+    if (!selectedEl || !document.contains(selectedEl)) {
+      selOverlay.style.display = 'none';
+      selectedEl = null;
+      return;
+    }
+    const r = selectedEl.getBoundingClientRect();
+    selOverlay.style.display = 'block';
+    selOverlay.style.left = r.left + 'px';
+    selOverlay.style.top = r.top + 'px';
+    selOverlay.style.width = r.width + 'px';
+    selOverlay.style.height = r.height + 'px';
+  }
+  window.addEventListener('scroll', repositionSelOverlay, true);
+  window.addEventListener('resize', repositionSelOverlay);
 
   function cssPath(el) {
     const parts = [];
@@ -2340,13 +2485,7 @@ const EDIT_MODE_SCRIPT = `
     hoverEl = null;
   });
 
-  // Single click: select element (send info to parent)
-  document.addEventListener('click', function(e) {
-    if (editingEl) return;
-    const t = e.target;
-    if (isVsEl(t)) return;
-    e.preventDefault();
-    e.stopPropagation();
+  function notifySelected(t) {
     const path = cssPath(t);
     const text = (t.textContent || '').trim().slice(0, 80);
     const outer = t.outerHTML.slice(0, 500);
@@ -2357,29 +2496,14 @@ const EDIT_MODE_SCRIPT = `
       textPreview: text,
       outerHtml: outer,
     }, '*');
+  }
 
-    // Visual feedback: flash green border
-    overlay.style.borderColor = '#22c55e';
-    overlay.style.background = 'rgba(34,197,94,0.1)';
-    setTimeout(function() {
-      overlay.style.borderColor = '#3b82f6';
-      overlay.style.background = 'rgba(59,130,246,0.08)';
-    }, 400);
-  }, true);
+  function enterTextEdit(t) {
+    if (!isTextElement(t)) return false;
 
-  // Double click: enable inline text editing
-  document.addEventListener('dblclick', function(e) {
-    const t = e.target;
-    if (isVsEl(t)) return;
-    if (!isTextElement(t)) return;
-    e.preventDefault();
-    e.stopPropagation();
-
-    // Save original for diff
     var originalText = t.textContent;
     var originalPath = cssPath(t);
 
-    // Enter edit mode
     editingEl = t;
     t.contentEditable = 'true';
     t.focus();
@@ -2388,8 +2512,8 @@ const EDIT_MODE_SCRIPT = `
     t.style.borderRadius = '4px';
     overlay.style.display = 'none';
     label.style.display = 'none';
+    selOverlay.style.display = 'none';
 
-    // Select all text for easy replacement
     var range = document.createRange();
     range.selectNodeContents(t);
     var sel = window.getSelection();
@@ -2403,11 +2527,11 @@ const EDIT_MODE_SCRIPT = `
       editingEl = null;
       t.removeEventListener('blur', onBlur);
       t.removeEventListener('keydown', onKey);
+      // Restore selection overlay around the (now-edited) element
+      if (selectedEl === t) repositionSelOverlay();
 
       var newText = t.textContent;
       if (newText !== originalText) {
-        // Get full updated HTML of the document
-        // Remove our injected VS elements before capturing
         var vsEls = document.querySelectorAll('[id^=__vs_]');
         vsEls.forEach(function(el) { el.style.display = 'none'; });
         var scripts = document.querySelectorAll('script');
@@ -2430,10 +2554,85 @@ const EDIT_MODE_SCRIPT = `
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finishEdit(); }
       if (e.key === 'Escape') { t.textContent = originalText; finishEdit(); }
     }
-
     t.addEventListener('blur', onBlur);
     t.addEventListener('keydown', onKey);
+    return true;
+  }
+
+  // Single click: first click selects, second click on the same element enters edit mode.
+  document.addEventListener('click', function(e) {
+    if (editingEl) return;
+    const t = e.target;
+    if (isVsEl(t)) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (selectedEl === t) {
+      // Second click on same element → enter edit mode if it's a text leaf.
+      if (enterTextEdit(t)) return;
+    }
+
+    selectedEl = t;
+    repositionSelOverlay();
+    notifySelected(t);
   }, true);
+
+  // Double click: shortcut → select + immediately enter edit mode.
+  document.addEventListener('dblclick', function(e) {
+    const t = e.target;
+    if (isVsEl(t)) return;
+    if (!isTextElement(t)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    selectedEl = t;
+    repositionSelOverlay();
+    notifySelected(t);
+    enterTextEdit(t);
+  }, true);
+
+  // Right-click on selected element → ask parent to show element context menu.
+  document.addEventListener('contextmenu', function(e) {
+    if (editingEl) return; // editing has its own native menu
+    const t = e.target;
+    if (isVsEl(t)) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Auto-select on right-click if not already selected (matches IDE-style menus).
+    if (selectedEl !== t) {
+      selectedEl = t;
+      repositionSelOverlay();
+      notifySelected(t);
+    }
+    window.parent.postMessage({
+      type: '__vs_element_context_menu',
+      x: e.clientX,
+      y: e.clientY,
+      cssPath: cssPath(t),
+      tagName: t.tagName.toLowerCase(),
+      textPreview: (t.textContent || '').trim().slice(0, 80),
+      outerHtml: t.outerHTML.slice(0, 500),
+    }, '*');
+  }, true);
+
+  // ESC clears selection.
+  document.addEventListener('keydown', function(e) {
+    if (editingEl) return;
+    if (e.key === 'Escape' && selectedEl) {
+      selectedEl = null;
+      selOverlay.style.display = 'none';
+      window.parent.postMessage({ type: '__vs_element_deselected' }, '*');
+    }
+  });
+
+  // Allow parent to set / clear selection programmatically (e.g. when sidebar deselects).
+  window.addEventListener('message', function(ev) {
+    if (!ev.data) return;
+    if (ev.data.type === '__vs_clear_selection') {
+      selectedEl = null;
+      selOverlay.style.display = 'none';
+    }
+  });
 })();
 </script>`;
 
@@ -2500,12 +2699,14 @@ function intensityBorder(intensity: number): string {
 
 function ScreenCard({
   screen, width, minHeight, isSelected, isMultiSelected, deviceType, editMode, heatmapMode, heatmapZones,
-  onClick, onContextMenu, onElementSelect, onTextEdit, onHeatmapZoneClick, onHeightMeasured, onResize,
+  onClick, onContextMenu, onElementSelect, onElementContextMenu, onElementDeselect, onTextEdit, onHeatmapZoneClick, onHeightMeasured, onResize,
 }: {
   screen: Screen; width: number; minHeight: number; deviceType: 'app' | 'web' | 'tablet'
   isSelected?: boolean; isMultiSelected?: boolean; editMode?: boolean; heatmapMode?: boolean; heatmapZones?: HeatmapZone[]
   onClick?: () => void; onContextMenu?: (e: React.MouseEvent) => void
   onElementSelect?: (info: { cssPath: string; tagName: string; textPreview: string; outerHtml: string }) => void
+  onElementContextMenu?: (info: { x: number; y: number; cssPath: string; tagName: string; textPreview: string; outerHtml: string }) => void
+  onElementDeselect?: () => void
   onTextEdit?: (screenId: string, newHtml: string, editInfo: { cssPath: string; oldText: string; newText: string }) => void
   onHeatmapZoneClick?: (zone: HeatmapZone, x: number, y: number) => void
   onHeightMeasured?: (screenId: string, height: number) => void
@@ -2630,8 +2831,30 @@ function ScreenCard({
   useEffect(() => {
     if (!isEditable) return
     const handler = (e: MessageEvent) => {
+      // Only handle messages from THIS iframe (multiple cards on canvas).
+      if (iframeRef.current && e.source !== iframeRef.current.contentWindow) return
       if (e.data?.type === '__vs_element_selected' && onElementSelect) {
         onElementSelect({
+          cssPath: e.data.cssPath,
+          tagName: e.data.tagName,
+          textPreview: e.data.textPreview,
+          outerHtml: e.data.outerHtml,
+        })
+      }
+      if (e.data?.type === '__vs_element_deselected' && onElementDeselect) {
+        onElementDeselect()
+      }
+      if (e.data?.type === '__vs_element_context_menu' && onElementContextMenu) {
+        // Translate iframe-local coords to viewport coords.
+        const rect = iframeRef.current?.getBoundingClientRect()
+        const offsetX = rect ? rect.left : 0
+        const offsetY = rect ? rect.top : 0
+        // Iframe content may be scaled (transform: scale(s)) — apply scale.
+        const scaleX = rect && iframeRef.current ? rect.width / iframeRef.current.offsetWidth : 1
+        const scaleY = rect && iframeRef.current ? rect.height / iframeRef.current.offsetHeight : 1
+        onElementContextMenu({
+          x: offsetX + (e.data.x || 0) * scaleX,
+          y: offsetY + (e.data.y || 0) * scaleY,
           cssPath: e.data.cssPath,
           tagName: e.data.tagName,
           textPreview: e.data.textPreview,
@@ -2648,18 +2871,26 @@ function ScreenCard({
     }
     window.addEventListener('message', handler)
     return () => window.removeEventListener('message', handler)
-  }, [isEditable, onElementSelect, onTextEdit, screen.id])
+  }, [isEditable, onElementSelect, onElementContextMenu, onElementDeselect, onTextEdit, screen.id])
 
-  // Resolve heatmap zone rects via iframe postMessage
+  // Resolve heatmap zone rects via iframe postMessage.
+  // Re-probes whenever screen.html changes (e.g. after applying an effect
+  // to one zone) so remaining zones snap to their new positions instead of
+  // showing stale rects from before the edit.
   const [resolvedZones, setResolvedZones] = useState<HeatmapZone[]>([])
 
   useEffect(() => {
-    if (!showHeatmap || !heatmapZones) { setResolvedZones([]); return }
+    if (!showHeatmap || !heatmapZones || heatmapZones.length === 0) {
+      setResolvedZones([])
+      return
+    }
 
-    const hasUnresolved = heatmapZones.some(z => z.rect.w === 0 && z.rect.h === 0)
-    if (!hasUnresolved) { setResolvedZones(heatmapZones); return }
+    // Show what we have immediately — even if rects are stale, the user
+    // sees the heatmap until the probe response refreshes positions.
+    setResolvedZones(heatmapZones)
 
     const handler = (e: MessageEvent) => {
+      if (iframeRef.current && e.source !== iframeRef.current.contentWindow) return
       if (e.data?.type === '__vs_heatmap_rects') {
         const rects: { cssPath: string; x: number; y: number; w: number; h: number }[] = e.data.rects
         const updated = heatmapZones.map(zone => {
@@ -2685,7 +2916,7 @@ function ScreenCard({
       window.removeEventListener('message', handler)
       clearTimeout(timer)
     }
-  }, [showHeatmap, heatmapZones])
+  }, [showHeatmap, heatmapZones, screen.html])
 
   const HEIGHT_OVERRIDE_CSS = `<style data-vs-height-fix>
 html,body{height:auto!important;max-height:none!important;overflow:visible!important;min-height:0!important;}
@@ -2826,11 +3057,9 @@ body>*{min-height:0!important;}
             ? 'border-orange-500 shadow-lg shadow-orange-500/30 ring-2 ring-orange-500/20'
             : isEditable
             ? 'border-blue-500 shadow-lg shadow-blue-500/30 ring-2 ring-blue-500/20'
-            : isMultiSelected
-            ? 'border-violet-500 shadow-lg shadow-violet-500/20 ring-2 ring-violet-500/20'
-            : isSelected
-            ? 'border-blue-500 shadow-lg shadow-blue-500/20'
-            : 'border-neutral-200 dark:border-neutral-600 hover:border-neutral-400'
+            : (isSelected || isMultiSelected)
+            ? 'border-blue-900 dark:border-yellow-300 ring-1 ring-blue-900 dark:ring-yellow-300 ring-offset-4 ring-offset-neutral-50 dark:ring-offset-neutral-900 shadow-md shadow-blue-900/25 dark:shadow-yellow-300/25'
+            : 'border-neutral-200 dark:border-neutral-600 hover:border-neutral-400 dark:hover:border-neutral-400'
         }`}
         style={{ width: displayWidth, height: displayHeight }}
       >
@@ -3119,6 +3348,59 @@ function MonitorSmallIcon() {
 }
 function HeatmapSmallIcon() {
   return <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><circle cx="12" cy="12" r="7" opacity="0.5" /><circle cx="12" cy="12" r="10" opacity="0.25" /></svg>
+}
+
+function ElementContextMenu({ x, y, info, onAction, onClose }: {
+  x: number; y: number
+  info: { cssPath: string; tagName: string; textPreview: string; outerHtml: string }
+  onAction: (action: string) => void; onClose: () => void
+}) {
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose()
+    }
+    const escHandler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('mousedown', handler)
+    document.addEventListener('keydown', escHandler)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      document.removeEventListener('keydown', escHandler)
+    }
+  }, [onClose])
+
+  const clampedX = Math.min(x, window.innerWidth - 240)
+  const clampedY = Math.min(y, window.innerHeight - 220)
+
+  const items = [
+    { label: 'Edit with AI', action: 'edit-ai', shortcut: '⏎' },
+    { label: 'Duplicate', action: 'duplicate', shortcut: '⌘D' },
+    { label: 'Copy HTML', action: 'copy-html', shortcut: '⌘C' },
+    { label: 'Delete', action: 'delete', shortcut: '⌫', danger: true },
+  ]
+
+  return (
+    <div
+      ref={menuRef}
+      className="fixed z-50 w-56 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 shadow-xl py-1.5"
+      style={{ left: clampedX, top: clampedY }}
+    >
+      <div className="px-3 py-1.5 mb-1 border-b border-neutral-200 dark:border-neutral-700 text-[11px] uppercase tracking-wide text-neutral-500 dark:text-neutral-400 font-mono">
+        &lt;{info.tagName}&gt;{info.textPreview ? ` · ${info.textPreview.slice(0, 22)}${info.textPreview.length > 22 ? '…' : ''}` : ''}
+      </div>
+      {items.map(it => (
+        <button
+          key={it.action}
+          onClick={() => onAction(it.action)}
+          className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between hover:bg-neutral-100 dark:hover:bg-neutral-700 ${it.danger ? 'text-red-600 dark:text-red-400' : 'text-neutral-800 dark:text-neutral-200'}`}
+        >
+          <span>{it.label}</span>
+          {it.shortcut && <span className="text-[11px] text-neutral-400 dark:text-neutral-500 font-mono">{it.shortcut}</span>}
+        </button>
+      ))}
+    </div>
+  )
 }
 
 function HeatmapActionMenu({ x, y, zone, onAction, onClose }: {
