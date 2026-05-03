@@ -71,6 +71,7 @@ const _ko: Record<keyof typeof en, string> = {
 
   // Editor — Left toolbar
   'editor.tool.cursor': '커서',
+  'editor.tool.hand': '손',
   'editor.tool.select': '선택',
   'editor.tool.pen': '펜',
   'editor.tool.voice': '음성 입력',

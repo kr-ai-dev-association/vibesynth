@@ -69,6 +69,7 @@ export const en = {
 
   // Editor — Left toolbar
   'editor.tool.cursor': 'Cursor',
+  'editor.tool.hand': 'Hand',
   'editor.tool.select': 'Select',
   'editor.tool.pen': 'Pen',
   'editor.tool.voice': 'Voice input',

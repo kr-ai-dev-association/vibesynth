@@ -59,7 +59,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   const [colorScheme, setColorScheme] = useState<'light' | 'dark' | 'auto'>(project.designSystem?.colorScheme || 'auto')
 
   // Left toolbar active tool
-  type CanvasTool = 'cursor' | 'select' | 'element' | 'image'
+  type CanvasTool = 'cursor' | 'hand' | 'select' | 'element' | 'image'
   const [activeTool, setActiveTool] = useState<CanvasTool>('cursor')
 
   // Multi-screen selection helpers
@@ -1052,14 +1052,46 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      if ((e.target as HTMLElement)?.isContentEditable) return
       if (e.code === 'Space' && !e.repeat) {
         e.preventDefault()
         spaceHeld.current = true
         setSpaceDown(true)
       }
-      if (e.code === 'KeyE' && selectedScreen && !e.repeat) {
-        setEditMode((v) => !v)
-        setSelectedElement(null)
+      // Tool shortcuts (top → bottom in left toolbar): Q W E R
+      if (!e.metaKey && !e.ctrlKey && !e.altKey && !e.repeat) {
+        if (e.code === 'KeyQ') {
+          e.preventDefault()
+          setActiveTool((cur) => (cur === 'hand' ? 'cursor' : 'hand'))
+          return
+        }
+        if (e.code === 'KeyW') {
+          e.preventDefault()
+          setActiveTool('cursor')
+          return
+        }
+        if (e.code === 'KeyE') {
+          e.preventDefault()
+          if (activeTool === 'element') {
+            setActiveTool('cursor')
+            setEditMode(false)
+            setSelectedElement(null)
+          } else {
+            setActiveTool('element')
+            if (selectedScreen) setEditMode(true)
+          }
+          return
+        }
+        if (e.code === 'KeyR') {
+          e.preventDefault()
+          if (activeTool === 'select') {
+            setActiveTool('cursor')
+            clearMultiSelection()
+          } else {
+            setActiveTool('select')
+          }
+          return
+        }
       }
       if (e.code === 'KeyH' && selectedScreen && !e.repeat) {
         handleToggleHeatmap()
@@ -1086,8 +1118,17 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const isMiddle = e.button === 1
+    const isHandToolPan = e.button === 0 && activeTool === 'hand'
     const isLeftWithMod = e.button === 0 && (e.altKey || spaceHeld.current)
     const isLeftOnEmptyCanvas = e.button === 0 && !(e.target as HTMLElement).closest('[data-screen-card]')
+
+    // Hand tool: always pan, never deselect — even when clicking on a screen.
+    if (isHandToolPan) {
+      e.preventDefault()
+      setIsPanning(true)
+      panStart.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }
+      return
+    }
 
     if (isLeftOnEmptyCanvas && !isLeftWithMod) {
       setSelectedScreen(null)
@@ -1102,7 +1143,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       setIsPanning(true)
       panStart.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }
     }
-  }, [pan])
+  }, [pan, activeTool])
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (isPanning) {
@@ -1847,17 +1888,9 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           style={{ width: leftSidebarWidth }}
         >
           <div className={`flex flex-col gap-1 ${leftSidebarWidth > 80 ? 'items-start px-2' : 'items-center'}`}>
-            <ToolButton icon={<CursorIcon />} title={t('editor.tool.cursor')} active={activeTool === 'cursor'} label={leftSidebarWidth > 80 ? t('editor.tool.cursor') : undefined} onClick={() => setActiveTool('cursor')} />
-            <ToolButton icon={<SelectIcon />} title={t('editor.tool.select')} active={activeTool === 'select'} label={leftSidebarWidth > 80 ? t('editor.tool.select') : undefined} onClick={() => {
-              if (activeTool === 'select') {
-                setActiveTool('cursor')
-                clearMultiSelection()
-              } else {
-                setActiveTool('select')
-                addLog('Multi-select mode: click screens to select/deselect. Shift+click also works in cursor mode.', 'info')
-              }
-            }} />
-            <ToolButton icon={<ElementSelectIcon />} title="Element Select" active={activeTool === 'element'} label={leftSidebarWidth > 80 ? 'Element' : undefined} onClick={() => {
+            <ToolButton icon={<HandIcon />} title={`${t('editor.tool.hand')} (Q)`} active={activeTool === 'hand'} label={leftSidebarWidth > 80 ? t('editor.tool.hand') : undefined} onClick={() => setActiveTool(activeTool === 'hand' ? 'cursor' : 'hand')} />
+            <ToolButton icon={<CursorIcon />} title={`${t('editor.tool.cursor')} (W)`} active={activeTool === 'cursor'} label={leftSidebarWidth > 80 ? t('editor.tool.cursor') : undefined} onClick={() => setActiveTool('cursor')} />
+            <ToolButton icon={<ElementSelectIcon />} title="Element Edit (E)" active={activeTool === 'element'} label={leftSidebarWidth > 80 ? 'Element' : undefined} onClick={() => {
               if (activeTool === 'element') {
                 // Exit element/edit mode
                 setActiveTool('cursor')
@@ -1872,6 +1905,15 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                 } else {
                   addLog('Select a screen first, then use Element tool to pick elements inside it.', 'info')
                 }
+              }
+            }} />
+            <ToolButton icon={<SelectIcon />} title={`${t('editor.tool.select')} (R)`} active={activeTool === 'select'} label={leftSidebarWidth > 80 ? t('editor.tool.select') : undefined} onClick={() => {
+              if (activeTool === 'select') {
+                setActiveTool('cursor')
+                clearMultiSelection()
+              } else {
+                setActiveTool('select')
+                addLog('Multi-select mode: click screens to select/deselect. Shift+click also works in cursor mode.', 'info')
               }
             }} />
             <div className="h-px w-6 bg-neutral-200 dark:bg-neutral-700 my-1 self-center" />
@@ -1914,7 +1956,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         <div
           ref={canvasRef}
           data-editor-canvas
-          className={`flex-1 overflow-hidden relative ${isPanning ? 'cursor-grabbing' : spaceDown ? 'cursor-grab' : 'cursor-default'}`}
+          className={`flex-1 overflow-hidden relative ${isPanning ? 'cursor-grabbing' : (activeTool === 'hand' || spaceDown) ? 'cursor-grab' : 'cursor-default'}`}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
@@ -1945,6 +1987,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                       heatmapZones={heatmapData.get(screen.id)}
                       deviceType={deviceType}
                       onClick={() => {
+                        if (activeTool === 'hand') return
                         if (!editMode && !heatmapMode) handleScreenClick(screen.name)
                       }}
                       onContextMenu={(e) => {
@@ -3314,6 +3357,10 @@ function MenuIcon({ className }: { className?: string }) {
 }
 function CursorIcon() {
   return <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4l7.07 17 2.51-7.39L21 11.07z" /></svg>
+}
+function HandIcon() {
+  // Open hand / pan tool icon
+  return <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v5" /><path d="M14 10V4a2 2 0 0 0-4 0v6" /><path d="M10 10.5V6a2 2 0 0 0-4 0v8" /><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" /></svg>
 }
 function SelectIcon() {
   return <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" strokeDasharray="4 2" /></svg>
