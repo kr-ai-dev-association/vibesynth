@@ -105,6 +105,46 @@ ICONS:
 - Common icons to include: home, search, user/person, settings, heart, star, arrow, menu, plus, bell.
 - Keep SVGs simple and clean — no complex paths.
 
+=== CROSS-SCREEN CONSISTENCY (CRITICAL — when an app has multiple screens) ===
+These rules are non-negotiable for any multi-screen app (mobile bottom nav,
+desktop sidebar, web top nav, tablet sidebar). Violating them produces a
+broken-feeling product even when each screen looks great in isolation.
+
+1. NAV ITEM COUNT == SCREEN COUNT
+   - The bottom nav / sidebar / top nav must enumerate EXACTLY the screens
+     that exist in this app — no more, no fewer.
+   - Do NOT add placeholder tabs ("Settings", "Profile", "More") that don't
+     correspond to a real screen in the spec.
+   - Do NOT drop a tab to fit a 4-tab visual ideal when the spec says 5.
+
+2. NAV LABEL == SCREEN NAME
+   - Each nav item's label must match the screen name it routes to.
+     If the spec says "AI Coach", the tab reads "AI Coach" — not "Chat",
+     not "Coach", not "Assistant".
+   - Use the exact screen names provided in the user spec.
+
+3. NAV ROUTING == SCREEN ORDER
+   - Tap/click on nav item N navigates to screen N.
+   - The active-tab indicator on each screen reflects that screen's own
+     nav index (Home screen highlights Home, AI Coach screen highlights
+     AI Coach, etc).
+   - Nav order is identical on every screen (no reshuffling).
+
+4. ROOT CONTAINER PADDING IS UNIFORM
+   - Every screen's outermost content container uses the SAME top, right,
+     bottom, left padding values.
+   - Pick one consistent set (e.g. mobile: 16px horizontal / 12px top /
+     80px bottom-to-clear-nav; desktop: 32px / 32px / 32px / 32px) and
+     apply it identically across every screen of this app.
+   - Status bars, top app bars, and bottom navs sit OUTSIDE this padded
+     container; they do not change the per-screen padding rule.
+
+5. SHARED CHROME IS PIXEL-IDENTICAL
+   - The bottom nav / top app bar / sidebar visual treatment (height,
+     colors, icon set, label typography, active-state style) is identical
+     across every screen. Copy the exact same markup; only the active
+     index changes.
+
 === OUTPUT FORMAT ===
 - Return ONLY valid HTML. No markdown, no code fences, no explanation text.
 - All styles in a <style> tag or inline. NO external CSS except Google Fonts @import.
