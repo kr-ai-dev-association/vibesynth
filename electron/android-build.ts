@@ -29,6 +29,7 @@ import {
 import { type ScreenForCodegen, type DesignSystemLite } from './android-codegen'
 import { runBanyaCodegen, isBanyaCliAvailable } from './banya-cli'
 import { captureHtmlToPng } from './screen-capture'
+import { extractScreenImages, buildDrawableMappingPrompt } from './android-image-extract'
 
 export interface RunAndroidOptions {
   projectId: string
@@ -407,18 +408,35 @@ async function codegenScreens(
   for (const f of fs.readdirSync(designDir)) {
     try { fs.unlinkSync(path.join(designDir, f)) } catch {}
   }
+  // Extract every <img src="data:..."> into res/drawable/ so the agent
+  // can use painterResource(R.drawable.<name>) instead of placeholder
+  // boxes. Also returns the rewritten HTML with marker tags
+  // (<img data-vs-drawable="<name>">) that the agent maps back.
+  emit({ step: 'codegen', status: 'progress', message: '디자인 이미지 추출 중 (data URI → res/drawable)' })
+  const extracted = extractScreenImages(projectDirPath, screens.map((s) => ({ name: s.name, html: s.html })))
+  emit({
+    step: 'codegen',
+    status: 'success',
+    message: `${extracted.images.length}개 이미지 → res/drawable/`,
+    detail: extracted.images.slice(0, 4).map((im) => im.drawableName).join(', ') + (extracted.images.length > 4 ? ` +${extracted.images.length - 4}개` : ''),
+  })
+
   const screenFiles: string[] = []
   const screenPngPaths: string[] = []
   for (let i = 0; i < screens.length; i++) {
     const safe = screens[i].name.replace(/[^a-zA-Z0-9가-힣 _-]/g, '').replace(/\s+/g, '-').slice(0, 60) || `screen-${i + 1}`
     const baseName = `${String(i + 1).padStart(2, '0')}-${safe}`
     const htmlFname = `${baseName}.html`
-    fs.writeFileSync(path.join(designDir, htmlFname), screens[i].html, 'utf-8')
+    // Write the REWRITTEN HTML (with marker tags) so the agent's read_file
+    // tool sees the marker, not the original ~700KB base64 payload.
+    fs.writeFileSync(path.join(designDir, htmlFname), extracted.rewrittenHtmlByScreen[i], 'utf-8')
     screenFiles.push(htmlFname)
     screenPngPaths.push(path.join(designDir, `${baseName}.png`))
   }
 
-  // Render each HTML to PNG so Gemini sees the actual visual design.
+  // Render each ORIGINAL HTML to PNG so Gemini sees the actual visual
+  // design (with the real images) — the agent's screenshot still has the
+  // designed pictures even though its text source has been compacted.
   emit({ step: 'codegen', status: 'progress', message: `스크린샷 렌더 중: ${screens.length}개 (각 ~1초)` })
   for (let i = 0; i < screens.length; i++) {
     try {
@@ -453,7 +471,7 @@ The attached image is the rendered screenshot of the FIRST screen. Use it
 to ground the design system (colors, typography weights, spacing rhythm).
 For the other screens, the HTML is your source of truth.
 
-DESIGN SYSTEM: primary color ${primary}.
+DESIGN SYSTEM: primary color ${primary}.${buildDrawableMappingPrompt(extracted.images)}
 
 NAVIGATION STRUCTURE — match what the design shows, not a generic wrapper:
 - Inspect each screen's HTML for navigation chrome (bottom tab bar, top
@@ -472,6 +490,7 @@ NAVIGATION STRUCTURE — match what the design shows, not a generic wrapper:
 REQUIRED IMPORTS — copy this block at the top, after \`package ${packageName}\`:
 \`\`\`
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -486,6 +505,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
