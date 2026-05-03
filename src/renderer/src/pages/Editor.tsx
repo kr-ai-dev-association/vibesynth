@@ -18,6 +18,10 @@ export interface AgentLogEntry {
   message: string
   timestamp: Date
   type: 'info' | 'success' | 'error' | 'generating'
+  // When set, a new entry with the same category replaces any prior
+  // entries that share it. Used to collapse repeated build progress
+  // (gradle running → gradle done) into a single up-to-date row.
+  category?: string
 }
 
 interface EditorProps {
@@ -264,6 +268,16 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     setLogEntries((prev) =>
       prev.map((e) => (e.id === id ? { ...e, message, type } : e))
     )
+  }
+
+  // Replace any prior log entry sharing the same category with this one.
+  // Useful for build progress where multiple lines per step
+  // ("⋯ gradle running" → "✓ gradle done") should collapse to the latest.
+  const replaceLog = (category: string, message: string, type: AgentLogEntry['type']): string => {
+    const id = crypto.randomUUID()
+    const entry: AgentLogEntry = { id, message, timestamp: new Date(), type, category }
+    setLogEntries((prev) => [...prev.filter((e) => e.category !== category), entry])
+    return id
   }
 
   const activeGuide = project.designSystem?.guide || DEFAULT_DESIGN_GUIDE
@@ -712,7 +726,10 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     androidBuildingRef.current = true
     setAndroidStatus('building')
     setAgentLogOpen(true)
-    const logId = addLog(
+    // Use replaceLog so consecutive Android builds (initial + Live rebuilds)
+    // collapse into one row that reflects the current status.
+    const logId = replaceLog(
+      'android-build:main',
       opts?.clean
         ? `Android Clean Rebuild 시작: ${project.name}`
         : isInitial
@@ -721,12 +738,20 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       'generating',
     )
     let progressCleanup: (() => void) | undefined
+    // Track interim 'generating' progress entries so the spinner stops
+    // when the build settles. Final ✓/✗ entries keep their colors thanks
+    // to category-based replacement (each step replaces its own prior row).
+    const progressLogIds: string[] = []
     try {
       progressCleanup = window.electronAPI?.android.onProgress((e) => {
         const icon = e.status === 'success' ? '✓' : e.status === 'error' ? '✗' : '⋯'
         const lvl: 'info' | 'success' | 'error' | 'generating' =
-          e.status === 'success' ? 'info' : e.status === 'error' ? 'error' : 'generating'
-        addLog(`${icon} [${e.step}] ${e.message}${e.detail ? ` — ${e.detail.slice(0, 100)}` : ''}`, lvl)
+          e.status === 'success' ? 'success' : e.status === 'error' ? 'error' : 'generating'
+        const message = `${icon} [${e.step}] ${e.message}${e.detail ? ` — ${e.detail.slice(0, 100)}` : ''}`
+        // One entry per step — new emissions overwrite older ones for the
+        // same step, so "⋯ gradle running" is replaced by "✓ gradle done".
+        const id = replaceLog(`android-progress:${e.step}`, message, lvl)
+        if (lvl === 'generating') progressLogIds.push(id)
       })
       const screensPayload = project.screens.map((s) => ({ id: s.id, name: s.name, html: s.html }))
       const result = await window.electronAPI?.android.run(
@@ -744,7 +769,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           // a separate window. Mirrors what handleRun() does for the web
           // live app.
           window.electronAPI?.liveEdit.open(project.id).catch(() => {})
-          addLog('Live Edit 팝업 열림 — 프롬프트 입력 시 자동 재빌드', 'info')
+          replaceLog('live-edit-popup', 'Live Edit 팝업 열림 — 프롬프트 입력 시 자동 재빌드', 'info')
         }
       } else {
         updateLog(logId, `Android 실행 실패: ${result?.error || 'unknown'}`, 'error')
@@ -755,6 +780,14 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       setAndroidStatus('error')
     } finally {
       progressCleanup?.()
+      // Sweep any progress entries still spinning — single batched setState
+      // so React doesn't re-render once per id.
+      if (progressLogIds.length > 0) {
+        const ids = new Set(progressLogIds)
+        setLogEntries((prev) => prev.map((e) =>
+          ids.has(e.id) && e.type === 'generating' ? { ...e, type: 'info' } : e,
+        ))
+      }
       androidBuildingRef.current = false
     }
   }
@@ -771,6 +804,51 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     }
     addLog('Android Live 모드 종료', 'info')
   }
+
+  // Detect emulator shutdown (user closed it externally). Polls adb every
+  // 5s while Android Live is active; when the device list becomes empty
+  // after we've seen one, log it, exit live mode, and stop further
+  // rebuild attempts that would just hang trying to install on nothing.
+  useEffect(() => {
+    if (!androidLiveMode || androidStatus !== 'live') return
+    let cancelled = false
+    let sawDevice = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const poll = async () => {
+      if (cancelled) return
+      try {
+        const cfg = await window.electronAPI?.android.getConfig()
+        if (!cfg?.adbPath) {
+          // No config — bail; nothing to poll.
+          return
+        }
+        const devices = await window.electronAPI?.android.listDevices(cfg.adbPath)
+        const list = Array.isArray(devices) ? devices : []
+        if (list.length > 0) {
+          sawDevice = true
+        } else if (sawDevice) {
+          replaceLog('emulator-disconnect', '🔌 에뮬레이터 종료 감지 — Android Live 모드 종료', 'info')
+          setAndroidLiveMode(false)
+          setAndroidStatus('idle')
+          if (androidRebuildTimer.current) {
+            clearTimeout(androidRebuildTimer.current)
+            androidRebuildTimer.current = null
+          }
+          return
+        }
+      } catch {
+        // Transient adb error — keep polling.
+      }
+      if (!cancelled) timer = setTimeout(poll, 5000)
+    }
+
+    timer = setTimeout(poll, 5000)
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [androidLiveMode, androidStatus]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Push the active platform to the Live Edit popup whenever the run mode
   // changes. The popup uses this to render its header indicator (web vs
@@ -1374,29 +1452,22 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     const cleanup = window.electronAPI?.onLiveEditRequest(async (prompt: string) => {
       if (!project.id) return
 
-      // ─── Element edit takes priority — if the user picked an element on
-      // the main canvas (right-click or edit-mode click) and then typed in
-      // the popup, target that element. handleElementEdit handles the
-      // image-generation path for "generate an image into this div" prompts
-      // and falls back to LLM element edit otherwise.
-      if (selectedElement && selectedScreen) {
-        handleElementEdit(prompt)
-        return
-      }
-
       // ─── Android branch: edit screen HTMLs, let the auto-rebuild useEffect
       // pick up project.screens changes, then runOnAndroid pushes a new APK
-      // to the emulator. Per-screen edit goes through editDesignsBatch on
-      // every selected screen (or the currently focused one if none) —
-      // model sees siblings so shared UI stays consistent.
+      // to the emulator. The Live Edit popup is meant for APP-WIDE edits
+      // (consistency, theme, nav layout), so default to editing EVERY
+      // screen — only narrow when the user has explicitly multi-selected
+      // a subset on the main canvas. We deliberately ignore single-screen
+      // `selectedScreen` and `selectedElement` here so that prompts like
+      // "각 메뉴 화면의 타이틀 폰트 크기를 동일하게" actually hit every
+      // screen instead of accidentally being scoped to one stale selection
+      // left over from earlier interactions on the main canvas.
       if (androidLiveMode) {
         addLog(t('editor.log.liveEditRequest', { prompt }), 'generating')
         try {
           const targets = selectedScreens.size > 0
             ? project.screens.filter(s => selectedScreens.has(s.name))
-            : selectedScreen
-              ? project.screens.filter(s => s.name === selectedScreen)
-              : project.screens
+            : project.screens
           if (targets.length === 0) {
             const msg = '편집할 스크린이 없습니다.'
             addLog(msg, 'error')
