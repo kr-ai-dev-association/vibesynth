@@ -150,23 +150,17 @@ export function Settings({ onBack }: SettingsProps) {
 
           {/* AI */}
           <Section title={t('settings.ai')}>
-            <SettingRow label={t('settings.apiKey')} description={t('settings.apiKeyDesc')}>
-              <div className="flex gap-2">
-                <input
-                  type={showApiKey ? 'text' : 'password'}
-                  value={general.apiKey}
-                  onChange={(e) => updateGeneral('apiKey', e.target.value)}
-                  placeholder="AIzaSy..."
-                  className="w-64 px-3 py-1.5 text-sm rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 outline-none focus:border-neutral-400 font-mono"
-                />
-                <button
-                  onClick={() => setShowApiKey((v) => !v)}
-                  className="px-3 py-1.5 text-sm rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-700"
-                >
-                  {showApiKey ? t('settings.hide') : t('settings.show')}
-                </button>
-              </div>
-            </SettingRow>
+            <div className="py-2">
+              <p className="text-sm font-medium mb-2">{t('settings.apiKey')}</p>
+              <ApiKeyInput
+                value={general.apiKey}
+                onChange={(v) => updateGeneral('apiKey', v)}
+                show={showApiKey}
+                onToggleShow={() => setShowApiKey((v) => !v)}
+                showLabel={t('settings.show')}
+                hideLabel={t('settings.hide')}
+              />
+            </div>
             <SettingRow label={t('settings.defaultModel')} description={t('settings.defaultModelDesc')}>
               <select
                 value={general.defaultModel}
@@ -300,6 +294,111 @@ function ToggleSwitch({ checked, onChange, defaultChecked }: { checked?: boolean
 
 function ArrowLeftIcon() {
   return <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+}
+
+// ─── Gemini API key input with format validation ──────────────
+//
+// Real Gemini keys match `AIzaSy[A-Za-z0-9_-]{33}` — total 39 chars.
+// We had a real corruption bug where a paste-cycle on the show/hide
+// toggle ended up storing a 78-char duplicated key, which the API
+// silently rejected with API_KEY_INVALID. This component:
+//   - validates length + pattern on every change
+//   - rejects pastes that look like duplications (e.g. "AIza...AIza...")
+//     with a quick auto-trim option
+//   - surfaces a red border + error hint until the value is plausible
+
+const GEMINI_KEY_RE = /^AIzaSy[A-Za-z0-9_-]{33}$/
+
+function detectDuplicatedKey(s: string): string | null {
+  // Pattern we've seen: "<prefix><prefix><suffix><suffix>" where prefix
+  // and suffix are both halves of a real key. Try to recover by scanning
+  // for two consecutive valid-looking keys joined together.
+  const matches = s.match(/AIzaSy[A-Za-z0-9_-]{33}/g)
+  if (matches && matches.length >= 1) return matches[0]
+  // Fallback: pattern AAAABBBB where each duplicate. Find the first
+  // 39-char window that matches the regex.
+  for (let i = 0; i + 39 <= s.length; i++) {
+    const slice = s.slice(i, i + 39)
+    if (GEMINI_KEY_RE.test(slice)) return slice
+  }
+  return null
+}
+
+function ApiKeyInput({
+  value, onChange, show, onToggleShow, showLabel, hideLabel,
+}: {
+  value: string
+  onChange: (v: string) => void
+  show: boolean
+  onToggleShow: () => void
+  showLabel: string
+  hideLabel: string
+}) {
+  const trimmed = value.trim()
+  const isEmpty = !trimmed
+  const looksValid = isEmpty || GEMINI_KEY_RE.test(trimmed)
+  const recoverable = !looksValid ? detectDuplicatedKey(trimmed) : null
+
+  const handleChange = (raw: string) => {
+    // Always strip leading/trailing whitespace + collapse internal whitespace
+    // (some terminal pastes include accidental spaces or newlines).
+    const cleaned = raw.replace(/\s+/g, '')
+    onChange(cleaned)
+  }
+
+  return (
+    <div className="flex flex-col gap-1 w-full">
+      <div className="flex gap-2 w-full">
+        <input
+          type={show ? 'text' : 'password'}
+          value={value}
+          onChange={(e) => handleChange(e.target.value)}
+          onPaste={(e) => {
+            // Replace selection with cleaned pasted text instead of letting
+            // the browser concatenate — this kills the "show toggle paste
+            // duplication" failure mode that produced the 78-char key bug.
+            e.preventDefault()
+            const pasted = e.clipboardData.getData('text').replace(/\s+/g, '')
+            handleChange(pasted)
+          }}
+          placeholder="AIzaSy..."
+          spellCheck={false}
+          className={`flex-1 min-w-0 px-3 py-1.5 text-sm rounded-lg border bg-white dark:bg-neutral-800 outline-none focus:border-neutral-400 font-mono ${
+            looksValid
+              ? 'border-neutral-200 dark:border-neutral-700'
+              : 'border-red-400 dark:border-red-500'
+          }`}
+        />
+        <button
+          onClick={onToggleShow}
+          className="px-3 py-1.5 text-sm rounded-lg border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-700 shrink-0"
+        >
+          {show ? hideLabel : showLabel}
+        </button>
+      </div>
+      {!looksValid && (
+        <div className="flex items-center gap-2 text-[11px] text-red-600 dark:text-red-400">
+          <span>
+            ⚠ 형식 이상 — 길이 {trimmed.length}자 (정상 39자, AIzaSy 로 시작 + 33자 영숫자)
+          </span>
+          {recoverable && recoverable !== trimmed && (
+            <button
+              type="button"
+              onClick={() => onChange(recoverable)}
+              className="px-2 py-0.5 rounded border border-red-400 dark:border-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+            >
+              자동 수정 ({recoverable.slice(0, 8)}...{recoverable.slice(-4)})
+            </button>
+          )}
+        </div>
+      )}
+      {looksValid && !isEmpty && (
+        <div className="text-[11px] text-emerald-600 dark:text-emerald-400">
+          ✓ 형식 OK ({trimmed.length}자)
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ─── External editor select (persisted to localStorage) ────────
