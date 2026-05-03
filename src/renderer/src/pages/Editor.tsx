@@ -109,6 +109,16 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   } | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [logEntries, setLogEntries] = useState<AgentLogEntry[]>([])
+  // ── Cancellation registry ────────────────────────────────────
+  // logId → AbortController. State (Set) drives re-renders for the
+  // log's stop icon; the ref holds the actual controllers (refs are
+  // ergonomic when we need to read latest in async closures).
+  const cancelRegistryRef = useRef<Map<string, AbortController>>(new Map())
+  const [cancellableLogIds, setCancellableLogIds] = useState<Set<string>>(() => new Set())
+  // The "current" submission tracked by the prompt bar's stop button.
+  // Multiple ops may be cancellable in the log, but the prompt bar's stop
+  // refers to whatever the user just submitted.
+  const [activeOperationLogId, setActiveOperationLogId] = useState<string | null>(null)
   const [showCodeModal, setShowCodeModal] = useState(false)
   const [editMode, setEditMode] = useState(false)
   const [selectedElement, setSelectedElement] = useState<{
@@ -154,6 +164,31 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   const panStart = useRef({ x: 0, y: 0 })
 
   const designSystem = project.designSystem || PLACEHOLDER_DESIGN_SYSTEM
+
+  // Recover from killed/aborted generations: drop any placeholder screens
+  // (generating=true + empty html) and reset the spinner flag on screens
+  // that already have content. Without this, reopening a project after
+  // crashing/quitting mid-generation would show "AI Generating…" forever.
+  const recoveryDoneRef = useRef(false)
+  useEffect(() => {
+    if (recoveryDoneRef.current) return
+    if (project.screens.length === 0) return
+    const cleaned = project.screens
+      .filter((s) => !(s.generating && (!s.html || s.html.length < 50)))
+      .map((s) => (s.generating ? { ...s, generating: false } : s))
+    const dropped = project.screens.length - cleaned.length
+    const reset = cleaned.filter((s, i) => s.generating !== project.screens[i]?.generating).length
+    if (dropped > 0 || reset > 0) {
+      onProjectUpdate({ ...project, screens: cleaned, updatedAt: new Date().toLocaleDateString() })
+      addLog(
+        dropped > 0
+          ? `중단된 생성 정리: 빈 placeholder ${dropped}개 삭제` + (reset > 0 ? `, ${reset}개 spinner 해제` : '')
+          : `중단된 생성 정리: ${reset}개 spinner 해제`,
+        'info',
+      )
+    }
+    recoveryDoneRef.current = true
+  }, [project.screens]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-generate initial screen if project has no screens (just created from dashboard)
   // Auto-save project to DB when screens/designSystem change
@@ -280,6 +315,37 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     return id
   }
 
+  // Register `logId` as cancellable. Returns the AbortSignal to thread
+  // into Gemini calls. Caller must invoke finishCancellable on completion
+  // so the stop icon disappears.
+  const startCancellable = (logId: string, opts?: { trackAsActive?: boolean }): AbortSignal => {
+    const ctrl = new AbortController()
+    cancelRegistryRef.current.set(logId, ctrl)
+    setCancellableLogIds((prev) => new Set(prev).add(logId))
+    if (opts?.trackAsActive) setActiveOperationLogId(logId)
+    return ctrl.signal
+  }
+  const finishCancellable = (logId: string) => {
+    cancelRegistryRef.current.delete(logId)
+    setCancellableLogIds((prev) => {
+      if (!prev.has(logId)) return prev
+      const next = new Set(prev); next.delete(logId); return next
+    })
+    setActiveOperationLogId((cur) => (cur === logId ? null : cur))
+  }
+  // Abort the controller registered under logId, mark the entry as
+  // cancelled in the log, and clear it from the registry. Safe to call
+  // even if the id isn't registered (no-op).
+  const cancelById = (logId: string) => {
+    const ctrl = cancelRegistryRef.current.get(logId)
+    if (!ctrl) return
+    try { ctrl.abort() } catch { /* noop */ }
+    finishCancellable(logId)
+    setLogEntries((prev) => prev.map((e) => e.id === logId
+      ? { ...e, type: 'error', message: e.message + ' — 취소됨' }
+      : e))
+  }
+
   const activeGuide = project.designSystem?.guide || DEFAULT_DESIGN_GUIDE
 
   const handleGenerateScreen = async (prompt: string) => {
@@ -288,6 +354,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     setAgentLogOpen(true)
 
     const logId = addLog(t('editor.log.generatingDesign', { prompt }), 'generating')
+    const signal = startCancellable(logId, { trackAsActive: true })
     let imgLogId: string | null = null
 
     // Pre-create placeholder screen with generating=true
@@ -315,7 +382,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         onDesignGenComplete: () => {
           updateLog(logId, t('editor.log.layoutDone'), 'generating')
         },
-      }, existingRefHtml, project.designSystem)
+      }, existingRefHtml, project.designSystem, signal)
 
       const r = results[0]
       const finishedScreen: Screen = { id: placeholderId, name: r.screenName, html: r.html }
@@ -355,7 +422,8 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
-      updateLog(logId, t('editor.log.genFailed', { error: message }), 'error')
+      const aborted = err instanceof Error && err.name === 'AbortError'
+      updateLog(logId, aborted ? '취소됨' : t('editor.log.genFailed', { error: message }), aborted ? 'info' : 'error')
       // Remove placeholder on failure
       onProjectUpdate({
         ...project,
@@ -363,6 +431,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         updatedAt: new Date().toLocaleDateString(),
       })
     } finally {
+      finishCancellable(logId)
       setIsGenerating(false)
     }
   }
@@ -394,6 +463,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     setIsGenerating(true)
     setAgentLogOpen(true)
     const logId = addLog(t('editor.log.creatingEmptyScreen', { name: newName }), 'generating')
+    const signal = startCancellable(logId, { trackAsActive: true })
 
     try {
       // Without a reference screen we can't copy chrome — fall back to a
@@ -408,6 +478,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           referenceHtml: reference.html,
           existingScreenNames: project.screens.filter(s => !s.generating).map(s => s.name),
           designSystem: project.designSystem || undefined,
+          signal,
         })
       }
 
@@ -420,13 +491,15 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       setSelectedScreen(newName)
     } catch (err: any) {
       const message = err?.message || String(err)
-      updateLog(logId, t('editor.log.emptyScreenFailed', { error: message }), 'error')
+      const aborted = err?.name === 'AbortError'
+      updateLog(logId, aborted ? '취소됨' : t('editor.log.emptyScreenFailed', { error: message }), aborted ? 'info' : 'error')
       onProjectUpdate({
         ...project,
         screens: project.screens.filter(s => s.id !== placeholderId),
         updatedAt: new Date().toLocaleDateString(),
       })
     } finally {
+      finishCancellable(logId)
       setIsGenerating(false)
     }
   }
@@ -437,6 +510,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     setAgentLogOpen(true)
 
     const logId = addLog(t('editor.log.generatingScreens', { count: screenNames.length, names: screenNames.join(', ') }), 'generating')
+    const signal = startCancellable(logId, { trackAsActive: true })
     let imgLogId: string | null = null
 
     // Pre-create placeholder screens with generating=true so they appear on canvas immediately
@@ -486,7 +560,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             updatedAt: new Date().toLocaleDateString(),
           })
         },
-      }, project.designSystem)
+      }, project.designSystem, signal)
 
       // Extract design system from first screen — ONLY if no DS was pre-selected
       if (!project.designSystem && firstScreenHtml) {
@@ -509,7 +583,8 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
-      updateLog(logId, t('editor.log.multiScreenFailed', { error: message }), 'error')
+      const aborted = err instanceof Error && err.name === 'AbortError'
+      updateLog(logId, aborted ? '취소됨' : t('editor.log.multiScreenFailed', { error: message }), aborted ? 'info' : 'error')
       // Remove any remaining placeholder screens on failure
       latestScreens = latestScreens.filter(s => !s.generating)
       onProjectUpdate({
@@ -518,6 +593,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         updatedAt: new Date().toLocaleDateString(),
       })
     } finally {
+      finishCancellable(logId)
       setIsGenerating(false)
     }
   }
@@ -546,11 +622,13 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       // ─── Batch edit: apply to all screens ───
       setScreensGenerating(project.screens.map(s => s.id), true) // blur all
       const logId = addLog(t('editor.log.batchEditing', { count: project.screens.length, prompt }), 'generating')
+      const signal = startCancellable(logId, { trackAsActive: true })
 
       try {
         const batchResult = await editDesignsBatch(
           project.screens.map(s => ({ id: s.id, name: s.name, html: s.html })),
           prompt,
+          signal,
         )
         const byId = new Map(batchResult.map(r => [r.id, r]))
         const updatedScreens = project.screens.map(s => {
@@ -582,17 +660,21 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error'
-        updateLog(logId, t('editor.log.batchFailed', { error: message }), 'error')
+        const aborted = err instanceof Error && err.name === 'AbortError'
+        updateLog(logId, aborted ? '취소됨' : t('editor.log.batchFailed', { error: message }), aborted ? 'info' : 'error')
+        setScreensGenerating(project.screens.map(s => s.id), false)
       } finally {
+        finishCancellable(logId)
         setIsGenerating(false)
       }
     } else {
       // ─── Single screen edit ───
       setScreensGenerating([screen.id], true) // blur this screen
       const logId = addLog(t('editor.log.editing', { screen: screen.name, prompt }), 'generating')
+      const signal = startCancellable(logId, { trackAsActive: true })
 
       try {
-        const newHtml = await editDesign(screen.html, prompt)
+        const newHtml = await editDesign(screen.html, prompt, signal)
         updateLog(logId, t('editor.log.updatedScreen', { name: screen.name }), 'success')
 
         const updatedScreens = project.screens.map((s) =>
@@ -605,8 +687,11 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         })
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error'
-        updateLog(logId, t('editor.log.editFailed', { error: message }), 'error')
+        const aborted = err instanceof Error && err.name === 'AbortError'
+        updateLog(logId, aborted ? '취소됨' : t('editor.log.editFailed', { error: message }), aborted ? 'info' : 'error')
+        setScreensGenerating([screen.id], false)
       } finally {
+        finishCancellable(logId)
         setIsGenerating(false)
       }
     }
@@ -636,6 +721,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     setAgentLogOpen(true)
     setScreensGenerating([screen.id], true) // blur
     const logId = addLog(t('editor.log.editingElement', { tag: selectedElement.tagName, screen: screen.name, prompt }), 'generating')
+    const signal = startCancellable(logId, { trackAsActive: true })
 
     try {
       // Image-aware path: triggers when target is <img>, OR when target is a
@@ -697,7 +783,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       }
 
       const { editDesignElement } = await import('../lib/gemini')
-      const newHtml = await editDesignElement(screen.html, selectedElement.cssPath, selectedElement.outerHtml, prompt)
+      const newHtml = await editDesignElement(screen.html, selectedElement.cssPath, selectedElement.outerHtml, prompt, signal)
       updateLog(logId, t('editor.log.updatedElement', { name: screen.name }), 'success')
 
       const updatedScreens = project.screens.map((s) =>
@@ -707,8 +793,11 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       setSelectedElement(null)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
-      updateLog(logId, t('editor.log.elementEditFailed', { error: message }), 'error')
+      const aborted = err instanceof Error && err.name === 'AbortError'
+      updateLog(logId, aborted ? '취소됨' : t('editor.log.elementEditFailed', { error: message }), aborted ? 'info' : 'error')
+      setScreensGenerating([screen.id], false)
     } finally {
+      finishCancellable(logId)
       setIsGenerating(false)
     }
   }
@@ -721,7 +810,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   const androidRebuildTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const androidBuildingRef = useRef(false)
 
-  const triggerAndroidBuild = async (isInitial: boolean, opts?: { clean?: boolean }) => {
+  const triggerAndroidBuild = async (isInitial: boolean, opts?: { clean?: boolean; extraInstruction?: string }) => {
     if (androidBuildingRef.current) return
     androidBuildingRef.current = true
     setAndroidStatus('building')
@@ -757,7 +846,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       const result = await window.electronAPI?.android.run(
         project.id, project.name, screensPayload,
         project.designSystem || undefined,
-        { clean: !!opts?.clean },
+        { clean: !!opts?.clean, extraInstruction: opts?.extraInstruction },
       )
       if (result?.success) {
         updateLog(logId, isInitial ? `Android 실행 성공: ${project.name}` : 'Android Live: 재빌드 완료', 'success')
@@ -792,8 +881,29 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     }
   }
 
-  const handleRunAndroid = () => triggerAndroidBuild(true)
-  const handleRunAndroidClean = () => triggerAndroidBuild(true, { clean: true })
+  // Remember the last-used build target so the main Run button defaults to
+  // it on next click. Persisted to localStorage so it survives reloads.
+  // Values: 'web' (React/Vite), 'android', 'android-clean'.
+  const LAST_BUILD_KEY = 'vibesynth-last-build-target'
+  const [lastBuildTarget, setLastBuildTargetState] = useState<'web' | 'android' | 'android-clean'>(() => {
+    const saved = (typeof localStorage !== 'undefined' && localStorage.getItem(LAST_BUILD_KEY)) || 'web'
+    return saved === 'android' || saved === 'android-clean' ? saved : 'web'
+  })
+  const setLastBuildTarget = (t: 'web' | 'android' | 'android-clean') => {
+    setLastBuildTargetState(t)
+    try { localStorage.setItem(LAST_BUILD_KEY, t) } catch {}
+  }
+
+  const handleRunAndroid = () => { setLastBuildTarget('android'); triggerAndroidBuild(true) }
+  const handleRunAndroidClean = () => { setLastBuildTarget('android-clean'); triggerAndroidBuild(true, { clean: true }) }
+  // Dispatcher used by the main Run button. Routes to whichever target the
+  // user picked last so they don't have to dig back into the dropdown each
+  // time. Web is the default for fresh projects.
+  const handleRunDefault = () => {
+    if (lastBuildTarget === 'android') return handleRunAndroid()
+    if (lastBuildTarget === 'android-clean') return handleRunAndroidClean()
+    return handleRun()
+  }
 
   const handleStopAndroidLive = () => {
     setAndroidLiveMode(false)
@@ -806,17 +916,34 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   }
 
   // Detect emulator shutdown (user closed it externally). Polls adb every
-  // 5s while Android Live is active; when the device list becomes empty
-  // after we've seen one, log it, exit live mode, and stop further
+  // 5s while Android Live is active; when the device list stays empty for
+  // several consecutive checks, log it, exit live mode, and stop further
   // rebuild attempts that would just hang trying to install on nothing.
+  //
+  // We deliberately require MULTIPLE consecutive empty responses and
+  // pause polling during a build:
+  //  - adb briefly shows zero devices when the daemon is restarting or
+  //    while `adb install` holds the device, producing false positives
+  //    that previously killed Live mode 1s after a build finished
+  //  - while androidBuildingRef is true the build is itself driving adb,
+  //    so polling its result is meaningless
   useEffect(() => {
     if (!androidLiveMode || androidStatus !== 'live') return
     let cancelled = false
     let sawDevice = false
+    let missStreak = 0
+    const MISS_THRESHOLD = 3 // ≥15s of confirmed-empty before declaring shutdown
     let timer: ReturnType<typeof setTimeout> | null = null
 
     const poll = async () => {
       if (cancelled) return
+      // Skip while a build is in flight — adb is busy and may transiently
+      // report no devices even though the emulator is alive and well.
+      if (androidBuildingRef.current) {
+        missStreak = 0
+        if (!cancelled) timer = setTimeout(poll, 5000)
+        return
+      }
       try {
         const cfg = await window.electronAPI?.android.getConfig()
         if (!cfg?.adbPath) {
@@ -827,18 +954,23 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
         const list = Array.isArray(devices) ? devices : []
         if (list.length > 0) {
           sawDevice = true
+          missStreak = 0
         } else if (sawDevice) {
-          replaceLog('emulator-disconnect', '🔌 에뮬레이터 종료 감지 — Android Live 모드 종료', 'info')
-          setAndroidLiveMode(false)
-          setAndroidStatus('idle')
-          if (androidRebuildTimer.current) {
-            clearTimeout(androidRebuildTimer.current)
-            androidRebuildTimer.current = null
+          missStreak += 1
+          if (missStreak >= MISS_THRESHOLD) {
+            replaceLog('emulator-disconnect', '🔌 에뮬레이터 종료 감지 — Android Live 모드 종료', 'info')
+            setAndroidLiveMode(false)
+            setAndroidStatus('idle')
+            if (androidRebuildTimer.current) {
+              clearTimeout(androidRebuildTimer.current)
+              androidRebuildTimer.current = null
+            }
+            return
           }
-          return
         }
       } catch {
-        // Transient adb error — keep polling.
+        // Transient adb error — don't escalate, just keep polling.
+        missStreak = 0
       }
       if (!cancelled) timer = setTimeout(poll, 5000)
     }
@@ -1033,6 +1165,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
     setAgentLogOpen(true)
     setScreensGenerating(targets.map(s => s.id), true) // blur selected screens
     const logId = addLog(`Editing ${targets.length} selected screens: "${prompt}"`, 'generating')
+    const signal = startCancellable(logId, { trackAsActive: true })
 
     try {
       // SINGLE model call with all selected screens — model sees every
@@ -1041,6 +1174,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       const updated = await editDesignsBatch(
         targets.map(s => ({ id: s.id, name: s.name, html: s.html })),
         prompt,
+        signal,
       )
       const updatedById = new Map(updated.map(u => [u.id, u]))
       const skipped = updated.filter(u => !u.changed).length
@@ -1056,9 +1190,11 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       updateLog(logId, msg, 'success')
       onProjectUpdate({ ...project, screens: newScreens, updatedAt: new Date().toLocaleDateString() })
     } catch (err: any) {
-      updateLog(logId, `Batch edit failed: ${err.message}`, 'error')
+      const aborted = err?.name === 'AbortError'
+      updateLog(logId, aborted ? '취소됨' : `Batch edit failed: ${err.message}`, aborted ? 'info' : 'error')
       setScreensGenerating(targets.map(s => s.id), false)
     } finally {
+      finishCancellable(logId)
       setIsGenerating(false)
     }
   }
@@ -1463,6 +1599,42 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       // screen instead of accidentally being scoped to one stale selection
       // left over from earlier interactions on the main canvas.
       if (androidLiveMode) {
+        // Read the latest design-sync state from main. When the user has
+        // explicitly broken sync from the popup, skip the HTML edit pass
+        // and route the prompt straight into the next codegen as an
+        // extra instruction — the HTML stops being the source of truth
+        // for behaviour the user is dictating directly.
+        // Defensive: if getDesignSync isn't on the API surface (stale
+        // preload, e.g. popup opened before this IPC was added), default
+        // to ON so the user doesn't get surprised by a silent codegen-
+        // direct path. We also log so the user can spot the mismatch.
+        let designSync: boolean = true
+        if (typeof window.electronAPI?.liveEdit?.getDesignSync === 'function') {
+          try {
+            const v = await window.electronAPI.liveEdit.getDesignSync()
+            designSync = v !== false
+          } catch {
+            designSync = true
+          }
+        } else {
+          addLog('liveEdit.getDesignSync unavailable — defaulting to sync ON. Restart the app to pick up new IPC.', 'info')
+        }
+        if (designSync === false) {
+          addLog(`(동기화 OFF) Android 코드젠 직행: "${prompt}"`, 'generating')
+          try {
+            await triggerAndroidBuild(false, { extraInstruction: prompt })
+            const summary = `Android 코드젠 + 빌드 완료 (디자인 동기화 OFF — HTML 변경 없음)`
+            window.electronAPI?.liveEdit.updateFeedback(summary, 'success')
+            window.electronAPI?.sendLiveEditResult({ success: true, message: summary })
+          } catch (err: any) {
+            const msg = err?.message || String(err)
+            addLog(`Live Edit (Android, sync off) 실패: ${msg}`, 'error')
+            window.electronAPI?.liveEdit.updateFeedback(msg, 'error')
+            window.electronAPI?.sendLiveEditResult({ success: false, message: msg })
+          }
+          return
+        }
+
         addLog(t('editor.log.liveEditRequest', { prompt }), 'generating')
         try {
           const targets = selectedScreens.size > 0
@@ -1506,7 +1678,18 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
       }
 
       // ─── Web branch (original): patch src/App.tsx and let Vite HMR reload.
-      if (!devServerUrl) return
+      if (!devServerUrl) {
+        // Neither Android Live nor a web dev server is active. Surface this
+        // instead of silently dropping the prompt — that combo (popup open,
+        // prompt fired, no rebuild, no error) was the "live edit doesn't
+        // reach the emulator" report when androidLiveMode had been flipped
+        // off (e.g. by a false-positive emulator-disconnect detection).
+        const msg = '활성 빌드가 없어 Live Edit을 적용할 수 없습니다. Run을 다시 눌러주세요.'
+        addLog(msg, 'error')
+        window.electronAPI?.liveEdit.updateFeedback(msg, 'error')
+        window.electronAPI?.sendLiveEditResult({ success: false, message: msg })
+        return
+      }
       addLog(t('editor.log.liveEditRequest', { prompt }), 'generating')
 
       const targetFile = 'src/App.tsx'
@@ -1570,6 +1753,7 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
   }
 
   const handleRun = async () => {
+    setLastBuildTarget('web')
     if (isRunning) {
       // Resume — re-open Live App + Live Edit windows
       if (devServerUrl) {
@@ -2030,8 +2214,13 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           <div className="relative">
             <div className="flex">
               <button
-                onClick={handleRun}
+                onClick={handleRunDefault}
                 disabled={buildingFrontend}
+                title={
+                  lastBuildTarget === 'android' ? 'Run Android (마지막 선택)'
+                  : lastBuildTarget === 'android-clean' ? 'Android Clean Rebuild (마지막 선택)'
+                  : 'Run Web (마지막 선택)'
+                }
                 className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-l-lg border-r ${
                   buildingFrontend
                     ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 cursor-wait border-amber-200 dark:border-amber-700'
@@ -2045,7 +2234,12 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                     <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-20" /><path d="M12 2a10 10 0 019.95 9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" /></svg>
                     Building...
                   </span>
-                ) : isRunning ? 'Resume' : t('editor.run')}
+                ) : isRunning ? 'Resume' : (
+                  <span className="flex items-center gap-1">
+                    {lastBuildTarget === 'android' || lastBuildTarget === 'android-clean' ? '🤖' : '▶'}
+                    {t('editor.run')}
+                  </span>
+                )}
               </button>
               <button
                 data-testid="run-dropdown-toggle"
@@ -2068,9 +2262,10 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
               <div className="absolute right-0 top-full mt-1 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-lg z-50 min-w-[160px] py-1">
                 <button
                   onClick={() => { setShowRunMenu(false); handleRun() }}
-                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2"
+                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center justify-between gap-2"
                 >
-                  {isRunning ? '🔄 Resume' : '▶ Run'}
+                  <span className="flex items-center gap-2">{isRunning ? '🔄 Resume' : '▶ Run (Web)'}</span>
+                  {lastBuildTarget === 'web' && <span className="text-[10px] text-emerald-500">● 기본</span>}
                 </button>
                 {isRunning && (
                   <button
@@ -2099,16 +2294,18 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
                   data-testid="run-android"
                   onClick={() => { setShowRunMenu(false); handleRunAndroid() }}
                   disabled={androidStatus === 'building'}
-                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 disabled:opacity-50"
+                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center justify-between gap-2 disabled:opacity-50"
                 >
-                  🤖 {androidLiveMode ? 'Android 재빌드 + 실행' : 'Android 에뮬레이터에서 실행'}
+                  <span className="flex items-center gap-2">🤖 {androidLiveMode ? 'Android 재빌드 + 실행' : 'Android 에뮬레이터에서 실행'}</span>
+                  {lastBuildTarget === 'android' && <span className="text-[10px] text-emerald-500">● 기본</span>}
                 </button>
                 <button
                   onClick={() => { setShowRunMenu(false); handleRunAndroidClean() }}
                   disabled={androidStatus === 'building'}
-                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center gap-2 disabled:opacity-50"
+                  className="w-full text-left px-3 py-1.5 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-700 flex items-center justify-between gap-2 disabled:opacity-50"
                 >
-                  🤖🧹 Android Clean Rebuild
+                  <span className="flex items-center gap-2">🤖🧹 Android Clean Rebuild</span>
+                  {lastBuildTarget === 'android-clean' && <span className="text-[10px] text-emerald-500">● 기본</span>}
                 </button>
                 {androidLiveMode && (
                   <button
@@ -2741,6 +2938,8 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
             selectedElement={selectedElement ? { tagName: selectedElement.tagName, textPreview: selectedElement.textPreview } : undefined}
             onExitEditMode={() => { setEditMode(false); setSelectedElement(null) }}
             onClearElement={() => setSelectedElement(null)}
+            busy={!!activeOperationLogId}
+            onCancel={() => { if (activeOperationLogId) cancelById(activeOperationLogId) }}
           />
         </div>
 
@@ -2749,6 +2948,8 @@ export function Editor({ project, onBack, onProjectUpdate, onOpenSettings }: Edi
           isOpen={agentLogOpen}
           onToggle={() => setAgentLogOpen(!agentLogOpen)}
           entries={logEntries}
+          cancellableIds={cancellableLogIds}
+          onCancel={cancelById}
         />
       </div>
 
